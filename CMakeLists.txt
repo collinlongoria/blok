@@ -13,6 +13,14 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE}
 # Subdirectories
 add_subdirectory(blok)
 
+# Dawn (WebGPU Native)
+add_subdirectory(external/dawn)
+target_link_libraries(blok
+        PRIVATE
+            dawnncpp
+            dawn_native
+)
+
 # Properties
 set_target_properties(blok PROPERTIES
         CXX_STANDARD 20
