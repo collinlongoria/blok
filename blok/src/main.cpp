@@ -12,11 +12,17 @@ int main(void){
     // Create WebGPU instance
     // Create a descriptor
     WGPUInstanceDescriptor desc = {};
+    desc.nextInChain = nullptr;
+
+    // Create instance using descriptor
     WGPUInstance instance = wgpuCreateInstance(&desc);
     if(!instance) {
         std::cerr << "Failed to create WGPU instance" << std::endl;
+        return 1;
     }
+    std::cout << "WGPU instance: " << instance << std::endl;
 
-    std::cout << "blok." << std::endl;
+    // Cleanup
+    wgpuInstanceRelease(instance);
     return 0;
 }
