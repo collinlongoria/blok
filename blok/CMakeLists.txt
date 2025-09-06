@@ -43,3 +43,12 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         "${DAWN_ROOT}/bin/tint.exe"
         $<TARGET_FILE_DIR:${PROJECT_NAME}>
 )
+
+# GLM (Header-only interface)
+add_library(glm INTERFACE)
+target_include_directories(glm INTERFACE ${CMAKE_SOURCE_DIR}/external/glm/glm)
+target_link_libraries(blok PUBLIC glm)
+
+# GLFW (built outside of here)
+include_directories(${CMAKE_SOURCE_DIR}/external/glfw/include)
+target_link_libraries(blok PRIVATE glfw)
