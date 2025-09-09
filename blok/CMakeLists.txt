@@ -1,7 +1,10 @@
 set(SOURCES
         # Add all files under here:
         src/main.cpp
+        include/window.hpp
+        src/window.cpp
 )
+# This may seem tedious, but you don't want to use glob (slows everything down)
 
 add_executable(blok ${SOURCES})
 
