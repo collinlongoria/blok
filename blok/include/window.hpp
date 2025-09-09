@@ -20,7 +20,7 @@ namespace blok {
         ~Window();
 
         // Poll and process GLFW events
-        void pollEvents();
+        static void pollEvents();
 
         // Returns if window should close
         [[nodiscard]] bool shouldClose() const;
@@ -44,6 +44,8 @@ namespace blok {
         }
 
     private:
+        void onResize(int width, int height);
+
         uint32_t m_width, m_height;
         std::string m_name;
         GLFWwindow* m_window;
