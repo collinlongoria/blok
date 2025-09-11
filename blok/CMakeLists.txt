@@ -3,6 +3,7 @@ set(SOURCES
         src/main.cpp
         include/window.hpp
         src/window.cpp
+        include/math.hpp
 )
 # This may seem tedious, but you don't want to use glob (slows everything down)
 

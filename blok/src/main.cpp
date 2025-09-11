@@ -8,9 +8,9 @@
 #include <webgpu.h>
 #include <iostream>
 
-#include <glm.hpp>
 #include <memory>
 
+#include "math.hpp"
 #include "window.hpp"
 
 int main(void){
@@ -27,8 +27,8 @@ int main(void){
     }
     std::cout << "WGPU instance: " << instance << std::endl;
 
-    glm::vec2 a(1,1);
-    glm::vec2 b(2,2);
+    Blok::Vector2 a(1,1);
+    Blok::Vector2 b(2,2);
 
     auto c = a + b;
     std::cout << "(" << c.x << ", " << c.y << ")" << std::endl;
