@@ -12,7 +12,7 @@ using namespace blok;
 void App::run() {
     init();
 
-    while (!window->shouldClose()) {
+    while (!m_window->shouldClose()) {
         update();
     }
 
@@ -20,7 +20,7 @@ void App::run() {
 }
 
 void App::init() {
-    window = std::make_shared<Window>(640, 480, "blok");
+    m_window = std::make_shared<Window>(640, 480, "blok");
 }
 
 void App::update() {

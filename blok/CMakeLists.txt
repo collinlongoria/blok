@@ -6,6 +6,9 @@ set(SOURCES
         include/math.hpp
         include/app.hpp
         src/app.cpp
+        include/gpu_flags.hpp
+        include/gpu_types.hpp
+        include/gpu_handles.hpp
 )
 # This may seem tedious, but you don't want to use glob (slows everything down)
 

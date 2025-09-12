@@ -3,12 +3,15 @@
 * Project: blok
 * Author: Collin Longoria
 * Created on: 9/11/2025
+*
+* Description: Math wrapper
 */
 
 #ifndef BLOK_MATH_HPP
 #define BLOK_MATH_HPP
 
 #include <glm.hpp>
+#include <cstdint>
 
 namespace blok {
     /*
