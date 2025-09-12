@@ -10,7 +10,7 @@
 
 #include <glm.hpp>
 
-namespace Blok {
+namespace blok {
     /*
      * glm type wrappers (to maintain consistent style)
      */

@@ -4,6 +4,8 @@ set(SOURCES
         include/window.hpp
         src/window.cpp
         include/math.hpp
+        include/app.hpp
+        src/app.cpp
 )
 # This may seem tedious, but you don't want to use glob (slows everything down)
 
