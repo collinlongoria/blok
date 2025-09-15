@@ -3,6 +3,8 @@
 * Project: blok
 * Author: Collin Longoria
 * Created on: 9/8/2025
+*
+* Description: GLFW wrapper window class
 */
 
 #ifndef WINDOW_HPP

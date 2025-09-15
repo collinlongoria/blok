@@ -3,6 +3,8 @@
 * Project: blok
 * Author: Collin Longoria
 * Created on: 9/11/2025
+*
+* Description: Math wrapper
 */
 
 #ifndef BLOK_MATH_HPP
@@ -11,8 +13,7 @@
 #include <glm.hpp>
 #include <gtc/quaternion.hpp>
 
-
-namespace Blok {
+namespace blok {
     /*
      * glm type wrappers (to maintain consistent style)
      */
