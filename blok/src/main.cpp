@@ -33,6 +33,17 @@ int main(void){
     auto c = a + b;
     std::cout << "(" << c.x << ", " << c.y << ")" << std::endl;
 
+
+    Blok::Transform t;
+
+    std::cout << "pos = (" << t.position.x << ", "<< t.position.y << ", " << t.position.z << ")" << std::endl;
+    std::cout << "scale = (" << t.scale.x << ", " << t.scale.y << ", " << t.scale.z << ")" << std::endl;
+    std::cout << "rot = (" << t.rotation.x << ", " << t.rotation.y << ", " << t.rotation.z << ", " << t.rotation.w << ")" << std::endl;
+
+    Blok::Vector3 z(0, 0, 1);
+    t.Rotate(45, z);
+    std::cout << "rot = (" << t.rotation.x << ", " << t.rotation.y << ", " << t.rotation.z << ", " << t.rotation.w << ")" << std::endl;
+
     // Window test
     std::unique_ptr<blok::Window> window = std::make_unique<blok::Window>(640, 480, "blok");
 
