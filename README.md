@@ -4,21 +4,21 @@
 </p>
 
 <p align="center">
-    <a href="#-features">Features</a>
+    <a href="#features">Features</a>
     |
-    <a href="#-installation">Installation</a>
+    <a href="#installation">Installation</a>
     |
-    <a href="#-wiki">Documentation</a>
+    <a href="#wiki">[Documentation](https://github.com/collinlongoria/blok/wiki)</a>
 </p>
 
 ## Table of Contents
-- [About](#-about)
-- [Requirements](#-requirements)
-- [Installation](#-installation)
-- [Examples](#-examples)
-- [FAQ](#-faq)
-- [License](#-license)
-- [Citations](#-citations)
+- [About](#about)
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [Examples](#examples)
+- [FAQ](#faq)
+- [License](#license)
+- [Citations](#citations)
 
 ## About
 **blok** is a voxel path-tracing renderer and terrain editor that serves as a research project into the viability of native *WebGPU* to handle voxel rendering, comparing performance to an *OpenGL* and *CUDA* compute pipeline.
@@ -61,4 +61,5 @@ IDK where to find the DigiPen License stuff someone please help me LOL. Here is 
 <a href="https://graphics.cs.kuleuven.be/publications/BLD14OCCSVO/BLD14OCCSVO_paper.pdf" target="_blank">Baert, Jeroen, et al. “Out-of-Core Construction of Sparse Voxel Octrees.” Computer Graphics Forum, 1 Jan. 1970, graphics.cs.kuleuven.be/publications/BLD14OCCSVO/.</a>
 
 <a href="https://dl.acm.org/doi/abs/10.1145/1882261.1866201" target="_blank">    Michael Schwarz and Hans-Peter Seidel. 2010. Fast parallel surface and solid voxelization on GPUs. ACM Trans. Graph. 29, 6, Article 179 (December 2010), 10 pages. https://doi.org/10.1145/1882261.1866201
+
 </a>(Paywalled) -  sorry
