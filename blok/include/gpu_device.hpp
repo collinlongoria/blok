@@ -71,7 +71,7 @@ struct ResourceBarrier {
  * Render Targets
  */
 
-struct AttachmentDescription {
+struct AttachmentDescriptor {
     ImageViewHandle view = 0;
     enum class LoadOperation { LOAD, CLEAR, DONTCARE } load = LoadOperation::CLEAR;
     enum class StoreOperation { STORE, DONTCARE } store = StoreOperation::STORE;
@@ -81,8 +81,8 @@ struct AttachmentDescription {
 };
 
 struct RenderPassBeginInfo {
-    std::vector<AttachmentDescription> colorAttachments{};
-    std::optional<AttachmentDescription> depthAttachments;
+    std::vector<AttachmentDescriptor> colorAttachments{};
+    std::optional<AttachmentDescriptor> depthAttachments;
     uint32_t width = 0, height = 0;
 };
 
@@ -159,19 +159,19 @@ public:
     virtual DeviceCapabilities getCapabilities() const = 0;
 
     // Resouce creation / destruction
-    virtual BufferHandle createBuffer(const BufferDescription&, const void* initialData=nullptr) = 0;
+    virtual BufferHandle createBuffer(const BufferDescriptor&, const void* initialData=nullptr) = 0;
     virtual void destroyBuffer(BufferHandle) = 0;
 
-    virtual ImageHandle createImage(const ImageDescription&, const void* initialPixels=nullptr) = 0;
+    virtual ImageHandle createImage(const ImageDescriptor&, const void* initialPixels=nullptr) = 0;
     virtual void destroyImage(ImageHandle) = 0;
 
-    virtual ImageViewHandle createImageView(ImageHandle, const ImageViewDescription&) = 0;
+    virtual ImageViewHandle createImageView(ImageHandle, const ImageViewDescriptor&) = 0;
     virtual void destroyImageView(ImageViewHandle) = 0;
 
-    virtual SamplerHandle createSampler(const SamplerDescription&) = 0;
+    virtual SamplerHandle createSampler(const SamplerDescriptor&) = 0;
     virtual void destroySampler(SamplerHandle) = 0;
 
-    virtual BindGroupLayoutHandle createBindGroupLayout(const BindGroupLayoutDescription&) = 0;
+    virtual BindGroupLayoutHandle createBindGroupLayout(const BindGroupLayoutDescriptor&) = 0;
     virtual void destroyBindGroupLayout(BindGroupLayoutHandle) = 0;
 
     struct BindGroupEntry {
@@ -181,24 +181,24 @@ public:
         size_t offset = 0;
         size_t size = 0;
     };
-    struct BindGroupDescription {
+    struct BindGroupDescriptor {
         BindGroupLayoutHandle layout;
         std::vector<BindGroupEntry> entries;
     };
 
-    virtual BindGroupHandle createBindGroup(const BindGroupDescription&) = 0;
+    virtual BindGroupHandle createBindGroup(const BindGroupDescriptor&) = 0;
     virtual void destroyBindGroup(BindGroupHandle) = 0;
 
-    virtual PipelineLayoutHandle createPipelineLayout(const PipelineLayoutDescription&) = 0;
+    virtual PipelineLayoutHandle createPipelineLayout(const PipelineLayoutDescriptor&) = 0;
     virtual void destroyPipelineLayout(PipelineLayoutHandle) = 0;
 
-    virtual ShaderModuleHandle createShaderModule(const ShaderModuleDescription&) = 0;
+    virtual ShaderModuleHandle createShaderModule(const ShaderModuleDescriptor&) = 0;
     virtual void destroyShaderModule(ShaderModuleHandle) = 0;
 
-    virtual GraphicsPipelineHandle createGraphicsPipeline(const GraphicsPipelineDescription&) = 0;
+    virtual GraphicsPipelineHandle createGraphicsPipeline(const GraphicsPipelineDescriptor&) = 0;
     virtual void destroyGraphicsPipeline(GraphicsPipelineHandle) = 0;
 
-    virtual ComputePipelineHandle createComputePipeline(const ComputePipelineDescription&) = 0;
+    virtual ComputePipelineHandle createComputePipeline(const ComputePipelineDescriptor&) = 0;
     virtual void destroyComputePipeline(ComputePipelineHandle) = 0;
 
     // Mapping / Updates

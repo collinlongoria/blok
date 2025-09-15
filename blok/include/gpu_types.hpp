@@ -132,13 +132,13 @@ enum class IndexType : uint8_t {
     UINT32
 };
 
-struct BufferDescription {
+struct BufferDescriptor {
     size_t size = 0;
     BufferUsage usage = BufferUsage::NONE;
     bool hostVisible = false; // Upload/Readback convinience
 };
 
-struct ImageDescription {
+struct ImageDescriptor {
     ImageDimensions dimensions = ImageDimensions::D2;
     Format format = Format::UNKNOWN;
     uint32_t width = 0, height = 0, depth = 1;
@@ -147,12 +147,12 @@ struct ImageDescription {
 };
 
 // Subresource view for SRV/UAV
-struct ImageViewDescription {
+struct ImageViewDescriptor {
     uint32_t baseMip = 0, mipCount = 1;
     uint32_t baseLayer = 0, layerCount = 1;
 };
 
-struct SamplerDescription {
+struct SamplerDescriptor {
     enum class Filter { NEAREST, LINEAR };
     enum class Address { REPEAT, CLAMP, MIRROR };
 
@@ -190,7 +190,7 @@ struct BindGroupLayoutEntry {
         PipelineStage::COMPUTESHADER;
 };
 
-struct BindGroupLayoutDescription {
+struct BindGroupLayoutDescriptor {
     std::vector<BindGroupLayoutEntry> entries;
 };
 
@@ -200,7 +200,7 @@ struct PushConstantRange {
     uint32_t size = 0; // also in bytes
 };
 
-struct PipelineLayoutDescription {
+struct PipelineLayoutDescriptor {
     std::vector<uint64_t> setLayouts; // BindGroupLayout handles
     std::vector<PushConstantRange> pushConstants;
 };
@@ -230,7 +230,7 @@ struct ShaderDefine {
     std::string value;
 };
 
-struct ShaderModuleDescription {
+struct ShaderModuleDescriptor {
     ShaderIR ir = ShaderIR::SPIRV;
     ShaderStage stage = ShaderStage::COMPUTE;
     std::span<const uint8_t> bytes;
@@ -239,7 +239,7 @@ struct ShaderModuleDescription {
 };
 
 // Pipelines
-struct VertexAttributeDescription {
+struct VertexAttributeDescriptor {
     uint32_t location = 0, binding = 0, offset = 0, stride = 0;
     Format format = Format::RGBA32_FLOAT;
 };
@@ -279,11 +279,11 @@ struct BlendState {
     bool enable = false;
 };
 
-struct GraphicsPipelineDescription {
+struct GraphicsPipelineDescriptor {
     uint64_t vs = 0, fs = 0; // ShaderModule handles
     uint64_t pipelineLayout = 0; // PipelineLayout handle
 
-    std::vector<VertexAttributeDescription> vertexInputs;
+    std::vector<VertexAttributeDescriptor> vertexInputs;
     PrimitiveTopology primitiveTopology = PrimitiveTopology::TRIANGLELIST;
 
     CullMode cull = CullMode::BACK;
@@ -296,7 +296,7 @@ struct GraphicsPipelineDescription {
     Format depthFormat = Format::D24S8;
 };
 
-struct ComputePipelineDescription {
+struct ComputePipelineDescriptor {
     uint64_t cs = 0; // ShaderModule handle
     uint64_t pipelineLayout = 0; // PipelineLayout handle
 };
