@@ -316,4 +316,27 @@ struct DeviceCapabilities {
     bool hasExternalMemoryInterop = false;
     // TODO: Add more extensions as needed...
 };
+
+/*
+ * Device Initialization Info
+ */
+
+enum class PresentMode {
+    IMMEDIATE,
+    VSYNC, // fifo
+    MAILBOX
+};
+
+struct DeviceInitInfo {
+    // Window
+    void* windowHandle = nullptr;
+    uint32_t width = 640, height = 480;
+
+    // Presentation
+    Format backBufferFormat = Format::RGBA8_UNORM; // Can usually leave default?
+    PresentMode presentMode = PresentMode::VSYNC;
+
+    // TODO: Finish this as more information is needed
+};
+
 #endif //BLOK_GPU_TYPES_HPP
