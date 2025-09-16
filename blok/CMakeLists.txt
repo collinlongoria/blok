@@ -10,6 +10,7 @@ set(SOURCES
         include/gpu_types.hpp
         include/gpu_handles.hpp
         include/gpu_device.hpp
+        include/webgpu_device.hpp
 )
 # This may seem tedious, but you don't want to use glob (slows everything down)
 

@@ -121,8 +121,8 @@ public:
     virtual void clearImage(ImageHandle dst, const ImageSubresourceRange& sub, const std::array<float, 4>& rgba) = 0;
 
     // Binding
-    virtual void bindPipeline(GraphicsPipelineHandle pipeline) = 0;
-    virtual void bindPipeline(ComputePipelineHandle pipeline) = 0;
+    virtual void bindGraphicsPipeline(GraphicsPipelineHandle pipeline) = 0; // TODO: figure out why it is making me name these seperate
+    virtual void bindComputePipeline(ComputePipelineHandle pipeline) = 0; // why can't this be overload?
     virtual void bindBindGroup(uint32_t setIndex, BindGroupHandle group) = 0;
     virtual void pushConstants(uint32_t offsetBytes, uint32_t sizeBytes, const void* data) = 0;
 
