@@ -34,16 +34,6 @@ int main(void){
     std::cout << "(" << c.x << ", " << c.y << ")" << std::endl;
 
 
-    Blok::Transform t;
-
-    std::cout << "pos = (" << t.translation.x << ", "<< t.translation.y << ", " << t.translation.z << ")" << std::endl;
-    std::cout << "scale = (" << t.scale.x << ", " << t.scale.y << ", " << t.scale.z << ")" << std::endl;
-    std::cout << "rot = (" << t.rotation.x << ", " << t.rotation.y << ", " << t.rotation.z << ", " << t.rotation.w << ")" << std::endl;
-
-    Blok::Vector3 z(0, 0, 1);
-    t.rotate(45, z);
-    std::cout << "rot = (" << t.rotation.x << ", " << t.rotation.y << ", " << t.rotation.z << ", " << t.rotation.w << ")" << std::endl;
-
     // Window test
     std::unique_ptr<blok::Window> window = std::make_unique<blok::Window>(640, 480, "blok");
 

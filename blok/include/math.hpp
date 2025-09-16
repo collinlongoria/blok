@@ -9,7 +9,6 @@
 #define BLOK_MATH_HPP
 
 #include <glm.hpp>
-#include <gtx/quaternion.hpp> 
 #include <gtc/quaternion.hpp>
 #include <iostream>
 
@@ -36,7 +35,7 @@ namespace Blok {
         Vector3 translation = { 0,0,0 };
         Vector3 scale = { 1,1,1 };
         Quaternion rotation = { 1,0,0,0 };
-
+        
         //Sets Quaternian rotation using Euclidean angles in degrees
         void setRotation(Rotation newRotation)
         {
@@ -54,7 +53,7 @@ namespace Blok {
         {
             rotation = rotate * rotation;
         }
-
+        
         //Rotate using an angle in degrees and a unit vector to rotate around.
         void rotate(float angleDeg, Vector3 axis)
         {
@@ -66,12 +65,29 @@ namespace Blok {
         //Get transform matrix from translation, rotation, and scale
         Matrix4 getTransformMatrix()
         {
-            Matrix4 transform = glm::translate(Matrix4(1.0f), translation) * glm::toMat4(rotation) * glm::scale(Matrix4(1.0f), scale);
+            Matrix4 transform = glm::translate(Matrix4(1.0f), translation) * glm::mat4_cast(rotation) * glm::scale(Matrix4(1.0f), scale);
 
             return transform;
         }
     };
 
+    /*
+    std::ostream& operator<<(std::ostream& os, const Vector3& v) {
+        os << "(" << v.x << ", " << v.y << ", " << v.z << ")";
+        return os;
+    }
+
+    inline std::ostream& operator<<(std::ostream& os, const Quaternion& q) {
+        os << "(" << q.w << ", " << q.x << ", " << q.y << ", " << q.z << ")";
+        return os;
+    }
+
+
+    std::ostream& operator<<(std::ostream& os, const Transform& t) {
+        os << "{translation: " << t.translation << ", rotation: " << t.rotation << ", scale: " << t.scale << "}";
+        return os; 
+    }
+    */
 }
 
 #endif //BLOK_MATH_HPP
