@@ -36,12 +36,12 @@ int main(void){
 
     Blok::Transform t;
 
-    std::cout << "pos = (" << t.position.x << ", "<< t.position.y << ", " << t.position.z << ")" << std::endl;
+    std::cout << "pos = (" << t.translation.x << ", "<< t.translation.y << ", " << t.translation.z << ")" << std::endl;
     std::cout << "scale = (" << t.scale.x << ", " << t.scale.y << ", " << t.scale.z << ")" << std::endl;
     std::cout << "rot = (" << t.rotation.x << ", " << t.rotation.y << ", " << t.rotation.z << ", " << t.rotation.w << ")" << std::endl;
 
     Blok::Vector3 z(0, 0, 1);
-    t.Rotate(45, z);
+    t.rotate(45, z);
     std::cout << "rot = (" << t.rotation.x << ", " << t.rotation.y << ", " << t.rotation.z << ", " << t.rotation.w << ")" << std::endl;
 
     // Window test
