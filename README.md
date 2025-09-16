@@ -4,11 +4,11 @@
 </p>
 
 <p align="center">
-    <a href="#features">Features</a>
+    <a href="#about">About</a>
     |
     <a href="#installation">Installation</a>
     |
-    <a href="#wiki">[Documentation](https://github.com/collinlongoria/blok/wiki)</a>
+    <a href="https://github.com/collinlongoria/blok/wiki">Documentation</href>
 </p>
 
 ## Table of Contents
@@ -63,3 +63,4 @@ IDK where to find the DigiPen License stuff someone please help me LOL. Here is 
 <a href="https://dl.acm.org/doi/abs/10.1145/1882261.1866201" target="_blank">    Michael Schwarz and Hans-Peter Seidel. 2010. Fast parallel surface and solid voxelization on GPUs. ACM Trans. Graph. 29, 6, Article 179 (December 2010), 10 pages. https://doi.org/10.1145/1882261.1866201
 
 </a>(Paywalled) -  sorry
+
