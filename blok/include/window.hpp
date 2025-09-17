@@ -3,53 +3,48 @@
 * Project: blok
 * Author: Collin Longoria
 * Created on: 9/8/2025
+*
+* Description: GLFW wrapper window class
 */
 
 #ifndef WINDOW_HPP
 #define WINDOW_HPP
 
 #include <string>
+#include <cstdint>
 
 #define GLFW_INCLUDE_NONE
-#include "GLFW/glfw3.h"
+#include <GLFW/glfw3.h>
 
 namespace blok {
-    class Window {
-    public:
-        Window(uint32_t width, uint32_t height, const std::string& name);
-        ~Window();
 
-        // Poll and process GLFW events
-        static void pollEvents();
+class Window {
+public:
+    Window(uint32_t width, uint32_t height, const std::string& name);
+    ~Window();
 
-        // Returns if window should close
-        [[nodiscard]] bool shouldClose() const;
+    static void pollEvents();
 
-        // Provides access to raw GLFWwindow pointer
-        [[nodiscard]] GLFWwindow* getGLFWwindow() const {
-            return m_window;
-        }
+    [[nodiscard]] bool shouldClose() const;
 
-        // Getters for window properties
-        [[nodiscard]] uint32_t getWidth() const { return m_width; }
-        [[nodiscard]] uint32_t getHeight() const { return m_height; }
-        [[nodiscard]] const std::string& getName() const { return m_name; }
+    [[nodiscard]] GLFWwindow* getGLFWwindow() const { return m_window; }
 
-        // Set GLFW input callback for the window
-        // TODO: Ideally this needs to be re-written to not expose GLFW
-        void setKeyCallback(const GLFWkeyfun callback) const {
-            if(m_window) {
-                glfwSetKeyCallback(m_window, callback);
-            }
-        }
+    [[nodiscard]] uint32_t getWidth() const { return m_width; }
+    [[nodiscard]] uint32_t getHeight() const { return m_height; }
+    [[nodiscard]] const std::string& getName() const { return m_name; }
 
-    private:
-        void onResize(int width, int height);
+    void setKeyCallback(const GLFWkeyfun callback) const {
+        if (m_window) glfwSetKeyCallback(m_window, callback);
+    }
 
-        uint32_t m_width, m_height;
-        std::string m_name;
-        GLFWwindow* m_window;
-    };
-}
+private:
+    void onResize(int width, int height);
 
-#endif //WINDOW_HPP
+    uint32_t    m_width = 0, m_height = 0;
+    std::string m_name;
+    GLFWwindow* m_window = nullptr;
+};
+
+} // namespace blok
+
+#endif // WINDOW_HPP
