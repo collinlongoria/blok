@@ -19,6 +19,12 @@
 #include <GLFW/glfw3.h>
 #include <glad/glad.h>
 
+/* These includes are here so I can test build */
+#include "gpu_device.hpp"
+#include "gpu_types.hpp"
+#include "gpu_flags.hpp"
+#include "gpu_handles.hpp"
+
 using namespace blok;
 
 App::App(RenderBackend backend)

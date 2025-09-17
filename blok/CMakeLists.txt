@@ -1,11 +1,7 @@
 # ---- Sources ----
-set(SOURCES
-  src/main.cpp
-  src/app.cpp
-  src/window.cpp
-  src/Renderer_GL.cpp
-  src/Renderer_WGPU.cpp
-  src/Cuda_Tracer.cu
+file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
+        ${CMAKE_SOURCE_DIR}/src/*.cpp
+        ${CMAKE_SOURCE_DIR}/include/*.hpp
 )
 
 add_executable(blok ${SOURCES})
@@ -22,8 +18,8 @@ find_package(CUDAToolkit REQUIRED)
 # Pick an arch that matches your GPU:
 #   86 = Ampere (RTX 30xx), 89 = Ada (RTX 40xx), 75 = Turing (RTX 20xx), 61 = Pascal, 52 = Maxwell
 set_target_properties(blok PROPERTIES
-  CUDA_ARCHITECTURES 86
-  CUDA_SEPARABLE_COMPILATION OFF
+        CUDA_ARCHITECTURES 86
+        CUDA_SEPARABLE_COMPILATION OFF
 )
 
 # CUDA usage requirements
@@ -47,35 +43,31 @@ add_custom_command(TARGET blok POST_BUILD
           "${DAWN_ROOT}/bin/webgpu_dawn.dll"
           $<TARGET_FILE_DIR:blok>
 )
-add_custom_command(TARGET blok POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "${DAWN_ROOT}/bin/tint.exe"
-          $<TARGET_FILE_DIR:blok>
+add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${DAWN_ROOT}/bin/tint.exe"
+        $<TARGET_FILE_DIR:${PROJECT_NAME}>
 )
 
 # ---- GLM ----
 add_library(glm INTERFACE)
-target_include_directories(glm INTERFACE ${CMAKE_SOURCE_DIR}/external/glm/glm)
+target_include_directories(glm INTERFACE
+        ${CMAKE_SOURCE_DIR}/external/glm/glm)
 target_link_libraries(blok PUBLIC glm)
 
 # ---- GLFW ----
-target_include_directories(blok PRIVATE ${CMAKE_SOURCE_DIR}/external/glfw/include)
+include_directories(${CMAKE_SOURCE_DIR}/external/glfw/include)
+target_link_libraries(blok PRIVATE glfw)
 
 # ---- GLAD ----
 add_library(glad STATIC
-  ${CMAKE_SOURCE_DIR}/external/glad/src/glad.c
+        ${CMAKE_SOURCE_DIR}/external/glad/src/glad.c
 )
 target_include_directories(glad PUBLIC
-  ${CMAKE_SOURCE_DIR}/external/glad/include
+        ${CMAKE_SOURCE_DIR}/external/glad/include
 )
+target_link_libraries(blok PRIVATE glad)
 
 # ---- OpenGL ----
 find_package(OpenGL REQUIRED)
-
-# ---- Link everything ----
-target_link_libraries(blok
-  PRIVATE
-    glfw
-    glad
-    OpenGL::GL
-)
+target_link_libraries(blok PRIVATE OpenGL::GL)

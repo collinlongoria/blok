@@ -86,6 +86,13 @@ struct RenderPassBeginInfo {
     uint32_t width = 0, height = 0;
 };
 
+// Only Vulkan/DX12 have dynamic rendering, so we need swapchain
+struct SwapchainDescriptor {
+    uint32_t width = 0, height = 0;
+    Format format = Format::RGBA8_UNORM;
+    PresentMode presentMode = PresentMode::VSYNC;
+};
+
 /*
  * Command List
  */
@@ -93,6 +100,10 @@ struct RenderPassBeginInfo {
 class ICommandList {
 public:
     virtual ~ICommandList() = default;
+
+    // Initialization and Shudown
+    virtual bool initialize(const DeviceInitInfo& info) = 0;
+    virtual void shutdown() = 0;
 
     // Begin and Endpoint
     virtual void begin() = 0;
@@ -110,8 +121,8 @@ public:
     virtual void clearImage(ImageHandle dst, const ImageSubresourceRange& sub, const std::array<float, 4>& rgba) = 0;
 
     // Binding
-    virtual void bindPipeline(GraphicsPipelineHandle pipeline) = 0;
-    virtual void bindPipeline(ComputePipelineHandle pipeline) = 0;
+    virtual void bindGraphicsPipeline(GraphicsPipelineHandle pipeline) = 0; // TODO: figure out why it is making me name these seperate
+    virtual void bindComputePipeline(ComputePipelineHandle pipeline) = 0; // why can't this be overload?
     virtual void bindBindGroup(uint32_t setIndex, BindGroupHandle group) = 0;
     virtual void pushConstants(uint32_t offsetBytes, uint32_t sizeBytes, const void* data) = 0;
 
@@ -200,6 +211,13 @@ public:
 
     virtual ComputePipelineHandle createComputePipeline(const ComputePipelineDescriptor&) = 0;
     virtual void destroyComputePipeline(ComputePipelineHandle) = 0;
+
+    virtual SwapchainHandle createSwapchain(const SwapchainDescriptor&) = 0;
+    virtual void destroySwapchain(SwapchainHandle) = 0;
+
+    // Per-frame Render
+    virtual ImageViewHandle acquireNextImage(SwapchainHandle) = 0;
+    virtual void present(SwapchainHandle) = 0;
 
     // Mapping / Updates
     virtual void* mapBuffer(BufferHandle, size_t offset, size_t size) = 0;

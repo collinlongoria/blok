@@ -12,14 +12,14 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE}
 
 # ---- Consistent MSVC/CUDA runtimes (fixes LNK4098) --------------------------
 if (MSVC)
-  # Use dynamic MSVC runtime: /MD (Release) and /MDd (Debug)
-  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+    # Use dynamic MSVC runtime: /MD (Release) and /MDd (Debug)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 endif()
 # Make CUDA use shared cudart to match /MD runtime
 set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
 
 # ---- Subdirectories ---------------------------------------------------------
-add_subdirectory(external/glfw)   # builds glfw3
+add_subdirectory(external/glfw) # builds glfw3
 add_subdirectory(blok)
 
 # ---- Project-wide properties ------------------------------------------------
