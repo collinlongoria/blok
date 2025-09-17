@@ -6,15 +6,17 @@
 */
 
 #include <iostream>
-
 #include "app.hpp"
+#include "backend.hpp"
 
-int main(){
+int main() {
     try {
-        blok::App app;
+        blok::RenderBackend backend = blok::RenderBackend::CUDA;
+
+        blok::App app(backend);
         app.run();
-    } catch (std::exception& e) {
-        std::cerr << e.what() << std::endl;
+    } catch (const std::exception& e) {
+        std::cerr << "[FATAL] " << e.what() << "\n";
         return 1;
     }
     return 0;
