@@ -8,24 +8,35 @@
 */
 #ifndef BLOK_APP_HPP
 #define BLOK_APP_HPP
-#include <memory>
 
-#include "Window.hpp"
+#include <memory>
+#include <string>
+#include "backend.hpp"
 
 namespace blok {
-    class App {
-    public:
-        App() = default;
-        ~App() = default;
 
-        void run(); // Main entry point
-    private:
-        void init();
-        void update();
-        void shutdown();
+class Window;
+class IRenderer;  
+class CudaTracer;    
 
-        std::shared_ptr<Window> m_window;
-    };
-}
+class App {
+public:
+    explicit App(RenderBackend backend);
+    ~App();
 
-#endif //BLOK_APP_HPP
+    void run();
+
+private:
+    void init();
+    void update();
+    void shutdown();
+
+    RenderBackend m_backend;
+
+    std::shared_ptr<Window>  m_window;
+    std::unique_ptr<IRenderer> m_rendererGL;
+    std::unique_ptr<CudaTracer> m_cudaTracer;
+};
+
+} // namespace blok
+#endif

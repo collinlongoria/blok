@@ -1,3 +1,4 @@
+# ---- Sources ----
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
         ${CMAKE_SOURCE_DIR}/src/*.cpp
         ${CMAKE_SOURCE_DIR}/include/*.hpp
@@ -6,8 +7,8 @@ file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
 add_executable(blok ${SOURCES})
 
 target_include_directories(blok
-        PUBLIC
-            ${CMAKE_CURRENT_SOURCE_DIR}/include
+  PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 # ---- CUDA ----
@@ -31,17 +32,16 @@ target_include_directories(blok PRIVATE ${DAWN_ROOT}/include)
 
 add_library(dawn SHARED IMPORTED)
 set_target_properties(dawn PROPERTIES
-        IMPORTED_LOCATION "${DAWN_ROOT}/bin/webgpu_dawn.dll"
-        IMPORTED_IMPLIB "${DAWN_ROOT}/lib/webgpu_dawn.lib"
-        INTERFACE_INCLUDE_DIRECTORIES "${DAWN_ROOT}/include"
+  IMPORTED_LOCATION             "${DAWN_ROOT}/bin/webgpu_dawn.dll"
+  IMPORTED_IMPLIB               "${DAWN_ROOT}/lib/webgpu_dawn.lib"
+  INTERFACE_INCLUDE_DIRECTORIES "${DAWN_ROOT}/include"
 )
 target_link_libraries(blok PRIVATE dawn)
 
-# TODO: move all of this into it's own CMake list
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${DAWN_ROOT}/bin/webgpu_dawn.dll"
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>
+add_custom_command(TARGET blok POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+          "${DAWN_ROOT}/bin/webgpu_dawn.dll"
+          $<TARGET_FILE_DIR:blok>
 )
 add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different

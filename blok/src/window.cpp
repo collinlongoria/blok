@@ -1,56 +1,69 @@
 /*
 * File: window
 * Project: blok
-* Author: Collin Longoria
+* Author: Collin Longoria / Wes Morosan
 * Created on: 9/8/2025
+*/
+
+/*
+* File: window.cpp
+* Project: blok
+* Description: GLFW wrapper window implementation
 */
 
 #include "window.hpp"
 
 #include <iostream>
-#include <ostream>
 #include <stdexcept>
+
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
 
 using namespace blok;
 
-Window::Window(uint32_t width, uint32_t height, const std::string &name)
-    : m_width(width), m_height(height), m_name(name), m_window(nullptr) {
-    // If a window already initialized GLFW, don't do it again
-    static bool initialized = false;
-    if(!initialized) {
-        if(!glfwInit()) {
-            std::cerr << "Failed to initialize GLFW" << std::endl;
+Window::Window(uint32_t width, uint32_t height, const std::string& name)
+    : m_width(width), m_height(height), m_name(name), m_window(nullptr)
+{
+    static bool s_initialized = false;
+    if (!s_initialized) {
+        if (!glfwInit()) {
+            throw std::runtime_error("Failed to initialize GLFW");
         }
-        initialized = true;
+        s_initialized = true;
     }
 
-    // TODO: Implement Render APIs
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE); // for now, remove later
+    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+#ifdef __APPLE__
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+#endif
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
-    GLFWwindow *window = glfwCreateWindow(static_cast<int>(m_width), static_cast<int>(m_height),
-        m_name.c_str(), nullptr, nullptr);
-    if(!window) {
-        std::cerr << "Failed to create GLFW window" << std::endl;
+    m_window = glfwCreateWindow(static_cast<int>(m_width),
+                                static_cast<int>(m_height),
+                                m_name.c_str(),
+                                nullptr, nullptr);
+    if (!m_window) {
         glfwTerminate();
-        initialized = false;
+        throw std::runtime_error("Failed to create GLFW window");
     }
 
-    m_window = window;
-    glfwSetWindowUserPointer(window, this);
+    glfwSetWindowUserPointer(m_window, this);
 
-    glfwSetFramebufferSizeCallback(m_window, [](GLFWwindow *window, int width, int height) {
-       auto* self = static_cast<Window*>(glfwGetWindowUserPointer(window));
-        if(self) self->onResize(width, height);
+    glfwSetFramebufferSizeCallback(m_window, [](GLFWwindow* w, int fbw, int fbh) {
+        auto* self = static_cast<Window*>(glfwGetWindowUserPointer(w));
+        if (self) self->onResize(fbw, fbh);
     });
 }
 
 Window::~Window() {
-    if(m_window) {
+    if (m_window) {
         glfwDestroyWindow(m_window);
+        m_window = nullptr;
     }
 
-    // TODO: if multiple windows, add static ref count and only terminate on last window destroyed
     glfwTerminate();
 }
 
@@ -63,8 +76,6 @@ bool Window::shouldClose() const {
 }
 
 void Window::onResize(int width, int height) {
-    m_width = width;
-    m_height = height;
-
-    // TODO: When renderer API is added, send info to it here
+    m_width  = static_cast<uint32_t>(width);
+    m_height = static_cast<uint32_t>(height);
 }
