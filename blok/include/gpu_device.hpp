@@ -18,6 +18,7 @@
 #include "gpu_types.hpp"
 #include "gpu_handles.hpp"
 
+namespace blok {
 /*
  * Copy/Clear Regions
  */
@@ -100,10 +101,6 @@ struct SwapchainDescriptor {
 class ICommandList {
 public:
     virtual ~ICommandList() = default;
-
-    // Initialization and Shudown
-    virtual bool initialize(const DeviceInitInfo& info) = 0;
-    virtual void shutdown() = 0;
 
     // Begin and Endpoint
     virtual void begin() = 0;
@@ -246,5 +243,5 @@ public:
     virtual bool getQueryResults(QueryPoolHandle, uint32_t first, uint32_t count, std::span<uint64_t> outTimestampNs) = 0;
 
 };
-
+}
 #endif //BLOK_GPU_DEVICE_HPP

@@ -17,6 +17,7 @@
 #include "math.hpp"
 #include "gpu_flags.hpp"
 
+namespace blok {
 /*
  * Queues and Pipeline stages
  */
@@ -340,5 +341,6 @@ struct DeviceInitInfo {
 
     // TODO: Finish this as more information is needed
 };
+}
 
 #endif //BLOK_GPU_TYPES_HPP

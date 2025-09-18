@@ -24,6 +24,7 @@
 #include "gpu_types.hpp"
 #include "gpu_flags.hpp"
 #include "gpu_handles.hpp"
+#include "webgpu_device.hpp"
 
 using namespace blok;
 
