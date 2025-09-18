@@ -11,6 +11,7 @@
 
 #include <cstdint>
 
+namespace blok {
 using BufferHandle = uint64_t;
 using ImageHandle = uint64_t;
 using ImageViewHandle = uint64_t;
@@ -26,5 +27,6 @@ using FenceHandle = uint64_t;
 using SemaphoreHandle = uint64_t;
 using QueryPoolHandle = uint64_t;
 using SwapchainHandle = uint64_t;
+}
 
 #endif //BLOK_GPU_HANDLES_HPP

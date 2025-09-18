@@ -11,6 +11,7 @@
 
 #include <type_traits>
 
+namespace blok {
 template <typename E>
 struct is_flags_enum : std::false_type {};
 
@@ -61,6 +62,7 @@ template <typename E>
 E& operator^=(E& a, E b) {
     a = (a ^ b);
     return a;
+}
 }
 
 #endif //BLOK_GPU_FLAGS_HPP
