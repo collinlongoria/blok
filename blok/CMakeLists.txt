@@ -1,7 +1,8 @@
 # ---- Sources ----
 file(GLOB_RECURSE SOURCES CONFIGURE_DEPENDS
-        ${CMAKE_SOURCE_DIR}/src/*.cpp
-        ${CMAKE_SOURCE_DIR}/include/*.hpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cu
+        ${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp
 )
 
 add_executable(blok ${SOURCES})
@@ -18,7 +19,7 @@ find_package(CUDAToolkit REQUIRED)
 # Pick an arch that matches your GPU:
 #   86 = Ampere (RTX 30xx), 89 = Ada (RTX 40xx), 75 = Turing (RTX 20xx), 61 = Pascal, 52 = Maxwell
 set_target_properties(blok PROPERTIES
-        CUDA_ARCHITECTURES 86
+        CUDA_ARCHITECTURES 89
         CUDA_SEPARABLE_COMPILATION OFF
 )
 
