@@ -10,7 +10,7 @@
 #define BLOK_WEBGPU_DEVICE_HPP
 
 #define WEBGPU_CPP_IMPLEMENTATION
-#include <webgpu.hpp>
+#include <webgpu.h>
 
 #include "gpu_device.hpp"
 #include "gpu_types.hpp"
@@ -57,14 +57,14 @@ namespace blok {
     };
 
     struct SwapchainRec {
-        wgpu::SwapChain swapchain;
+        WGPUS swapchain;
     };
 
     class WebGPUDevice;
 
     class WebGPUCommandList /*final*/ : public ICommandList {
     public:
-        WebGPUCommandList(wgpu::Device* device, QueueType queue);
+        WebGPUCommandList(WGPUDevice* device, QueueType queue);
         ~WebGPUCommandList() override = default;
 
         void begin() override;
@@ -96,33 +96,33 @@ namespace blok {
         void draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance) override;
         void drawIndexed(uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) override;
 
-        wgpu::CommandBuffer finishToCommandBuffer();
+        WGPUCommandBuffer finishToCommandBuffer();
 
     private:
         WebGPUDevice* m_device{};
         QueueType m_queue{QueueType::GRAPHICS};
-        wgpu::CommandEncoder m_commandEncoder{};
-        wgpu::RenderPassEncoder m_renderPassEncoder{};
-        wgpu::ComputePassEncoder m_computePassEncoder{};
+        WGPUCommandEncoder m_commandEncoder{};
+        WGPURenderPassEncoder m_renderPassEncoder{};
+        WGPUComputePassEncoder m_computePassEncoder{};
 
         enum class PipelineType { NONE, GRAPHICS, COMPUTE };
         PipelineType m_pipelineType{PipelineType::NONE};
 
-        wgpu::IndexFormat m_indexFormat{wgpu::IndexFormat::Undefined};
+        WGPUIndexFormat m_indexFormat{WGPUIndexFormat_Undefined};
     };
 
     class WebGPUDevice /*final*/ : public IGPUDevice {
     public:
         WebGPUDevice() = default;
-        explicit WebGPUDevice(wgpu::Device device);
+        explicit WebGPUDevice(WGPUDevice device);
         ~WebGPUDevice() override = default;
 
     private:
         DeviceInitInfo m_deviceInitInfo{};
-        wgpu::Instance m_instance{};
-        wgpu::Surface m_surface{};
-        wgpu::Device m_device{};
-        wgpu::Queue m_queue{};
+        WGPUInstance m_instance{};
+        WGPUSurface m_surface{};
+        WGPUDevice m_device{};
+        WGPUQueue m_queue{};
         DeviceCapabilities m_capabilities{};
 
 

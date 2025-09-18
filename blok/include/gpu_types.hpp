@@ -10,6 +10,8 @@
 #define BLOK_GPU_TYPES_HPP
 
 #include <span>
+#include <array>
+#include <cstdint>
 #include <string>
 
 #include "math.hpp"
