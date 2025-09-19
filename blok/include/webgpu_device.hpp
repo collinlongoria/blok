@@ -335,7 +335,66 @@ public:
     explicit WebGPUDevice(const DeviceInitInfo& init);
     ~WebGPUDevice() override;
 
-    DeviceCapabilities getCapabilities() const override;
+    DeviceCapabilities getCapabilities() const override { return m_deviceCapabilities; }
+
+    BufferHandle createBuffer(const BufferDescriptor &, const void *initialData) override;
+    void destroyBuffer(BufferHandle) override;
+
+    ImageHandle createImage(const ImageDescriptor &, const void *initialPixels) override;
+    void destroyImage(ImageHandle) override;
+
+    ImageViewHandle createImageView(ImageHandle, const ImageViewDescriptor &) override;
+    void destroyImageView(ImageViewHandle) override;
+
+    SamplerHandle createSampler(const SamplerDescriptor &) override;
+    void destroySampler(SamplerHandle) override;
+
+    BindGroupLayoutHandle createBindGroupLayout(const BindGroupLayoutDescriptor &) override;
+    void destroyBindGroupLayout(BindGroupLayoutHandle) override;
+
+    BindGroupHandle createBindGroup(const BindGroupDescriptor &) override;
+    void destroyBindGroup(BindGroupHandle) override;
+
+    PipelineLayoutHandle createPipelineLayout(const PipelineLayoutDescriptor &) override;
+    void destroyPipelineLayout(PipelineLayoutHandle) override;
+
+    ShaderModuleHandle createShaderModule(const ShaderModuleDescriptor &) override;
+    void destroyShaderModule(ShaderModuleHandle) override;
+
+    GraphicsPipelineHandle createGraphicsPipeline(const GraphicsPipelineDescriptor &) override;
+    void destroyGraphicsPipeline(GraphicsPipelineHandle) override;
+
+    ComputePipelineHandle createComputePipeline(const ComputePipelineDescriptor &) override;
+    void destroyComputePipeline(ComputePipelineHandle) override;
+
+    SwapchainHandle createSwapchain(const SwapchainDescriptor &) override;
+    void destroySwapchain(SwapchainHandle) override;
+    ImageViewHandle acquireNextImage(SwapchainHandle) override;
+    void present(SwapchainHandle) override;
+
+    void *mapBuffer(BufferHandle, size_t offset, size_t size) override;
+    void unmapBuffer(BufferHandle) override;
+    void updateBuffer(BufferHandle, size_t offset, size_t size, const void *data) override;
+
+    ICommandList *createCommandList(QueueType) override;
+    void destroyCommandList(ICommandList *) override;
+    void submit(const SubmitBatch &) override;
+    void waitIdle(QueueType) override;
+
+    // These are not supported by WebGPU
+    FenceHandle createFence(bool signaled) override { return 0; }
+    void destroyFence(FenceHandle) override { }
+    void waitForFences(std::span<const FenceHandle> fences, bool waitAll, uint64_t timeoutNs) override { }
+
+    SemaphoreHandle createSemaphore(SemaphoreType type, uint64_t initialValue) override { return 0; }
+    void destroySemaphore(SemaphoreHandle) override { }
+
+    QueryPoolHandle createTimestampQueryPool(uint32_t count) override;
+    void destroyQueryPool(QueryPoolHandle) override;
+    bool getQueryResults(QueryPoolHandle, uint32_t first, uint32_t count, std::span<uint64_t> outTimestampNs) override;
+
+    [[nodiscard]] WGPUDevice deviceWGPU() const { return (m_device); }
+
 private:
     friend class WebGPUCommandList;
 
@@ -476,6 +535,218 @@ inline void WebGPUCommandList::clearBuffer(BufferHandle dst, size_t offset, size
 inline void WebGPUCommandList::clearImage(ImageHandle dst, const ImageSubresourceRange &sub, const std::array<float, 4> &rgba) {
     auto* img = m_device->m_imagePool.get(dst);
     const bool isDepth = detail::isDepthFormat(img->descriptor.format);
+
+    // Transient view for the specified subresource range
+    WGPUTextureViewDescriptor vd = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    vd.baseMipLevel = sub.baseMipLevel;
+    vd.mipLevelCount = sub.mipCount;
+    vd.baseArrayLayer = sub.baseArrayLayer;
+    vd.arrayLayerCount = sub.layerCount;
+    vd.aspect = isDepth ? WGPUTextureAspect_DepthOnly : WGPUTextureAspect_All;
+    WGPUTextureView view = wgpuTextureCreateView(img->texture, &vd);
+
+    // Tiny render pass, that just clears
+    if (!isDepth) {
+        WGPURenderPassColorAttachment color = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        color.view = view;
+        color.resolveTarget = nullptr;
+        color.loadOp = WGPULoadOp_Clear;
+        color.storeOp = WGPUStoreOp_Discard;
+        color.clearValue = { rgba[0], rgba[1], rgba[2], rgba[3] };
+
+        WGPURenderPassDescriptor rp = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        rp.colorAttachmentCount = 1;
+        rp.colorAttachments = &color;
+
+        rp.depthStencilAttachment = nullptr;
+
+        m_renderPass = wgpuCommandEncoderBeginRenderPass(m_encoder, &rp);
+        wgpuRenderPassEncoderEnd(m_renderPass);
+        m_renderPass = nullptr;
+    }
+    else {
+        WGPURenderPassDepthStencilAttachment ds = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+        ds.view = view;
+        ds.depthClearValue = rgba[0];
+        ds.depthLoadOp = WGPULoadOp_Clear;
+        ds.depthStoreOp = WGPUStoreOp_Discard;
+
+        WGPURenderPassDescriptor rp = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+        rp.colorAttachmentCount = 0;
+        rp.colorAttachments = nullptr;
+        rp.depthStencilAttachment = &ds;
+
+        m_renderPass = wgpuCommandEncoderBeginRenderPass(m_encoder, &rp);
+        wgpuRenderPassEncoderEnd(m_renderPass);
+        m_renderPass = nullptr;
+    }
+
+    wgpuTextureViewRelease(view);
+}
+
+inline void WebGPUCommandList::bindGraphicsPipeline(GraphicsPipelineHandle pipeline) {
+    m_currentGraphicsPipeline = pipeline;
+    if (m_renderPass) {
+        auto p = m_device->m_graphicsPipelinePool.get(pipeline);
+        wgpuRenderPassEncoderSetPipeline(m_renderPass, p->pipeline);
+    }
+}
+
+inline void WebGPUCommandList::bindComputePipeline(ComputePipelineHandle pipeline) {
+    m_currentComputePipeline = pipeline;
+    ensureComputePass();
+    auto p = m_device->m_computePipelinePool.get(pipeline);
+    wgpuComputePassEncoderSetPipeline(m_computePass, p->pipeline);
+}
+
+inline void WebGPUCommandList::bindBindGroup(uint32_t setIndex, BindGroupHandle group) {
+    if (m_renderPass) {
+        auto g = m_device->m_bindGroupPool.get(group);
+        wgpuRenderPassEncoderSetBindGroup(m_renderPass, setIndex, g->bindGroup, 0, nullptr);
+    }
+    else {
+        ensureComputePass();
+        auto g = m_device->m_bindGroupPool.get(group);
+        wgpuComputePassEncoderSetBindGroup(m_computePass, setIndex, g->bindGroup, 0, nullptr);
+    }
+}
+
+inline void WebGPUCommandList::dispatch(uint32_t gx, uint32_t gy, uint32_t gz) {
+    ensureComputePass();
+    wgpuComputePassEncoderDispatchWorkgroups(m_computePass, gx, gy, gz);
+}
+
+inline void WebGPUCommandList::dispatchIndirect(BufferHandle args, size_t offset) {
+    ensureComputePass();
+    auto b = m_device->m_bufferPool.get(args);
+    wgpuComputePassEncoderDispatchWorkgroupsIndirect(m_computePass, b->buffer, offset);
+}
+
+inline void WebGPUCommandList::beginRenderPass(const RenderPassBeginInfo &info) {
+    // Color attachments
+    std::vector<WGPURenderPassColorAttachment> cols;
+    cols.reserve(info.colorAttachments.size());
+    for (auto const& a : info.colorAttachments) {
+        auto* v = m_device->m_imageViewPool.get(a.view);
+        WGPURenderPassColorAttachment c = WGPU_RENDER_PASS_COLOR_ATTACHMENT_INIT;
+        c.view = v->textureView;
+        c.resolveTarget = nullptr;
+        switch (a.load) {
+        case AttachmentDescriptor::LoadOperation::LOAD:
+            c.loadOp = WGPULoadOp_Load;
+            break;
+        case AttachmentDescriptor::LoadOperation::CLEAR:
+            c.loadOp = WGPULoadOp_Clear;
+            c.clearValue = { a.clearColor[0], a.clearColor[1], a.clearColor[2], a.clearColor[3] };
+            break;
+        case AttachmentDescriptor::LoadOperation::DONTCARE:
+            c.loadOp = WGPULoadOp_Undefined;
+            break;
+        }
+        c.storeOp = (a.store == AttachmentDescriptor::StoreOperation::STORE) ? WGPUStoreOp_Store : WGPUStoreOp_Discard;
+        cols.push_back(c);
+    }
+
+    // Depth
+    WGPURenderPassDepthStencilAttachment ds = WGPU_RENDER_PASS_DEPTH_STENCIL_ATTACHMENT_INIT;
+    WGPURenderPassDepthStencilAttachment* pds = nullptr;
+    if (info.depthAttachments.has_value()) {
+        auto const& a = info.depthAttachments.value();
+        auto* v = m_device->m_imageViewPool.get(a.view);
+        ds.view = v->textureView;
+        ds.depthReadOnly = false;
+        switch (a.load) {
+        case AttachmentDescriptor::LoadOperation::LOAD:
+            ds.depthLoadOp = WGPULoadOp_Load;
+            break;
+        case AttachmentDescriptor::LoadOperation::CLEAR:
+            ds.depthLoadOp = WGPULoadOp_Clear;
+            ds.depthClearValue = a.clearColor[0];
+            break;
+        case AttachmentDescriptor::LoadOperation::DONTCARE:
+            ds.depthLoadOp = WGPULoadOp_Undefined;
+            break;
+        }
+        ds.depthStoreOp = (a.store == AttachmentDescriptor::StoreOperation::STORE) ? WGPUStoreOp_Store : WGPUStoreOp_Discard;
+        pds = &ds;
+    }
+
+    WGPURenderPassDescriptor rp = WGPU_RENDER_PASS_DESCRIPTOR_INIT;
+    rp.colorAttachmentCount = cols.size();
+    rp.colorAttachments = cols.empty() ? nullptr : cols.data();
+    rp.depthStencilAttachment = pds;
+
+    m_renderPass = wgpuCommandEncoderBeginRenderPass(m_encoder, &rp);
+    if (m_currentGraphicsPipeline) {
+        auto p = m_device->m_graphicsPipelinePool.get(m_currentGraphicsPipeline);
+        wgpuRenderPassEncoderSetPipeline(m_renderPass, p->pipeline);
+    }
+}
+
+inline void WebGPUCommandList::endRenderPass() {
+    if (m_renderPass) {
+        wgpuRenderPassEncoderEnd(m_renderPass);
+        m_renderPass = nullptr;
+    }
+}
+
+inline void WebGPUCommandList::setViewport(float x, float y, float w, float h, float minDepth, float maxDepth) {
+    assert(m_renderPass && "[FATAL] WebGPUCommandList: setViewport requires an active render pass");
+    wgpuRenderPassEncoderSetViewport(m_renderPass, x, y, w, h, minDepth, maxDepth);
+}
+
+inline void WebGPUCommandList::setScissor(float x, float y, float width, float height) {
+    assert(m_renderPass && "[FATAL] WebGPUCommandList: setScissor requires an active render pass");
+    wgpuRenderPassEncoderSetScissorRect(m_renderPass, static_cast<uint32_t>(x), static_cast<uint32_t>(y),
+        static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+}
+
+inline void WebGPUCommandList::bindIndexBuffer(BufferHandle buffer, IndexType type, size_t offset) {
+    assert(m_renderPass && "[FATAL] WebGPUCommandList: bindIndexBuffer requires an active render pass");
+    auto b = m_device->m_bufferPool.get(buffer);
+    wgpuRenderPassEncoderSetIndexBuffer(m_renderPass, b->buffer, detail::toWGPU(type), offset, b->size - offset);
+}
+
+inline void WebGPUCommandList::bindVertexBuffers(uint32_t firstBinding, std::span<const BufferHandle> buffers, std::span<const size_t> offsets) {
+    assert(m_renderPass && "[FATAL] WebGPUCommandList: bindVertexBuffers requires an active render pass");
+    assert(buffers.size() == offsets.size());
+    for (size_t i = 0; i < buffers.size(); ++i) {
+        auto b = m_device->m_bufferPool.get(buffers[i]);
+        wgpuRenderPassEncoderSetVertexBuffer(m_renderPass, static_cast<uint32_t>(i), b->buffer, offsets[i], b->size - offsets[i]);
+    }
+}
+
+inline void WebGPUCommandList::draw(uint32_t vertexCount, uint32_t instanceCount, uint32_t firstVertex, uint32_t firstInstance) {
+    assert(m_renderPass && "[FATAL] WebGPUCommandList: draw requires an active render pass");
+    if (m_currentGraphicsPipeline) {
+        auto p = m_device->m_graphicsPipelinePool.get(m_currentGraphicsPipeline);
+        wgpuRenderPassEncoderSetPipeline(m_renderPass, p->pipeline);
+    }
+    wgpuRenderPassEncoderDraw(m_renderPass, vertexCount, instanceCount, firstVertex, firstInstance);
+}
+
+inline void WebGPUCommandList::drawIndexed(uint32_t indexCount, uint32_t instanceCount, uint32_t firstIndex, int32_t vertexOffset, uint32_t firstInstance) {
+    assert(m_renderPass && "[FATAL] WebGPUCommandList: drawIndexed requires an active render pass");
+    if (m_currentGraphicsPipeline) {
+        auto p = m_device->m_graphicsPipelinePool.get(m_currentGraphicsPipeline);
+        wgpuRenderPassEncoderSetPipeline(m_renderPass, p->pipeline);
+    }
+    wgpuRenderPassEncoderDrawIndexed(m_renderPass, indexCount, instanceCount, firstIndex, vertexOffset, firstInstance);
+}
+
+inline void WebGPUCommandList::ensureComputePass() {
+    if (!m_currentComputePipeline) {
+        WGPUComputePassDescriptor d = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
+        m_computePass = wgpuCommandEncoderBeginComputePass(m_encoder, &d);
+        if (m_currentComputePipeline) {
+            auto p = m_device->m_computePipelinePool.get(m_currentComputePipeline);
+            wgpuComputePassEncoderSetPipeline(m_computePass, p->pipeline);
+        }
+    }
+}
+
+inline WGPUDevice WebGPUCommandList::deviceWGPU() const {
+    return m_device->deviceWGPU();
 }
 
 
