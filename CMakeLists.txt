@@ -6,9 +6,11 @@ project(
 )
 
 # ---- Output dirs ------------------------------------------------------------
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/build/${CMAKE_BUILD_TYPE}/lib)
+set(OUT_BIN ${CMAKE_SOURCE_DIR}/build/$<CONFIG>/bin)
+set(OUT_LIB ${CMAKE_SOURCE_DIR}/build/$<CONFIG>/lib)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${OUT_BIN})
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${OUT_LIB})
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${OUT_LIB})
 
 # ---- Consistent MSVC/CUDA runtimes (fixes LNK4098) --------------------------
 if (MSVC)
@@ -20,8 +22,7 @@ set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
 
 # ---- Subdirectories ---------------------------------------------------------
 add_subdirectory(external/glfw) # builds glfw3
-add_subdirectory(external/glfw3webgpu) # builds webgpu extension for glfw3
-target_include_directories(glfw3webgpu PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/Dawn/include)
+add_subdirectory(external/dawn) # builds dawn and glfw3webgpu extension
 add_subdirectory(blok)
 
 # ---- Project-wide properties ------------------------------------------------
