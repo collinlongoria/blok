@@ -20,6 +20,8 @@ set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
 
 # ---- Subdirectories ---------------------------------------------------------
 add_subdirectory(external/glfw) # builds glfw3
+add_subdirectory(external/glfw3webgpu) # builds webgpu extension for glfw3
+target_include_directories(glfw3webgpu PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/external/Dawn/include)
 add_subdirectory(blok)
 
 # ---- Project-wide properties ------------------------------------------------

@@ -59,6 +59,8 @@ target_link_libraries(blok PUBLIC glm)
 # ---- GLFW ----
 include_directories(${CMAKE_SOURCE_DIR}/external/glfw/include)
 target_link_libraries(blok PRIVATE glfw)
+include_directories(${CMAKE_SOURCE_DIR}/external/glfw3webgpu)
+target_link_libraries(blok PRIVATE glfw3webgpu)
 
 # ---- GLAD ----
 add_library(glad STATIC
