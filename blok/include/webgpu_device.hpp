@@ -9,6 +9,8 @@
 #ifndef BLOK_WEBGPU_DEVICE_HPP
 #define BLOK_WEBGPU_DEVICE_HPP
 
+#include <GLFW/glfw3.h>
+#include <glfw3webgpu.h>
 #include <webgpu.h>
 
 #include "gpu_device.hpp"
@@ -749,6 +751,9 @@ inline WGPUDevice WebGPUCommandList::deviceWGPU() const {
     return m_device->deviceWGPU();
 }
 
+inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
+    glfwCreateWindowWGPUSurface(m_instance, init.windowHandle->getGLFWwindow());
+}
 
 
 }

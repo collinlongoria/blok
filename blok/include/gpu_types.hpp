@@ -18,6 +18,9 @@
 #include "gpu_flags.hpp"
 
 namespace blok {
+
+class Window;
+
 /*
  * Queues and Pipeline stages
  */
@@ -332,7 +335,7 @@ enum class PresentMode {
 
 struct DeviceInitInfo {
     // Window
-    void* windowHandle = nullptr;
+    Window* windowHandle = nullptr;
     uint32_t width = 640, height = 480;
 
     // Presentation
