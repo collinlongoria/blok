@@ -27,28 +27,20 @@ set_target_properties(blok PROPERTIES
 target_include_directories(blok PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(blok PRIVATE ${CUDAToolkit_LIBRARIES})
 
-# ---- Dawn (WebGPU) ----
-set(DAWN_ROOT ${CMAKE_SOURCE_DIR}/external/dawn)
-target_include_directories(blok PRIVATE ${DAWN_ROOT}/include)
-
-add_library(dawn SHARED IMPORTED)
-set_target_properties(dawn PROPERTIES
-  IMPORTED_LOCATION             "${DAWN_ROOT}/bin/webgpu_dawn.dll"
-  IMPORTED_IMPLIB               "${DAWN_ROOT}/lib/webgpu_dawn.lib"
-  INTERFACE_INCLUDE_DIRECTORIES "${DAWN_ROOT}/include"
-)
-target_link_libraries(blok PRIVATE dawn)
+# ---- WebGPU (dawn) ---
+target_link_libraries(blok PRIVATE glfw3webgpu)
 
 add_custom_command(TARGET blok POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different
-          "${DAWN_ROOT}/bin/webgpu_dawn.dll"
-          $<TARGET_FILE_DIR:blok>
-)
-add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${DAWN_ROOT}/bin/tint.exe"
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        $<TARGET_RUNTIME_DLLS:blok> $<TARGET_FILE_DIR:blok>
+        COMMAND_EXPAND_LISTS
 )
+
+if (EXISTS "${TINT_EXE}")
+    add_custom_command(TARGET blok POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${TINT_EXE}" $<TARGET_FILE_DIR:blok>)
+endif()
 
 # ---- GLM ----
 add_library(glm INTERFACE)
@@ -57,10 +49,8 @@ target_include_directories(glm INTERFACE
 target_link_libraries(blok PUBLIC glm)
 
 # ---- GLFW ----
-include_directories(${CMAKE_SOURCE_DIR}/external/glfw/include)
+#include_directories(${CMAKE_SOURCE_DIR}/external/glfw/include)
 target_link_libraries(blok PRIVATE glfw)
-include_directories(${CMAKE_SOURCE_DIR}/external/glfw3webgpu)
-target_link_libraries(blok PRIVATE glfw3webgpu)
 
 # ---- GLAD ----
 add_library(glad STATIC
