@@ -768,8 +768,8 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     WGPURequestAdapterOptions opts = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
     opts.compatibleSurface = m_surface;
     struct Req { WGPUAdapter adapter{}; } req{};
-    auto onAdapter = [](WGPURequestAdapterStatus status, WGPUAdapter adapter, char const*, void* ud1, void*) {
-        if (status == WGPURequestAdapterStatus_Success) reinterpret_cast<Req*>(ud1)->adapter = adapter;
+    auto onAdapter = [](WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView, void* ud1, void*) {
+        if (status == WGPURequestAdapterStatus_Success) static_cast<Req*>(ud1)->adapter = adapter;
     };
     WGPURequestAdapterCallbackInfo ci{}; ci.mode = WGPUCallbackMode_WaitAnyOnly; ci.callback = onAdapter; ci.userdata1 = &req; ci.userdata2 = nullptr;
     (void)wgpuInstanceRequestAdapter(m_instance, &opts, ci);
@@ -1096,8 +1096,302 @@ inline void WebGPUDevice::destroyShaderModule(ShaderModuleHandle h) {
     }
 }
 
+inline GraphicsPipelineHandle WebGPUDevice::createGraphicsPipeline(const GraphicsPipelineDescriptor &d) {
+    auto* vs = m_shaderPool.get(d.vs);
+    auto* fs = m_shaderPool.get(d.fs);
+    auto* pl = m_pipelineLayoutPool.get(d.pipelineLayout);
 
+    // Vertex buffers/attributes
+    struct vbo { uint32_t stride=0; std::vector<WGPUVertexAttribute> attribs; };
+    std::unordered_map<uint32_t, vbo> vbos;
+    for (auto& a : d.vertexInputs) {
+        auto& vb = vbos[a.binding];
+        vb.stride = a.stride;
+        WGPUVertexAttribute va = WGPU_VERTEX_ATTRIBUTE_INIT;
+        va.shaderLocation = a.location;
+        va.offset = a.offset;
+        va.format = detail::toWGPUVertexFormat(a.format);
+        vb.attribs.push_back(va);
+    }
+    std::vector<WGPUVertexBufferLayout> vbl;
+    vbl.reserve(vbos.size());
+    std::vector<std::vector<WGPUVertexAttribute>> ownedAttribs;
+    ownedAttribs.reserve(vbos.size());
+    for (auto& [binding, vb] : vbos) {
+        ownedAttribs.push_back(vb.attribs);
+        WGPUVertexBufferLayout l = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
+        l.arrayStride = vb.stride;
+        l.stepMode = WGPUVertexStepMode_Vertex;
+        l.attributeCount = static_cast<uint32_t>(ownedAttribs.back().size());
+        l.attributes = ownedAttribs.back().data();
+        vbl.push_back(l);
+    }
 
+    // Primitive
+    WGPUPrimitiveState prim = WGPU_PRIMITIVE_STATE_INIT;
+    prim.topology = detail::toWGPU(d.primitiveTopology);
+    prim.frontFace = detail::toWGPU(d.frontFace);
+    prim.cullMode = detail::toWGPU(d.cull);
+
+    // Depth-stencil
+    WGPUDepthStencilState ds = WGPU_DEPTH_STENCIL_STATE_INIT;
+    WGPUDepthStencilState* pds = nullptr;
+    if (d.depth.depthTest || d.depth.depthWrite) {
+        ds.format = detail::toWGPU(d.depthFormat);
+        ds.depthWriteEnabled = static_cast<WGPUOptionalBool>(d.depth.depthWrite);
+        ds.depthCompare = d.depth.depthTest ? WGPUCompareFunction_LessEqual : WGPUCompareFunction_Always;
+        pds = &ds;
+    }
+
+    // Color target
+    WGPUBlendState bs = WGPU_BLEND_STATE_INIT;
+    if (d.blend.enable) {
+        bs.color.operation = WGPUBlendOperation_Add;
+        bs.color.srcFactor = WGPUBlendFactor_SrcAlpha;
+        bs.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+        bs.alpha.operation = WGPUBlendOperation_Add;
+        bs.alpha.srcFactor = WGPUBlendFactor_One;
+        bs.alpha.srcFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+    }
+    WGPUColorTargetState cts = WGPU_COLOR_TARGET_STATE_INIT;
+    cts.format = detail::toWGPU(d.colorFormat);
+    if (d.blend.enable) cts.blend = &bs;
+    cts.writeMask = WGPUColorWriteMask_All;
+
+    WGPUFragmentState fragState = WGPU_FRAGMENT_STATE_INIT;
+    if (fs) {
+        fragState.module = fs->module;
+        WGPUStringView fsEntry{ fs->descriptor.entryPoint.c_str(), fs->descriptor.entryPoint.size() };
+        fragState.entryPoint = fsEntry;
+        fragState.targetCount = 1;
+        fragState.targets = &cts;
+    }
+
+    // Vertex stage
+    WGPUVertexState vsState = WGPU_VERTEX_STATE_INIT;
+    vsState.module = vs->module;
+    WGPUStringView vsEntry { vs->descriptor.entryPoint.c_str(), vs->descriptor.entryPoint.size() };
+    vsState.entryPoint = vsEntry;
+    vsState.bufferCount = static_cast<uint32_t>(vbl.size());
+    vsState.buffers = vbl.empty() ? nullptr : vbl.data();
+
+    // Pipeline descriptor
+    WGPURenderPipelineDescriptor pd = WGPU_RENDER_PIPELINE_DESCRIPTOR_INIT;
+    pd.layout = pl->layout;
+    pd.vertex = vsState;
+    pd.primitive = prim;
+    pd.depthStencil = pds;
+    pd.multisample = WGPU_MULTISAMPLE_STATE_INIT;
+    pd.multisample.count = 1;
+    pd.fragment = fs ? &fragState : nullptr;
+
+    auto pipe = wgpuDeviceCreateRenderPipeline(m_device, &pd);
+    GraphicsPipelineRecord rec{};
+    rec.pipeline = pipe;
+    return m_graphicsPipelinePool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::destroyGraphicsPipeline(GraphicsPipelineHandle h) {
+    if (auto* r = m_graphicsPipelinePool.get(h)) {
+        if (r->pipeline) {
+            wgpuRenderPipelineRelease(r->pipeline);
+        }
+        m_graphicsPipelinePool.remove(h);
+    }
+}
+
+inline ComputePipelineHandle WebGPUDevice::createComputePipeline(const ComputePipelineDescriptor &d) {
+    auto* cs = m_shaderPool.get(d.cs);
+    auto* pl = m_pipelineLayoutPool.get(d.pipelineLayout);
+
+    WGPUComputePipelineDescriptor cd = WGPU_COMPUTE_PIPELINE_DESCRIPTOR_INIT;
+    cd.layout = pl->layout;
+    cd.compute = WGPU_COMPUTE_STATE_INIT;
+    cd.compute.module = cs->module;
+    WGPUStringView csEntry { cs->descriptor.entryPoint.c_str(), cs->descriptor.entryPoint.size() };
+    cd.compute.entryPoint = csEntry;
+    auto pipe = wgpuDeviceCreateComputePipeline(m_device, &cd);
+
+    ComputePipelineRecord rec{};
+    rec.pipeline = pipe;
+    return m_computePipelinePool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::destroyComputePipeline(ComputePipelineHandle h) {
+    if (auto* r = m_computePipelinePool.get(h)) {
+        if (r->pipeline) {
+            wgpuComputePipelineRelease(r->pipeline);
+        }
+        m_computePipelinePool.remove(h);
+    }
+}
+
+inline SwapchainHandle WebGPUDevice::createSwapchain(const SwapchainDescriptor & d) {
+    // To be clear, this doesn't use swapchains (removed from wgpu) but Surface (which is kinda similar)
+    if (!m_surface) return 0;
+
+    SwapchainRecord rec{};
+    rec.surface = m_surface;
+    rec.configuration.device = m_device;
+    rec.configuration.format = detail::toWGPU(d.format);
+    rec.configuration.usage = WGPUTextureUsage_RenderAttachment | WGPUTextureUsage_TextureBinding | WGPUTextureUsage_CopySrc;
+    rec.configuration.presentMode = detail::toWGPU(d.presentMode);
+    rec.configuration.width = d.width;
+    rec.configuration.height = d.height;
+    rec.configuration.alphaMode = WGPUCompositeAlphaMode_Auto;
+
+    wgpuSurfaceConfigure(m_surface, &rec.configuration);
+    return m_swapchainPool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::destroySwapchain(SwapchainHandle h) {
+    if (auto* r = m_swapchainPool.get(h)) {
+        if (r->currentView) {
+            wgpuTextureViewRelease(r->currentView);
+            r->currentView = nullptr;
+        }
+        if (r->currentTexture) {
+            wgpuTextureRelease(r->currentTexture);
+            r->currentTexture = nullptr;
+        }
+        // actual surface is owned by the device itself, so i don't destroy here.
+        m_swapchainPool.remove(h);
+    }
+}
+
+inline ImageViewHandle WebGPUDevice::acquireNextImage(SwapchainHandle h) {
+    auto* r = m_swapchainPool.get(h);
+    if (!r) return 0;
+    if (r->currentView) {
+        wgpuTextureViewRelease(r->currentView);
+        r->currentView = nullptr;
+    }
+    if (r->currentTexture) {
+        wgpuTextureRelease(r->currentTexture);
+        r->currentTexture = nullptr;
+    }
+
+    WGPUSurfaceTexture st{};
+    wgpuSurfaceGetCurrentTexture(r->surface, &st);
+    if (st.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
+        st.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
+        // Try to recover by reconfiguring surface
+        std::cerr << "acquireNextImage failed once... reconfiguring" << std::endl;
+        wgpuSurfaceConfigure(r->surface, &r->configuration);
+        wgpuSurfaceGetCurrentTexture(r->surface, &st);
+        if (st.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
+            st.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) {
+            std::cerr << "acquireNextImage failed twice." << std::endl;
+            return 0;
+        }
+    }
+
+    r->currentTexture = st.texture;
+    WGPUTextureViewDescriptor vd = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    r->currentView = wgpuTextureCreateView(st.texture, &vd);
+
+    ImageViewRecord rec{};
+    rec.textureView = r->currentView;
+    return m_imageViewPool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::present(SwapchainHandle h) {
+    auto* r = m_swapchainPool.get(h);
+    if (!r) return;
+    wgpuSurfacePresent(r->surface);
+    // TODO: The returned texture becomes invalid after Present. Although release at next acquire, I should make it so they cant call this more than once.
+}
+
+inline void *WebGPUDevice::mapBuffer(BufferHandle h, size_t offset, size_t size) {
+    auto* r = m_bufferPool.get(h);
+    if (!r) return nullptr;
+    struct Ctx { bool done=false; } ctx;
+    auto cb = [](WGPUMapAsyncStatus status, WGPUStringView message, void* userdata1, void* userdata2) {
+        ((Ctx*)userdata1)->done = true;
+    };
+
+    WGPUBufferMapCallbackInfo info{};
+    info.mode = WGPUCallbackMode_WaitAnyOnly;
+    info.callback = cb;
+    info.userdata1 = &ctx;
+    info.userdata2 = nullptr;
+    (void)wgpuBufferMapAsync(r->buffer, WGPUMapMode_Write, offset, size, info);
+    while (!ctx.done) { /* spin */ }
+    return wgpuBufferGetMappedRange(r->buffer, offset, size);
+}
+
+inline void WebGPUDevice::unmapBuffer(BufferHandle h) {
+    auto* r = m_bufferPool.get(h);
+    if (!r) return;
+    wgpuBufferUnmap(r->buffer);
+}
+
+inline void WebGPUDevice::updateBuffer(BufferHandle h, size_t offset, size_t size, const void *data) {
+    auto* r = m_bufferPool.get(h);
+    if (!r) return;
+    wgpuQueueWriteBuffer(m_queue, r->buffer, offset, data, size);
+}
+
+inline ICommandList *WebGPUDevice::createCommandList(QueueType q) {
+    return new WebGPUCommandList(this, q);
+}
+
+inline void WebGPUDevice::destroyCommandList(ICommandList *c) {
+    delete dynamic_cast<WebGPUCommandList*>(c);
+}
+
+inline void WebGPUDevice::submit(const SubmitBatch &batch) {
+    std::vector<WGPUCommandBuffer> buffers{};
+    buffers.reserve(batch.lists.size());
+    for (auto* l : batch.lists) {
+        auto* wl = dynamic_cast<WebGPUCommandList*>(l);
+        buffers.push_back(wl->commandBuffer());
+    }
+    wgpuQueueSubmit(m_queue, buffers.size(), buffers.data());
+}
+
+inline void WebGPUDevice::waitIdle(QueueType q) {
+    struct Ctx { bool done=false; } ctx;
+    auto onDone = [](WGPUQueueWorkDoneStatus, WGPUStringView message, void* userdata1, void* userdata2) {
+        ((Ctx*)userdata1)->done = true;
+    };
+    WGPUQueueWorkDoneCallbackInfo ci{};
+    ci.mode = WGPUCallbackMode_WaitAnyOnly;
+    ci.callback = onDone;
+    ci.userdata1 = &ctx;
+    ci.userdata2 = nullptr;
+    (void)wgpuQueueOnSubmittedWorkDone(m_queue, ci);
+    while (!ctx.done) { /* spin */ }
+}
+
+inline QueryPoolHandle WebGPUDevice::createTimestampQueryPool(uint32_t count) {
+    WGPUQuerySetDescriptor qd = WGPU_QUERY_SET_DESCRIPTOR_INIT;
+    qd.type = WGPUQueryType_Timestamp;
+    qd.count = count;
+    auto qs = wgpuDeviceCreateQuerySet(m_device, &qd);
+
+    QuerySetRecord rec{};
+    rec.querySet = qs;
+    rec.count = count;
+    return m_querySetPool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::destroyQueryPool(QueryPoolHandle h) {
+    if (auto* r = m_querySetPool.get(h)) {
+        if (r->querySet) {
+            wgpuQuerySetRelease(r->querySet);
+        }
+        m_querySetPool.remove(h);
+    }
+}
+
+inline bool WebGPUDevice::getQueryResults(QueryPoolHandle, uint32_t first, uint32_t count, std::span<uint64_t> outTimestampNs) {
+    // TODO: Implement this
+    // Note to self: WebGPU requires resolving queries to a buffer and then mapping.
+    // Agnostic API doesnt currently model this. Add smth like ResolveQuery to ICommandList
+    // and a staging buffer readback path
+    return false;
+}
 
 }
 
