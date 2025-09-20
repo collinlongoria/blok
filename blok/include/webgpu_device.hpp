@@ -771,14 +771,23 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     auto onAdapter = [](WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView, void* ud1, void*) {
         if (status == WGPURequestAdapterStatus_Success) static_cast<Req*>(ud1)->adapter = adapter;
     };
-    WGPURequestAdapterCallbackInfo ci{}; ci.mode = WGPUCallbackMode_WaitAnyOnly; ci.callback = onAdapter; ci.userdata1 = &req; ci.userdata2 = nullptr;
+    WGPURequestAdapterCallbackInfo ci{}; ci.mode = WGPUCallbackMode_AllowSpontaneous; ci.callback = onAdapter; ci.userdata1 = &req; ci.userdata2 = nullptr;
     (void)wgpuInstanceRequestAdapter(m_instance, &opts, ci);
     m_adapter = req.adapter;
 
     // Device
     WGPUDeviceDescriptor dd = WGPU_DEVICE_DESCRIPTOR_INIT;
+    WGPULimits limits;
+    limits.nextInChain = nullptr;
+    if (wgpuAdapterGetLimits(m_adapter, &limits)) {
+        dd.requiredLimits = &limits;
+    }
+    dd.label = WGPUStringView{ "MainDevice", 10 };
+
     m_device = wgpuAdapterCreateDevice(m_adapter, &dd);
-    m_queue = wgpuDeviceGetQueue(m_device);
+    if (!m_device) {
+        fprintf(stderr, "Device creation failed!\n");
+    }
 
     // TODO: capabilties better
     m_deviceCapabilities.uniformBufferAlignment = 256;

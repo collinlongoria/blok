@@ -54,6 +54,9 @@
 #  ifdef _GLFW_WIN32
 #    define GLFW_EXPOSE_NATIVE_WIN32
 #  endif
+#if defined(_WIN32)
+#  define GLFW_EXPOSE_NATIVE_WIN32
+#endif
 #endif // __EMSCRIPTEN__
 
 #ifdef GLFW_EXPOSE_NATIVE_COCOA
