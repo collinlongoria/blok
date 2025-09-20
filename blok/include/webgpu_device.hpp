@@ -98,6 +98,10 @@ namespace detail {
         return f == SamplerDescriptor::Filter::NEAREST ? WGPUFilterMode_Nearest : WGPUFilterMode_Linear;
     }
 
+    inline WGPUMipmapFilterMode toWGPU(SamplerDescriptor::MipFilter f) {
+        return f == SamplerDescriptor::MipFilter::NEAREST ? WGPUMipmapFilterMode_Nearest : WGPUMipmapFilterMode_Linear;
+    }
+
     inline WGPUAddressMode toWGPU(SamplerDescriptor::Address a) {
         switch (a) {
         case SamplerDescriptor::Address::REPEAT: return WGPUAddressMode_Repeat;
@@ -752,8 +756,347 @@ inline WGPUDevice WebGPUCommandList::deviceWGPU() const {
 }
 
 inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
-    glfwCreateWindowWGPUSurface(m_instance, init.windowHandle->getGLFWwindow());
+    // Instance
+    WGPUInstanceDescriptor id = WGPU_INSTANCE_DESCRIPTOR_INIT;
+    m_instance = wgpuCreateInstance(&id);
+
+    // Surface
+    m_surface = glfwCreateWindowWGPUSurface(m_instance, init.windowHandle->getGLFWwindow());
+    // TODO: I really should consider emscripten why not
+
+    // Adaptor
+    WGPURequestAdapterOptions opts = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
+    opts.compatibleSurface = m_surface;
+    struct Req { WGPUAdapter adapter{}; } req{};
+    auto onAdapter = [](WGPURequestAdapterStatus status, WGPUAdapter adapter, char const*, void* ud1, void*) {
+        if (status == WGPURequestAdapterStatus_Success) reinterpret_cast<Req*>(ud1)->adapter = adapter;
+    };
+    WGPURequestAdapterCallbackInfo ci{}; ci.mode = WGPUCallbackMode_WaitAnyOnly; ci.callback = onAdapter; ci.userdata1 = &req; ci.userdata2 = nullptr;
+    (void)wgpuInstanceRequestAdapter(m_instance, &opts, ci);
+    m_adapter = req.adapter;
+
+    // Device
+    WGPUDeviceDescriptor dd = WGPU_DEVICE_DESCRIPTOR_INIT;
+    m_device = wgpuAdapterCreateDevice(m_adapter, &dd);
+    m_queue = wgpuDeviceGetQueue(m_device);
+
+    // TODO: capabilties better
+    m_deviceCapabilities.uniformBufferAlignment = 256;
+    m_deviceCapabilities.storageBufferAlignment = 256;
+    m_deviceCapabilities.maxPushConstantBytes = 0; // webgpu doesnt support
+    m_deviceCapabilities.hasTimelineSemaphore = false;
+    m_deviceCapabilities.hasExternalMemoryInterop = false;
+
+    m_backbufferFormat = init.backBufferFormat;
+    m_presentMode = init.presentMode;
+    m_framebufferHeight = init.height; m_framebufferWidth = init.width;
 }
+
+inline WebGPUDevice::~WebGPUDevice() {
+    if (m_surface) { wgpuSurfaceUnconfigure(m_surface); }
+
+    if (m_queue) { wgpuQueueRelease(m_queue); m_queue = nullptr; }
+    if (m_device) { wgpuDeviceRelease(m_device); m_device = nullptr; }
+    if (m_adapter) { wgpuAdapterRelease(m_adapter); m_adapter = nullptr; }
+    if (m_surface) { wgpuSurfaceRelease(m_surface); m_surface = nullptr; }
+    if (m_instance) { wgpuInstanceRelease(m_instance); m_instance = nullptr; }
+}
+
+inline BufferHandle WebGPUDevice::createBuffer(const BufferDescriptor & d, const void *initialData) {
+    WGPUBufferDescriptor bd = WGPU_BUFFER_DESCRIPTOR_INIT;
+    bd.usage = detail::toWGPU(d.usage);
+    bd.size = d.size;
+    bd.mappedAtCreation = initialData != nullptr;
+    auto buf = wgpuDeviceCreateBuffer(m_device, &bd);
+
+    if (initialData) {
+        void* p = wgpuBufferGetMappedRange(buf, 0, d.size);
+        std::memcpy(p, initialData, d.size);
+        wgpuBufferUnmap(buf);
+    }
+
+    BufferRecord rec{};
+    rec.buffer = buf;
+    rec.size = d.size;
+    return m_bufferPool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::destroyBuffer(BufferHandle h) {
+    if (auto* r = m_bufferPool.get(h)) {
+        if (r->buffer) {
+            wgpuBufferDestroy(r->buffer);
+            wgpuBufferRelease(r->buffer);
+        }
+        m_bufferPool.remove(h);
+    }
+}
+
+inline ImageHandle WebGPUDevice::createImage(const ImageDescriptor & d, const void *initialPixels) {
+    WGPUTextureDescriptor td = WGPU_TEXTURE_DESCRIPTOR_INIT;
+    td.dimension = detail::toWGPU(d.dimensions);
+    td.size = { d.width, d.height, d.depth };
+    td.mipLevelCount = d.mips;
+    td.sampleCount = 1;
+    td.format = detail::toWGPU(d.format);
+    td.usage = detail::toWGPU(d.usage);
+    auto tex = wgpuDeviceCreateTexture(m_device, &td);
+
+    ImageRecord rec{};
+    rec.texture = tex;
+    rec.descriptor = d;
+    auto handle = m_imagePool.add(std::move(rec));
+
+    if (initialPixels) {
+        // This assumes tightly packed upload
+        WGPUTexelCopyTextureInfo dst = WGPU_TEXEL_COPY_TEXTURE_INFO_INIT;
+        dst.texture = tex;
+        dst.mipLevel = 0;
+        dst.origin = {0,0,0 };
+        dst.aspect = detail::isDepthFormat(d.format) ? WGPUTextureAspect_DepthOnly : WGPUTextureAspect_All;
+        WGPUExtent3D sz { d.width, d.height, d.depth };
+        WGPUTexelCopyBufferLayout layout = WGPU_TEXEL_COPY_BUFFER_LAYOUT_INIT;
+        layout.bytesPerRow = detail::bytesPerPixel(d.format) * d.width;
+        layout.rowsPerImage = d.height;
+        WGPUTexelCopyBufferInfo bi = WGPU_TEXEL_COPY_BUFFER_INFO_INIT;
+        bi.buffer = nullptr;
+        (void)bi;
+        // I use QueueWriteTexture for somplicity
+        wgpuQueueWriteTexture(m_queue, &dst, initialPixels,
+            static_cast<size_t>(layout.bytesPerRow) * d.height * d.depth, &layout, &sz);
+    }
+    return handle;
+}
+
+inline void WebGPUDevice::destroyImage(ImageHandle h) {
+    if (auto* r = m_imagePool.get(h)) {
+        if (r->texture) {
+            wgpuTextureDestroy(r->texture);
+            wgpuTextureRelease(r->texture);
+        }
+        m_imagePool.remove(h);
+    }
+}
+
+inline ImageViewHandle WebGPUDevice::createImageView(ImageHandle image, const ImageViewDescriptor & v) {
+    auto* r = m_imagePool.get(image);
+    WGPUTextureViewDescriptor vd = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+    vd.baseMipLevel = v.baseMip;
+    vd.mipLevelCount = v.mipCount;
+    vd.baseArrayLayer = v.baseLayer;
+    vd.arrayLayerCount = v.layerCount;
+    vd.aspect = detail::isDepthFormat(r->descriptor.format) ? WGPUTextureAspect_DepthOnly : WGPUTextureAspect_All;
+    auto view = wgpuTextureCreateView(r->texture, &vd);
+    ImageViewRecord rec{};
+    rec.textureView = view;
+    return m_imageViewPool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::destroyImageView(ImageViewHandle h) {
+    if (auto* r = m_imageViewPool.get(h)) {
+        if (r->textureView) {
+            wgpuTextureViewRelease(r->textureView);
+        }
+        m_imageViewPool.remove(h);
+    }
+}
+
+inline SamplerHandle WebGPUDevice::createSampler(const SamplerDescriptor & d) {
+    WGPUSamplerDescriptor sd = WGPU_SAMPLER_DESCRIPTOR_INIT;
+    sd.addressModeU = detail::toWGPU(d.addressU);
+    sd.addressModeV = detail::toWGPU(d.addressV);
+    sd.addressModeW = detail::toWGPU(d.addressW);
+    sd.magFilter = detail::toWGPU(d.magFilter);
+    sd.minFilter = detail::toWGPU(d.minFilter);
+    sd.mipmapFilter = detail::toWGPU(d.mipFilter);
+    sd.lodMinClamp = d.minLod;
+    sd.lodMaxClamp = d.maxLod;
+    if (d.compareEnable) {
+        sd.compare = WGPUCompareFunction_LessEqual;
+    }
+
+    auto samp = wgpuDeviceCreateSampler(m_device, &sd);
+    SamplerRecord rec{};
+    rec.sampler = samp;
+    return m_samplerPool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::destroySampler(SamplerHandle h) {
+    if (auto* r = m_samplerPool.get(h)) {
+        if (r->sampler) {
+            wgpuSamplerRelease(r->sampler);
+        }
+        m_samplerPool.remove(h);
+    }
+}
+
+inline BindGroupLayoutHandle WebGPUDevice::createBindGroupLayout(const BindGroupLayoutDescriptor &d) {
+    std::vector<WGPUBindGroupLayoutEntry> entries;
+    entries.reserve(d.entries.size());
+    for (auto& e : d.entries) {
+        WGPUBindGroupLayoutEntry le = WGPU_BIND_GROUP_LAYOUT_ENTRY_INIT;
+        le.binding = e.binding;
+        le.visibility = detail::toWGPU(e.visibleStages);
+        le.bindingArraySize = 0;
+
+        switch (e.type) {
+        case BindingType::UNIFORMBUFFER:
+            le.buffer.type = WGPUBufferBindingType_Uniform;
+            le.buffer.hasDynamicOffset = false;
+            le.buffer.minBindingSize = 0;
+            break;
+        case BindingType::STORAGEBUFFER:
+            le.buffer.type = WGPUBufferBindingType_Storage;
+            le.buffer.hasDynamicOffset = false;
+            le.buffer.minBindingSize = 0;
+            break;
+        case BindingType::SAMPLEDIMAGE:
+            le.texture.sampleType = WGPUTextureSampleType_Float;
+            le.texture.viewDimension = WGPUTextureViewDimension_2D;
+            le.texture.multisampled = false;
+            break;
+        case BindingType::STORAGEIMAGE:
+            le.storageTexture.access = WGPUStorageTextureAccess_WriteOnly;
+            le.storageTexture.format = WGPUTextureFormat_RGBA8Unorm; //TODO: extend API to support formats
+            le.storageTexture.viewDimension = WGPUTextureViewDimension_2D;
+            break;
+        case BindingType::SAMPLER:
+            le.sampler.type = WGPUSamplerBindingType_Filtering;
+            break;
+        }
+        entries.push_back(le);
+    }
+    WGPUBindGroupLayoutDescriptor bld = WGPU_BIND_GROUP_LAYOUT_DESCRIPTOR_INIT;
+    bld.entryCount = static_cast<uint32_t>(entries.size());
+    bld.entries = entries.data();
+    auto bgl = wgpuDeviceCreateBindGroupLayout(m_device, &bld);
+    BindGroupLayoutRecord rec{};
+    rec.layout = bgl;
+    rec.entries = d.entries;
+    return m_bindGroupLayoutPool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::destroyBindGroupLayout(BindGroupLayoutHandle h) {
+    if (auto* r = m_bindGroupLayoutPool.get(h)) {
+        if (r->layout) {
+            wgpuBindGroupLayoutRelease(r->layout);
+        }
+        m_bindGroupLayoutPool.remove(h);
+    }
+}
+
+inline BindGroupHandle WebGPUDevice::createBindGroup(const BindGroupDescriptor &d) {
+    auto* layoutRec = m_bindGroupLayoutPool.get(d.layout);
+    std::vector<WGPUBindGroupEntry> entries;
+    entries.reserve(d.entries.size());
+    for (auto& e : d.entries) {
+        WGPUBindGroupEntry be = WGPU_BIND_GROUP_ENTRY_INIT;
+        be.binding = e.binding;
+        switch (e.kind) {
+        case IGPUDevice::BindGroupEntry::Kind::BUFFER: {
+            auto* b = m_bufferPool.get(static_cast<BufferHandle>(e.handle));
+            be.buffer = b->buffer;
+            be.offset = e.offset;
+            be.size = e.size ? e.size : (b->size - e.offset);
+        }
+            break;
+        case IGPUDevice::BindGroupEntry::Kind::IMAGEVIEW: {
+            auto* v = m_imageViewPool.get(static_cast<ImageViewHandle>(e.handle));
+            be.textureView = v->textureView;
+        }
+            break;
+        case IGPUDevice::BindGroupEntry::Kind::SAMPLER: {
+            auto* s = m_samplerPool.get(static_cast<SamplerHandle>(e.handle));
+            be.sampler = s->sampler;
+        }
+            break;
+        }
+        entries.push_back(be);
+    }
+
+    WGPUBindGroupDescriptor bgd = WGPU_BIND_GROUP_DESCRIPTOR_INIT;
+    bgd.layout = layoutRec->layout;
+    bgd.entryCount = static_cast<uint32_t>(entries.size());
+    bgd.entries = entries.data();
+    auto bg = wgpuDeviceCreateBindGroup(m_device, &bgd);
+    BindGroupRecord rec{};
+    rec.bindGroup = bg;
+    return m_bindGroupPool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::destroyBindGroup(BindGroupHandle h) {
+    if (auto* r = m_bindGroupPool.get(h)) {
+        if (r->bindGroup) {
+            wgpuBindGroupRelease(r->bindGroup);
+        }
+        m_bindGroupPool.remove(h);
+    }
+}
+
+inline PipelineLayoutHandle WebGPUDevice::createPipelineLayout(const PipelineLayoutDescriptor &d) {
+    std::vector<WGPUBindGroupLayout> sets;
+    sets.reserve(d.setLayouts.size());
+    for (auto h : d.setLayouts) {
+        sets.push_back(m_bindGroupLayoutPool.get(h)->layout);
+    }
+
+    WGPUPipelineLayoutDescriptor pld = WGPU_PIPELINE_LAYOUT_DESCRIPTOR_INIT;
+    pld.bindGroupLayoutCount = static_cast<uint32_t>(sets.size());
+    pld.bindGroupLayouts = sets.data();
+    pld.immediateSize = 0;
+
+    auto pl = wgpuDeviceCreatePipelineLayout(m_device, &pld);
+    PipelineLayoutRecord rec{};
+    rec.layout = pl;
+    return m_pipelineLayoutPool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::destroyPipelineLayout(PipelineLayoutHandle h) {
+    if (auto* r = m_pipelineLayoutPool.get(h)) {
+        if (r->layout) {
+            wgpuPipelineLayoutRelease(r->layout);
+        }
+        m_pipelineLayoutPool.remove(h);
+    }
+}
+
+inline ShaderModuleHandle WebGPUDevice::createShaderModule(const ShaderModuleDescriptor &d) {
+    WGPUShaderModule sm{};
+    WGPUShaderModuleDescriptor md = WGPU_SHADER_MODULE_DESCRIPTOR_INIT;
+
+    // TODO: When we make the core shader manager/compiler, refactor this
+    if (d.ir == ShaderIR::SPIRV) {
+        WGPUShaderSourceSPIRV spirv = WGPU_SHADER_SOURCE_SPIRV_INIT;
+        spirv.code = reinterpret_cast<const uint32_t*>(d.bytes.data());
+        spirv.codeSize = static_cast<uint32_t>(d.bytes.size() / 4);
+        md.nextInChain = &spirv.chain;
+    }
+    else if (d.ir == ShaderIR::WGSL) {
+        WGPUShaderSourceWGSL wgsl = WGPU_SHADER_SOURCE_WGSL_INIT;
+        WGPUStringView codeView{ reinterpret_cast<const char*>(d.bytes.data()), d.bytes.size() };
+        wgsl.code = codeView;
+        md.nextInChain = &wgsl.chain;
+    }
+    else {
+        std::cerr << "[WARN] WebGPUDevice: GLSL or Unknown shader format not supported. " << std::endl;
+        return 0;
+    }
+    sm = wgpuDeviceCreateShaderModule(m_device, &md);
+    ShaderRecord rec{};
+    rec.module = sm;
+    rec.descriptor = d;
+    return m_shaderPool.add(std::move(rec));
+}
+
+inline void WebGPUDevice::destroyShaderModule(ShaderModuleHandle h) {
+    if (auto* r = m_shaderPool.get(h)) {
+        if (r->module) {
+            wgpuShaderModuleRelease(r->module);
+        }
+        m_shaderPool.remove(h);
+    }
+}
+
+
 
 
 }

@@ -160,11 +160,12 @@ struct ImageViewDescriptor {
 
 struct SamplerDescriptor {
     enum class Filter { NEAREST, LINEAR };
+    enum class MipFilter { NEAREST, LINEAR }; // Strangely required by WebGPU, which separates the two
     enum class Address { REPEAT, CLAMP, MIRROR };
 
     Filter minFilter = Filter::LINEAR;
     Filter magFilter = Filter::LINEAR;
-    Filter mipFilter = Filter::LINEAR;
+    MipFilter mipFilter = MipFilter::LINEAR;
 
     Address addressU = Address::REPEAT;
     Address addressV = Address::REPEAT;
