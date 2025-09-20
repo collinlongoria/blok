@@ -11,8 +11,8 @@
 
 int main() {
     try {
-        blok::RenderBackend backend = blok::RenderBackend::CUDA;
-
+        //blok::RenderBackend backend = blok::RenderBackend::CUDA;
+        blok::RenderBackend backend = blok::RenderBackend::WebGPU;
         blok::App app(backend);
         app.run();
     } catch (const std::exception& e) {
