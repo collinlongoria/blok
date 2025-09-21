@@ -11,6 +11,7 @@
 
 #include <GLFW/glfw3.h>
 #include <glfw3webgpu.h>
+#include <thread>
 #include <webgpu.h>
 
 #include "gpu_device.hpp"
@@ -20,6 +21,13 @@
 #include "gpu_types.hpp"
 
 namespace blok {
+// For printing WGPUStringView (which may not be null terminated, as I learned)
+static std::string to_string_view(WGPUStringView v) {
+    std::string s;
+    if (v.data && v.length) s.assign(v.data, v.length);
+    return s;
+}
+
 /*
  * Resource Handle Pools
  * Reference: https://sourcemaking.com/design_patterns/object_pool/cpp/1
@@ -757,37 +765,136 @@ inline WGPUDevice WebGPUCommandList::deviceWGPU() const {
 
 inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     // Instance
+    /*
+    WGPUInstanceFeatureName feats[] = { WGPUInstanceFeatureName_TimedWaitAny };
+    WGPUInstanceLimits il = {}; il.nextInChain = nullptr; il.timedWaitAnyMaxcount = 4;
+
+    WGPUInstanceDescriptor id = WGPU_INSTANCE_DESCRIPTOR_INIT;
+    id.requiredFeatureCount = 1;
+    id.requiredFeatures = feats;
+    id.requiredLimits = &il;
+     */
     WGPUInstanceDescriptor id = WGPU_INSTANCE_DESCRIPTOR_INIT;
     m_instance = wgpuCreateInstance(&id);
 
     // Surface
     m_surface = glfwCreateWindowWGPUSurface(m_instance, init.windowHandle->getGLFWwindow());
-    // TODO: I really should consider emscripten why not
 
     // Adaptor
     WGPURequestAdapterOptions opts = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
     opts.compatibleSurface = m_surface;
-    struct Req { WGPUAdapter adapter{}; } req{};
-    auto onAdapter = [](WGPURequestAdapterStatus status, WGPUAdapter adapter, WGPUStringView, void* ud1, void*) {
-        if (status == WGPURequestAdapterStatus_Success) static_cast<Req*>(ud1)->adapter = adapter;
+    opts.backendType = WGPUBackendType_D3D12;
+
+    struct AdapterCtx { WGPUAdapter adapter = nullptr; } actx;
+    auto onAdapter = [](WGPURequestAdapterStatus status, WGPUAdapter adapter,
+        WGPUStringView message, void* ud1, void* ud2) {
+        if (status == WGPURequestAdapterStatus_Success) {
+            static_cast<AdapterCtx*>(ud1)->adapter = adapter;
+        }
+        else {
+            std::cerr << "WebGPU Adapter request failed: " << to_string_view(message) << std::endl;
+        }
     };
-    WGPURequestAdapterCallbackInfo ci{}; ci.mode = WGPUCallbackMode_AllowSpontaneous; ci.callback = onAdapter; ci.userdata1 = &req; ci.userdata2 = nullptr;
-    (void)wgpuInstanceRequestAdapter(m_instance, &opts, ci);
-    m_adapter = req.adapter;
+    WGPURequestAdapterCallbackInfo aci{};
+    aci.mode = WGPUCallbackMode_WaitAnyOnly;
+    aci.callback = onAdapter;
+    aci.userdata1 = &actx;
+
+    // apparaently MUST wait on EVERYTHING AHHHHHHHH
+    WGPUFuture aFuture = wgpuInstanceRequestAdapter(m_instance, &opts, aci);
+    WGPUFutureWaitInfo aWait = WGPU_FUTURE_WAIT_INFO_INIT;
+    aWait.future = aFuture;
+    for (;;) {
+        WGPUWaitStatus st = wgpuInstanceWaitAny(m_instance, 1, &aWait, 0);
+        if (st == WGPUWaitStatus_Success) break;
+        wgpuInstanceProcessEvents(m_instance); // flushes pending callbacks
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    m_adapter = actx.adapter;
+    if (!m_adapter) {
+        std::cerr << "WebGPU no compatible adapter found" << std::endl;
+        return;
+    }
+
+    // 1) Print which backend you actually got (after adapter request)
+    WGPUAdapterInfo info = WGPU_ADAPTER_INFO_INIT;
+    if (wgpuAdapterGetInfo(m_adapter, &info) == WGPUStatus_Success) {
+        fprintf(stderr, "Adapter: %.*s | Backend=%d | Vendor=0x%X Device=0x%X\n",
+            (int)info.description.length, info.description.data ? info.description.data : "",
+            (int)info.backendType, info.vendorID, info.deviceID);
+    } else {
+        fprintf(stderr, "wgpuAdapterGetInfo failed\n");
+    }
 
     // Device
-    WGPUDeviceDescriptor dd = WGPU_DEVICE_DESCRIPTOR_INIT;
-    WGPULimits limits;
-    limits.nextInChain = nullptr;
-    if (wgpuAdapterGetLimits(m_adapter, &limits)) {
-        dd.requiredLimits = &limits;
-    }
-    dd.label = WGPUStringView{ "MainDevice", 10 };
+    WGPULimits supported = WGPU_LIMITS_INIT;
+    wgpuAdapterGetLimits(m_adapter, &supported);
 
-    m_device = wgpuAdapterCreateDevice(m_adapter, &dd);
-    if (!m_device) {
-        fprintf(stderr, "Device creation failed!\n");
+    WGPUDeviceDescriptor dd = WGPU_DEVICE_DESCRIPTOR_INIT;
+    dd.label = WGPUStringView{ "blokDevice", 10 };
+    dd.requiredLimits = &supported;
+
+    auto onLost = [](const WGPUDevice*, WGPUDeviceLostReason reason, WGPUStringView message, void*, void*) {
+        std::cerr << "WebGPU Device Lost: " << std::to_string(static_cast<unsigned>(reason)) << to_string_view(message) << std::endl;
+    };
+    dd.deviceLostCallbackInfo = WGPU_DEVICE_LOST_CALLBACK_INFO_INIT;
+    dd.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
+    dd.deviceLostCallbackInfo.callback = onLost;
+
+    WGPUDawnTogglesDescriptor toggles = WGPU_DAWN_TOGGLES_DESCRIPTOR_INIT;
+    const char* enabled[] = { "use_dxc" };
+    toggles.enabledToggles = enabled;
+    toggles.enabledToggleCount = 1;
+    toggles.chain.next = dd.nextInChain;
+    dd.nextInChain = &toggles.chain;
+
+    struct DeviceCtx { WGPUDevice device = nullptr; } dctx;
+    auto onDevice = [](WGPURequestDeviceStatus status, WGPUDevice device,
+        WGPUStringView message, void* ud1, void* ud2) {
+        if (status == WGPURequestDeviceStatus_Success) {
+            static_cast<DeviceCtx*>(ud1)->device = device;
+        }
+        else {
+            std::cerr << "WebGPU Device request failed: " << to_string_view(message) << std::endl;
+        }
+    };
+    WGPURequestDeviceCallbackInfo dci{};
+    dci.mode = WGPUCallbackMode_WaitAnyOnly;
+    dci.callback = onDevice;
+    dci.userdata1 = &dctx;
+
+    WGPUFuture dFuture = wgpuAdapterRequestDevice(m_adapter, &dd, dci);
+    WGPUFutureWaitInfo dWait = WGPU_FUTURE_WAIT_INFO_INIT;
+    dWait.future = dFuture;
+    for (;;) {
+        WGPUWaitStatus st = wgpuInstanceWaitAny(m_instance, 1, &dWait, 0);
+        if (st == WGPUWaitStatus_Success) break;
+        wgpuInstanceProcessEvents(m_instance);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    m_device = dctx.device;
+    if (!m_device) {
+        std::cerr << "WebGPU device creation failed." << std::endl;
+    }
+
+    // Error callbacks TODO
+    /*
+    auto onError = [](WGPUErrorType type, WGPUStringView message, void* ud1, void* ud2) {
+        const char* t =
+            (type == WGPUErrorType_Validation) ? "Validation" :
+            (type == WGPUErrorType_OutOfMemory) ? "OutOfMemory" :
+            (type == WGPUErrorType_Internal) ? "Internal" :
+            (type == WGPUErrorType_Unknown) ? "Unknown" : "DeviceLost";
+        std::cerr << "WebGPU " << t << " error: " << message.data << std::endl;
+    };
+    WGPUUncapturedErrorCallbackInfo eci{};
+    eci.callback = onError;
+    eci.userdata1 = nullptr;
+    wgpuDeviceSetLoggingCallback()
+    */
+
+    // Queue
+    m_queue = wgpuDeviceGetQueue(m_device);
 
     // TODO: capabilties better
     m_deviceCapabilities.uniformBufferAlignment = 256;
