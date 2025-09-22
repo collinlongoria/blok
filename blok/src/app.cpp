@@ -261,7 +261,6 @@ void App::init() {
                 }
 
                 // Compute pass
-                /*
                 ICommandList* clCompute = m_gpu->createCommandList(QueueType::COMPUTE);
                 clCompute->begin();
                 clCompute->bindComputePipeline(cpipe);
@@ -270,7 +269,7 @@ void App::init() {
                 uint32_t gx = (VERT_COUNT + WG - 1) / WG;
                 clCompute->dispatch(gx, 1, 1);
                 clCompute->end();
-*/
+
                 // Render pass
                 ICommandList* clRender = m_gpu->createCommandList(QueueType::GRAPHICS);
                 clRender->begin();
@@ -290,14 +289,14 @@ void App::init() {
                 clRender->endRenderPass();
                 clRender->end();
 
-                std::vector<ICommandList*> clSubmits = { /*clCompute,*/ clRender };
+                std::vector<ICommandList*> clSubmits = { clCompute, clRender };
                 SubmitBatch batch{};
                 batch.lists = std::span<ICommandList*>( clSubmits );
                 m_gpu->submit(batch);
                 m_gpu->present(swap);
 
                 m_gpu->destroyImageView(bbView);
-                //m_gpu->destroyCommandList(clCompute);
+                m_gpu->destroyCommandList(clCompute);
                 m_gpu->destroyCommandList(clRender);
             }
 
