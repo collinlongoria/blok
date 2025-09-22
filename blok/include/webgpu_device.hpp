@@ -416,7 +416,7 @@ private:
     WGPUAdapter m_adapter{};
     WGPUDevice m_device{};
     WGPUQueue m_queue{};
-    WGPUSurface m_surface{};
+    WGPUSurface m_surface{}; bool m_surfaceConfigured = false;
 
     Format m_backbufferFormat = Format::RGBA8_UNORM;
     PresentMode m_presentMode = PresentMode::VSYNC;
@@ -816,7 +816,8 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
         return;
     }
 
-    // 1) Print which backend you actually got (after adapter request)
+    // Debug backend print
+/*
     WGPUAdapterInfo info = WGPU_ADAPTER_INFO_INIT;
     if (wgpuAdapterGetInfo(m_adapter, &info) == WGPUStatus_Success) {
         fprintf(stderr, "Adapter: %.*s | Backend=%d | Vendor=0x%X Device=0x%X\n",
@@ -825,7 +826,7 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     } else {
         fprintf(stderr, "wgpuAdapterGetInfo failed\n");
     }
-
+*/
     // Device
     WGPULimits supported = WGPU_LIMITS_INIT;
     wgpuAdapterGetLimits(m_adapter, &supported);
@@ -835,7 +836,8 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     dd.requiredLimits = &supported;
 
     auto onLost = [](const WGPUDevice*, WGPUDeviceLostReason reason, WGPUStringView message, void*, void*) {
-        std::cerr << "WebGPU Device Lost: " << std::to_string(static_cast<unsigned>(reason)) << to_string_view(message) << std::endl;
+        std::cerr << "WebGPU Device Lost (" << std::to_string(static_cast<unsigned>(reason)) << "): "
+        << to_string_view(message) << std::endl;
     };
     dd.deviceLostCallbackInfo = WGPU_DEVICE_LOST_CALLBACK_INFO_INIT;
     dd.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
@@ -893,6 +895,46 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     wgpuDeviceSetLoggingCallback()
     */
 
+    // Capabilities
+    WGPUSurfaceCapabilities caps = WGPU_SURFACE_CAPABILITIES_INIT;
+    wgpuSurfaceGetCapabilities(m_surface, m_adapter, &caps);
+
+        // Texture Format
+    WGPUTextureFormat format = WGPUTextureFormat_Undefined;
+    for (size_t i = 0; i < caps.formatCount; ++i) {
+        if (caps.formats[i] == WGPUTextureFormat_BGRA8UnormSrgb
+            || caps.formats[i] == WGPUTextureFormat_RGBA8UnormSrgb) {
+            format = caps.formats[i];
+            break;
+        }
+    }
+    if (format == WGPUTextureFormat_Undefined && caps.formatCount > 0) {
+        format = caps.formats[0];
+    }
+
+        // Present Mode (Queried from init)
+    WGPUPresentMode present = detail::toWGPU(init.presentMode);
+
+        // Alpha (just do opaque for now)
+    WGPUCompositeAlphaMode alpha = WGPUCompositeAlphaMode_Opaque;
+    for (size_t i = 0; i < caps.alphaModeCount; ++i) {
+        if (caps.alphaModes[i] == WGPUCompositeAlphaMode_Opaque) {
+            alpha = caps.alphaModes[i];
+            break;
+        }
+    }
+
+    WGPUSurfaceConfiguration sc = WGPU_SURFACE_CONFIGURATION_INIT;
+    sc.device = m_device;
+    sc.format = format;
+    sc.usage = WGPUTextureUsage_RenderAttachment;
+    sc.presentMode = present;
+    sc.alphaMode = alpha;
+    sc.width = init.width;
+    sc.height = init.height;
+    wgpuSurfaceConfigure(m_surface, &sc);
+    m_surfaceConfigured = true;
+
     // Queue
     m_queue = wgpuDeviceGetQueue(m_device);
 
@@ -909,12 +951,26 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
 }
 
 inline WebGPUDevice::~WebGPUDevice() {
-    if (m_surface) { wgpuSurfaceUnconfigure(m_surface); }
+    // (I am leaving notes on destruction order. Do not do anything other than listed in the steps beflow!)
 
+    // Step 0: Make sure all GPU work is done and all transient objects are dropped (WGPUTexture, etc.)
     if (m_queue) { wgpuQueueRelease(m_queue); m_queue = nullptr; }
-    if (m_device) { wgpuDeviceRelease(m_device); m_device = nullptr; }
-    if (m_adapter) { wgpuAdapterRelease(m_adapter); m_adapter = nullptr; }
+
+    // Step 1: Unconfigure Surface, then Release Surface
+    if (m_surface && m_surfaceConfigured) { wgpuSurfaceUnconfigure(m_surface); m_surfaceConfigured = false; }
     if (m_surface) { wgpuSurfaceRelease(m_surface); m_surface = nullptr; }
+
+    // Step 2: Destroy and Release the Device
+    if (m_device) {
+        wgpuDeviceDestroy(m_device);
+        wgpuDeviceRelease(m_device);
+        m_device = nullptr;
+    }
+
+    // Step 3: Release the Adapter
+    if (m_adapter) { wgpuAdapterRelease(m_adapter); m_adapter = nullptr; }
+
+    // Step 4: Finally, Release the Instance
     if (m_instance) { wgpuInstanceRelease(m_instance); m_instance = nullptr; }
 }
 

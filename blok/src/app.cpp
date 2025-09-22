@@ -28,6 +28,50 @@
 
 using namespace blok;
 
+// WebGPU Test Helpers
+
+struct alignas(16) Uniforms {
+    float t;     // time (seconds)
+    uint32_t N;  // vertex count
+    uint32_t pad0;
+    uint32_t pad1;
+};
+
+struct VertexP4C4 {
+    float px, py, pz, pw; // position (we use xy, keep zw for alignment)
+    float r, g, b, a;     // color
+};
+
+static std::vector<VertexP4C4> makeInitialVerts() {
+    // Three triangles offset on X; all will rotate around origin after compute
+    const float s = 0.25f; // size
+    std::vector<VertexP4C4> v;
+    auto tri = [&](float cx, float cy, float r, float g, float b) {
+        v.push_back({cx + 0.0f, cy + s,     0.0f, 1.0f,  r,g,b,1.0f});
+        v.push_back({cx - s,   cy - s,     0.0f, 1.0f,  r,g,b,1.0f});
+        v.push_back({cx + s,   cy - s,     0.0f, 1.0f,  r,g,b,1.0f});
+    };
+    tri(-0.6f, 0.0f, 1.0f, 0.3f, 0.3f);
+    tri( 0.0f, 0.0f, 0.3f, 1.0f, 0.3f);
+    tri( 0.6f, 0.0f, 0.3f, 0.3f, 1.0f);
+    return v;
+}
+
+// Read a whole text file (WGSL) into bytes
+static std::vector<uint8_t> readTextFile(const char* path) {
+    std::vector<uint8_t> out;
+    FILE* f = std::fopen(path, "rb");
+    if (!f) { std::perror(path); return out; }
+    std::fseek(f, 0, SEEK_END);
+    long n = std::ftell(f);
+    std::fseek(f, 0, SEEK_SET);
+    out.resize(n);
+    if (n > 0) std::fread(out.data(), 1, n, f);
+    std::fclose(f);
+    return out;
+}
+// WebGPU Test Helpers
+
 App::App(RenderBackend backend)
     : m_backend(backend) {}
 
@@ -77,6 +121,180 @@ void App::init() {
             init.windowHandle = m_window.get();
 
             m_gpu = std::make_unique<WebGPUDevice>(init);
+
+            SwapchainDescriptor sd{};
+            sd.width = init.width;
+            sd.height = init.height;
+            sd.format = init.backBufferFormat;
+            sd.presentMode = init.presentMode;
+            auto swap = m_gpu->createSwapchain(sd);
+
+            auto verts = makeInitialVerts();
+            const uint32_t VERT_COUNT = static_cast<uint32_t>(verts.size());
+
+            BufferDescriptor vbDesc{};
+            vbDesc.size = sizeof(VertexP4C4) * verts.size();
+            vbDesc.usage = BufferUsage::VERTEX | BufferUsage::STORAGE | BufferUsage::COPYDESTINATION;
+            auto vbuf = m_gpu->createBuffer(vbDesc, nullptr);
+
+            BufferDescriptor ubDesc{};
+            ubDesc.size = sizeof(Uniforms);
+            ubDesc.usage = BufferUsage::UNIFORM | BufferUsage::COPYDESTINATION;
+            auto ubuf = m_gpu->createBuffer(ubDesc, nullptr);
+
+            BindGroupLayoutDescriptor bglDesc{};
+            bglDesc.entries = {
+                BindGroupLayoutEntry{
+                    .binding = 0,
+                    .type = BindingType::UNIFORMBUFFER,
+                    .visibleStages = PipelineStage::COMPUTESHADER,
+                },
+                BindGroupLayoutEntry{
+                    .binding = 1,
+                    .type = BindingType::STORAGEBUFFER,
+                    .visibleStages = PipelineStage::COMPUTESHADER
+                },
+            };
+            auto bgl = m_gpu->createBindGroupLayout(bglDesc);
+
+            IGPUDevice::BindGroupDescriptor bgDesc{};
+            bgDesc.layout = bgl;
+            bgDesc.entries = {
+                IGPUDevice::BindGroupEntry{
+                    .binding = 0,
+                    .kind = IGPUDevice::BindGroupEntry::Kind::BUFFER,
+                    .handle = static_cast<uint64_t>(ubuf),
+                    .offset = 0,
+                    .size = sizeof(Uniforms),
+                },
+                IGPUDevice::BindGroupEntry{
+                    .binding = 1,
+                    .kind = IGPUDevice::BindGroupEntry::Kind::BUFFER,
+                    .handle = static_cast<uint64_t>(vbuf),
+                    .offset = 0,
+                    .size = sizeof(VertexP4C4) * verts.size(),
+                }
+            };
+            auto bgroup = m_gpu->createBindGroup(bgDesc);
+
+            PipelineLayoutDescriptor cplDesc{};
+            cplDesc.setLayouts = { bgl };
+            auto cpl = m_gpu->createPipelineLayout(cplDesc);
+
+            PipelineLayoutDescriptor gplDesc{};
+            gplDesc.setLayouts = {};
+            auto gpl = m_gpu->createPipelineLayout(gplDesc);
+
+            ShaderModuleDescriptor csMod{};
+            csMod.ir = ShaderIR::WGSL;
+            csMod.bytes = readTextFile("rotate.comp.wgsl");
+            csMod.entryPoint = "cs_main";
+            auto cs = m_gpu->createShaderModule(csMod);
+
+            ShaderModuleDescriptor vsMod{};
+            vsMod.ir = ShaderIR::WGSL;
+            vsMod.bytes = readTextFile("tri.wgsl");
+            vsMod.entryPoint = "vs_main";
+            auto vs = m_gpu->createShaderModule(vsMod);
+
+            ShaderModuleDescriptor fsMod{};
+            fsMod.ir = ShaderIR::WGSL;
+            fsMod.bytes = vsMod.bytes;
+            fsMod.entryPoint = "fs_main";
+            auto fs = m_gpu->createShaderModule(fsMod);
+
+            ComputePipelineDescriptor cpd{};
+            cpd.cs = cs;
+            cpd.pipelineLayout = cpl;
+            auto cpipe = m_gpu->createComputePipeline(cpd);
+
+            GraphicsPipelineDescriptor gpd{};
+            gpd.vs = vs;
+            gpd.fs = fs;
+            gpd.pipelineLayout = gpl;
+            gpd.primitiveTopology = PrimitiveTopology::TRIANGLELIST;
+            gpd.frontFace = FrontFace::CCW;
+            gpd.cull = CullMode::NONE;
+            gpd.depth = { .depthTest = false, .depthWrite = false };
+            gpd.depthFormat = Format::D32_FLOAT;
+            gpd.colorFormat = init.backBufferFormat;
+            gpd.blend = { .enable = true };
+            gpd.vertexInputs = {
+                VertexAttributeDescriptor{
+                    .location = 0,
+                    .binding = 0,
+                    .offset = 0,
+                    .stride = sizeof(VertexP4C4),
+                    .format = Format::RGBA32_FLOAT
+                },
+                VertexAttributeDescriptor{
+                    .location = 1,
+                    .binding = 0,
+                    .offset = 16,
+                    .stride = sizeof(VertexP4C4),
+                    .format = Format::RGBA32_FLOAT
+                }
+            };
+            auto gpipe = m_gpu->createGraphicsPipeline(gpd);
+
+            // (Just gonna fake a render loop here)
+            auto dt = std::chrono::high_resolution_clock::now();
+            while (!m_window->shouldClose()) {
+                Window::pollEvents();
+
+                auto now = std::chrono::high_resolution_clock::now();
+                float t = std::chrono::duration<float>(now - dt).count();
+                Uniforms u{};
+                u.t = t;
+                u.N = VERT_COUNT;
+                m_gpu->updateBuffer(ubuf, 0, sizeof(Uniforms), &u);
+
+                ImageViewHandle bbView = m_gpu->acquireNextImage(swap);
+                if (!bbView) {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    continue;
+                }
+
+                // Compute pass
+                /*
+                ICommandList* clCompute = m_gpu->createCommandList(QueueType::COMPUTE);
+                clCompute->begin();
+                clCompute->bindComputePipeline(cpipe);
+                clCompute->bindBindGroup(0, bgroup);
+                const uint32_t WG = 64;
+                uint32_t gx = (VERT_COUNT + WG - 1) / WG;
+                clCompute->dispatch(gx, 1, 1);
+                clCompute->end();
+*/
+                // Render pass
+                ICommandList* clRender = m_gpu->createCommandList(QueueType::GRAPHICS);
+                clRender->begin();
+                AttachmentDescriptor colorAttach{};
+                colorAttach.view = bbView;
+                colorAttach.load = AttachmentDescriptor::LoadOperation::CLEAR;
+                colorAttach.store = AttachmentDescriptor::StoreOperation::STORE;
+                colorAttach.clearColor = { 1.0f, 0.06f, 0.08f, 1.0f };
+                RenderPassBeginInfo rp{};
+                rp.colorAttachments = { colorAttach };
+                clRender->beginRenderPass(rp);
+                clRender->bindGraphicsPipeline(gpipe);
+                std::vector<BufferHandle> vbs = { vbuf };
+                std::vector<size_t> offsets = { 0 };
+                clRender->bindVertexBuffers(0, vbs, offsets);
+                clRender->draw(VERT_COUNT, 1, 0, 0);
+                clRender->endRenderPass();
+                clRender->end();
+
+                std::vector<ICommandList*> clSubmits = { /*clCompute,*/ clRender };
+                SubmitBatch batch{};
+                batch.lists = std::span<ICommandList*>( clSubmits );
+                m_gpu->submit(batch);
+                m_gpu->present(swap);
+
+                m_gpu->destroyImageView(bbView);
+                //m_gpu->destroyCommandList(clCompute);
+                m_gpu->destroyCommandList(clRender);
+            }
         }
             break;
     }
@@ -114,4 +332,9 @@ void App::update() {
 void App::shutdown() {
     if (m_rendererGL) { m_rendererGL->shutdown(); m_rendererGL.reset(); }
     if (m_cudaTracer) { m_cudaTracer->~CudaTracer(); m_cudaTracer.reset(); }
+
+    if (m_backend == RenderBackend::WebGPU) {
+        m_window.reset();
+        m_gpu.reset();
+    }
 }
