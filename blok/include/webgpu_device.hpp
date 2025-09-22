@@ -48,7 +48,7 @@ public:
         auto it = objects.find(h);
         return (it == objects.end()) ? nullptr : &it->second;
     }
-    const T* get(uint64_t h) const {
+    [[nodiscard]] const T* get(uint64_t h) const {
         auto it = objects.find(h);
         return (it == objects.end()) ? nullptr : &it->second;
     }
@@ -338,7 +338,7 @@ private:
     ComputePipelineHandle m_currentComputePipeline{};
 
     void ensureComputePass();
-    WGPUDevice deviceWGPU() const;
+    [[nodiscard]] WGPUDevice deviceWGPU() const;
 };
 
 /*
@@ -349,7 +349,7 @@ public:
     explicit WebGPUDevice(const DeviceInitInfo& init);
     ~WebGPUDevice() override;
 
-    DeviceCapabilities getCapabilities() const override { return m_deviceCapabilities; }
+    [[nodiscard]] DeviceCapabilities getCapabilities() const override { return m_deviceCapabilities; }
 
     BufferHandle createBuffer(const BufferDescriptor &, const void *initialData) override;
     void destroyBuffer(BufferHandle) override;
@@ -749,7 +749,7 @@ inline void WebGPUCommandList::drawIndexed(uint32_t indexCount, uint32_t instanc
 }
 
 inline void WebGPUCommandList::ensureComputePass() {
-    if (!m_currentComputePipeline) {
+    if (!m_computePass) {
         WGPUComputePassDescriptor d = WGPU_COMPUTE_PASS_DESCRIPTOR_INIT;
         m_computePass = wgpuCommandEncoderBeginComputePass(m_encoder, &d);
         if (m_currentComputePipeline) {
@@ -800,7 +800,7 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     aci.callback = onAdapter;
     aci.userdata1 = &actx;
 
-    // apparaently MUST wait on EVERYTHING AHHHHHHHH
+    // apparently MUST wait on EVERYTHING AHHHHHHHH
     WGPUFuture aFuture = wgpuInstanceRequestAdapter(m_instance, &opts, aci);
     WGPUFutureWaitInfo aWait = WGPU_FUTURE_WAIT_INFO_INIT;
     aWait.future = aFuture;
@@ -835,13 +835,26 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     dd.label = WGPUStringView{ "blokDevice", 10 };
     dd.requiredLimits = &supported;
 
+    // Device Lost Callback
     auto onLost = [](const WGPUDevice*, WGPUDeviceLostReason reason, WGPUStringView message, void*, void*) {
+        if (reason == WGPUDeviceLostReason_Destroyed) std::cout << "destroyed, safe to ignore" << std::endl;
+        if (reason == WGPUDeviceLostReason_CallbackCancelled) std::cout << "callback cancelled" << std::endl;
+        if (reason == WGPUDeviceLostReason_FailedCreation) std::cout << "failedCreation" << std::endl;
+        if (reason == WGPUDeviceLostReason_Unknown) std::cout << "unknown" << std::endl;
         std::cerr << "WebGPU Device Lost (" << std::to_string(static_cast<unsigned>(reason)) << "): "
         << to_string_view(message) << std::endl;
     };
     dd.deviceLostCallbackInfo = WGPU_DEVICE_LOST_CALLBACK_INFO_INIT;
     dd.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
     dd.deviceLostCallbackInfo.callback = onLost;
+
+    // Unhandled Errors Callback
+    auto onError = [](const WGPUDevice* device, WGPUErrorType type, WGPUStringView message, void* ud1, void* ud2) {
+        std::cerr << "WebGPU Error (" << std::to_string(static_cast<unsigned>(type)) << "): " << to_string_view(message) << std::endl;
+    };
+    dd.uncapturedErrorCallbackInfo = WGPU_UNCAPTURED_ERROR_CALLBACK_INFO_INIT;
+    dd.uncapturedErrorCallbackInfo.callback = onError;
+    dd.uncapturedErrorCallbackInfo.userdata1 = nullptr;
 
     WGPUDawnTogglesDescriptor toggles = WGPU_DAWN_TOGGLES_DESCRIPTOR_INIT;
     const char* enabled[] = { "use_dxc" };
@@ -879,27 +892,21 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
         std::cerr << "WebGPU device creation failed." << std::endl;
     }
 
-    // Error callbacks TODO
-    /*
-    auto onError = [](WGPUErrorType type, WGPUStringView message, void* ud1, void* ud2) {
-        const char* t =
-            (type == WGPUErrorType_Validation) ? "Validation" :
-            (type == WGPUErrorType_OutOfMemory) ? "OutOfMemory" :
-            (type == WGPUErrorType_Internal) ? "Internal" :
-            (type == WGPUErrorType_Unknown) ? "Unknown" : "DeviceLost";
-        std::cerr << "WebGPU " << t << " error: " << message.data << std::endl;
+    // Logging
+    auto onLog = [](WGPULoggingType type, WGPUStringView message, void* ud1, void* ud2) {
+        std::cerr << "WebGPU Log (" << std::to_string(static_cast<unsigned>(type)) << "): " << to_string_view(message) << std::endl;
     };
-    WGPUUncapturedErrorCallbackInfo eci{};
-    eci.callback = onError;
-    eci.userdata1 = nullptr;
-    wgpuDeviceSetLoggingCallback()
-    */
+    WGPULoggingCallbackInfo lci{};
+    lci.callback = onLog;
+    lci.userdata1 = nullptr;
+    wgpuDeviceSetLoggingCallback(m_device, lci);
 
     // Capabilities
     WGPUSurfaceCapabilities caps = WGPU_SURFACE_CAPABILITIES_INIT;
     wgpuSurfaceGetCapabilities(m_surface, m_adapter, &caps);
 
         // Texture Format
+    /*
     WGPUTextureFormat format = WGPUTextureFormat_Undefined;
     for (size_t i = 0; i < caps.formatCount; ++i) {
         if (caps.formats[i] == WGPUTextureFormat_BGRA8UnormSrgb
@@ -911,6 +918,8 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     if (format == WGPUTextureFormat_Undefined && caps.formatCount > 0) {
         format = caps.formats[0];
     }
+    */
+    WGPUTextureFormat format = detail::toWGPU(init.backBufferFormat);
 
         // Present Mode (Queried from init)
     WGPUPresentMode present = detail::toWGPU(init.presentMode);
@@ -962,7 +971,7 @@ inline WebGPUDevice::~WebGPUDevice() {
 
     // Step 2: Destroy and Release the Device
     if (m_device) {
-        wgpuDeviceDestroy(m_device);
+        //wgpuDeviceDestroy(m_device);
         wgpuDeviceRelease(m_device);
         m_device = nullptr;
     }
@@ -971,7 +980,11 @@ inline WebGPUDevice::~WebGPUDevice() {
     if (m_adapter) { wgpuAdapterRelease(m_adapter); m_adapter = nullptr; }
 
     // Step 4: Finally, Release the Instance
-    if (m_instance) { wgpuInstanceRelease(m_instance); m_instance = nullptr; }
+    if (m_instance) {
+        // Wait for everything else to finish
+        wgpuInstanceProcessEvents(m_instance);
+        wgpuInstanceRelease(m_instance); m_instance = nullptr;
+    }
 }
 
 inline BufferHandle WebGPUDevice::createBuffer(const BufferDescriptor & d, const void *initialData) {
@@ -1256,6 +1269,7 @@ inline ShaderModuleHandle WebGPUDevice::createShaderModule(const ShaderModuleDes
     ShaderRecord rec{};
     rec.module = sm;
     rec.descriptor = d;
+    rec.descriptor.bytes = {}; // avoids dangling span after returning
     return m_shaderPool.add(std::move(rec));
 }
 
@@ -1418,15 +1432,18 @@ inline SwapchainHandle WebGPUDevice::createSwapchain(const SwapchainDescriptor &
 
 inline void WebGPUDevice::destroySwapchain(SwapchainHandle h) {
     if (auto* r = m_swapchainPool.get(h)) {
+        /*
         if (r->currentView) {
             wgpuTextureViewRelease(r->currentView);
             r->currentView = nullptr;
         }
+        */ // Commented out for now, app owns view
+        r->currentView = nullptr;
         if (r->currentTexture) {
             wgpuTextureRelease(r->currentTexture);
             r->currentTexture = nullptr;
         }
-        // actual surface is owned by the device itself, so i don't destroy here.
+        // actual surface is owned by the device itself, so I don't destroy here.
         m_swapchainPool.remove(h);
     }
 }
@@ -1434,10 +1451,15 @@ inline void WebGPUDevice::destroySwapchain(SwapchainHandle h) {
 inline ImageViewHandle WebGPUDevice::acquireNextImage(SwapchainHandle h) {
     auto* r = m_swapchainPool.get(h);
     if (!r) return 0;
+    // Commented out because, for now, the app owns the view
+    /*
     if (r->currentView) {
         wgpuTextureViewRelease(r->currentView);
         r->currentView = nullptr;
     }
+    */
+    r->currentView = nullptr;
+
     if (r->currentTexture) {
         wgpuTextureRelease(r->currentTexture);
         r->currentTexture = nullptr;
