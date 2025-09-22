@@ -24,7 +24,7 @@ fn cs_main(@builtin(global_invocation_id) gid : vec3<u32>) {
     let c = cos(angle);
     let s = sin(angle);
 
-    var v = vertex[i];
+    var v = verts[i];
     let p = v.pos.xy;
     let pr = vec2<f32>(c*p.x - s*p.y, s*p.x + c*p.y);
     v.pos = vec4<f32>(pr, v.pos.z, v.pos.w);

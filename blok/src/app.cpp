@@ -93,8 +93,8 @@ void App::init() {
     m_window = std::make_shared<Window>(800, 600, "blok", m_backend);
 
     GLFWwindow* gw = m_window->getGLFWwindow();
-    glfwMakeContextCurrent(gw);
     if (m_backend == RenderBackend::CUDA || m_backend == RenderBackend::OpenGL) {
+        glfwMakeContextCurrent(gw);
         if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
             throw std::runtime_error("Failed to load GL with GLAD");
         }
@@ -136,6 +136,7 @@ void App::init() {
             vbDesc.size = sizeof(VertexP4C4) * verts.size();
             vbDesc.usage = BufferUsage::VERTEX | BufferUsage::STORAGE | BufferUsage::COPYDESTINATION;
             auto vbuf = m_gpu->createBuffer(vbDesc, nullptr);
+            m_gpu->updateBuffer(vbuf, 0, vbDesc.size, verts.data());
 
             BufferDescriptor ubDesc{};
             ubDesc.size = sizeof(Uniforms);
@@ -185,21 +186,25 @@ void App::init() {
             gplDesc.setLayouts = {};
             auto gpl = m_gpu->createPipelineLayout(gplDesc);
 
+            auto csSrc = readTextFile("rotate.comp.wgsl");
+            auto vsSrc = readTextFile("tri.wgsl");
+            auto fsSrc = vsSrc;
+
             ShaderModuleDescriptor csMod{};
             csMod.ir = ShaderIR::WGSL;
-            csMod.bytes = readTextFile("rotate.comp.wgsl");
+            csMod.bytes = std::span<const uint8_t>(csSrc.data(), csSrc.size());
             csMod.entryPoint = "cs_main";
             auto cs = m_gpu->createShaderModule(csMod);
 
             ShaderModuleDescriptor vsMod{};
             vsMod.ir = ShaderIR::WGSL;
-            vsMod.bytes = readTextFile("tri.wgsl");
+            vsMod.bytes = std::span<const uint8_t>(vsSrc.data(), vsSrc.size());
             vsMod.entryPoint = "vs_main";
             auto vs = m_gpu->createShaderModule(vsMod);
 
             ShaderModuleDescriptor fsMod{};
             fsMod.ir = ShaderIR::WGSL;
-            fsMod.bytes = vsMod.bytes;
+            fsMod.bytes = std::span<const uint8_t>(fsSrc.data(), fsSrc.size());
             fsMod.entryPoint = "fs_main";
             auto fs = m_gpu->createShaderModule(fsMod);
 
@@ -216,7 +221,7 @@ void App::init() {
             gpd.frontFace = FrontFace::CCW;
             gpd.cull = CullMode::NONE;
             gpd.depth = { .depthTest = false, .depthWrite = false };
-            gpd.depthFormat = Format::D32_FLOAT;
+            gpd.depthFormat = Format::UNKNOWN;
             gpd.colorFormat = init.backBufferFormat;
             gpd.blend = { .enable = true };
             gpd.vertexInputs = {
@@ -295,6 +300,19 @@ void App::init() {
                 //m_gpu->destroyCommandList(clCompute);
                 m_gpu->destroyCommandList(clRender);
             }
+
+            std::cout << "deleting resources" << std::endl;
+            //m_gpu->waitIdle(QueueType::GRAPHICS);
+            m_gpu->destroyBuffer(vbuf);
+            m_gpu->destroyBuffer(ubuf);
+            m_gpu->destroyBindGroup(bgroup);
+            m_gpu->destroyBindGroupLayout(bgl);
+            m_gpu->destroyPipelineLayout(cpl);
+            m_gpu->destroyPipelineLayout(gpl);
+            m_gpu->destroyComputePipeline(cpipe);
+            m_gpu->destroyGraphicsPipeline(gpipe);
+            m_gpu->destroySwapchain(swap);
+            std::cout << "deleting resources DONE" << std::endl;
         }
             break;
     }
@@ -326,7 +344,8 @@ void App::update() {
     }
 
     // TODO: Ideally this is happening in renderer interface
-    glfwSwapBuffers(m_window->getGLFWwindow());
+    if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA)
+        glfwSwapBuffers(m_window->getGLFWwindow());
 }
 
 void App::shutdown() {
@@ -334,7 +353,10 @@ void App::shutdown() {
     if (m_cudaTracer) { m_cudaTracer->~CudaTracer(); m_cudaTracer.reset(); }
 
     if (m_backend == RenderBackend::WebGPU) {
-        m_window.reset();
+        std::cout << "WebGPU shutdown" << std::endl;
         m_gpu.reset();
+        std::cout << "Window shutdown" << std::endl;
+        m_window.reset();
+        std::cout << "Window shutdown DONE. All DONE." << std::endl;
     }
 }
