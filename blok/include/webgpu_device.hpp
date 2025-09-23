@@ -79,6 +79,8 @@ namespace detail {
         case Format::R8_UNORM: return WGPUTextureFormat_R8Unorm;
         case Format::RG8_UNORM: return WGPUTextureFormat_RG8Unorm;
         case Format::RGBA8_UNORM: return WGPUTextureFormat_RGBA8Unorm;
+        case Format::BGRA8_UNORM_SRGB: return WGPUTextureFormat_BGRA8UnormSrgb;
+        case Format::RGBA8_UNORM_SRGB: return WGPUTextureFormat_RGBA8UnormSrgb;
         case Format::R8_UINT: return WGPUTextureFormat_R8Uint;
         case Format::R16_UINT: return WGPUTextureFormat_R16Uint;
         case Format::R32_UINT: return WGPUTextureFormat_R32Uint;
@@ -89,6 +91,7 @@ namespace detail {
         case Format::RGBA32_FLOAT: return WGPUTextureFormat_RGBA32Float;
         case Format::D24S8: return WGPUTextureFormat_Depth24PlusStencil8;
         case Format::D32_FLOAT: return WGPUTextureFormat_Depth32Float;
+        case Format::PREFERRED: return WGPUTextureFormat_Undefined;
         }
         return WGPUTextureFormat_Undefined;
     }
@@ -209,9 +212,9 @@ namespace detail {
         case Format::RGBA16_FLOAT: return WGPUVertexFormat_Float16x4;
         case Format::R32_UINT: return WGPUVertexFormat_Uint32;
         case Format::RGBA32_UINT: return WGPUVertexFormat_Uint32x4;
-        case Format::R8_UNORM: return WGPUVertexFormat_Uint8;
-        case Format::RG8_UNORM: return WGPUVertexFormat_Uint8x2;
-        case Format::RGBA8_UNORM: return WGPUVertexFormat_Uint8x4;
+        case Format::R8_UNORM: return WGPUVertexFormat_Unorm8;
+        case Format::RG8_UNORM: return WGPUVertexFormat_Unorm8x2;
+        case Format::RGBA8_UNORM: return WGPUVertexFormat_Unorm8x4;
         default: return WGPUVertexFormat_Float32; // TODO: no undefined - might throw error here
         }
     }
@@ -726,7 +729,7 @@ inline void WebGPUCommandList::bindVertexBuffers(uint32_t firstBinding, std::spa
     assert(buffers.size() == offsets.size());
     for (size_t i = 0; i < buffers.size(); ++i) {
         auto b = m_device->m_bufferPool.get(buffers[i]);
-        wgpuRenderPassEncoderSetVertexBuffer(m_renderPass, static_cast<uint32_t>(i), b->buffer, offsets[i], b->size - offsets[i]);
+        wgpuRenderPassEncoderSetVertexBuffer(m_renderPass, firstBinding + static_cast<uint32_t>(i), b->buffer, offsets[i], b->size - offsets[i]);
     }
 }
 
@@ -837,12 +840,8 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
 
     // Device Lost Callback
     auto onLost = [](const WGPUDevice*, WGPUDeviceLostReason reason, WGPUStringView message, void*, void*) {
-        if (reason == WGPUDeviceLostReason_Destroyed) std::cout << "destroyed, safe to ignore" << std::endl;
-        if (reason == WGPUDeviceLostReason_CallbackCancelled) std::cout << "callback cancelled" << std::endl;
-        if (reason == WGPUDeviceLostReason_FailedCreation) std::cout << "failedCreation" << std::endl;
-        if (reason == WGPUDeviceLostReason_Unknown) std::cout << "unknown" << std::endl;
-        std::cerr << "WebGPU Device Lost (" << std::to_string(static_cast<unsigned>(reason)) << "): "
-        << to_string_view(message) << std::endl;
+        if (reason != WGPUDeviceLostReason_Destroyed) std::cerr << "WebGPU Device Lost (" <<
+            std::to_string(static_cast<unsigned>(reason)) << "): " << to_string_view(message) << std::endl;
     };
     dd.deviceLostCallbackInfo = WGPU_DEVICE_LOST_CALLBACK_INFO_INIT;
     dd.deviceLostCallbackInfo.mode = WGPUCallbackMode_AllowProcessEvents;
@@ -920,6 +919,11 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     }
     */
     WGPUTextureFormat format = detail::toWGPU(init.backBufferFormat);
+    if (format == WGPUTextureFormat_Undefined) {
+        // Get preferred, using first entry in capabilities
+        // TODO: this currently does not work
+        format = caps.formats[0];
+    }
 
         // Present Mode (Queried from init)
     WGPUPresentMode present = detail::toWGPU(init.presentMode);
@@ -1288,28 +1292,29 @@ inline GraphicsPipelineHandle WebGPUDevice::createGraphicsPipeline(const Graphic
     auto* pl = m_pipelineLayoutPool.get(d.pipelineLayout);
 
     // Vertex buffers/attributes
-    struct vbo { uint32_t stride=0; std::vector<WGPUVertexAttribute> attribs; };
-    std::unordered_map<uint32_t, vbo> vbos;
+    uint32_t maxBinding = 0;
+    for (auto& a : d.vertexInputs) maxBinding = std::max(maxBinding, a.binding);
+
+    std::vector<std::vector<WGPUVertexAttribute>> attrs(maxBinding + 1);
+    std::vector<uint32_t> strides(maxBinding + 1, 0);
+
     for (auto& a : d.vertexInputs) {
-        auto& vb = vbos[a.binding];
-        vb.stride = a.stride;
         WGPUVertexAttribute va = WGPU_VERTEX_ATTRIBUTE_INIT;
         va.shaderLocation = a.location;
-        va.offset = a.offset;
+        va.offset = a.offset; // note: ensure this is bytes
         va.format = detail::toWGPUVertexFormat(a.format);
-        vb.attribs.push_back(va);
+        attrs[a.binding].push_back(va);
+        strides[a.binding] = a.stride; // this one also ensure this is bytes
     }
+
     std::vector<WGPUVertexBufferLayout> vbl;
-    vbl.reserve(vbos.size());
-    std::vector<std::vector<WGPUVertexAttribute>> ownedAttribs;
-    ownedAttribs.reserve(vbos.size());
-    for (auto& [binding, vb] : vbos) {
-        ownedAttribs.push_back(vb.attribs);
+    for (uint32_t b = 0; b <= maxBinding; ++b) {
+        if (attrs[b].empty()) continue;
         WGPUVertexBufferLayout l = WGPU_VERTEX_BUFFER_LAYOUT_INIT;
-        l.arrayStride = vb.stride;
+        l.arrayStride = strides[b];
         l.stepMode = WGPUVertexStepMode_Vertex;
-        l.attributeCount = static_cast<uint32_t>(ownedAttribs.back().size());
-        l.attributes = ownedAttribs.back().data();
+        l.attributeCount = static_cast<uint32_t>(attrs[b].size());
+        l.attributes = attrs[b].data();
         vbl.push_back(l);
     }
 
@@ -1337,7 +1342,7 @@ inline GraphicsPipelineHandle WebGPUDevice::createGraphicsPipeline(const Graphic
         bs.color.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
         bs.alpha.operation = WGPUBlendOperation_Add;
         bs.alpha.srcFactor = WGPUBlendFactor_One;
-        bs.alpha.srcFactor = WGPUBlendFactor_OneMinusSrcAlpha;
+        bs.alpha.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
     }
     WGPUColorTargetState cts = WGPU_COLOR_TARGET_STATE_INIT;
     cts.format = detail::toWGPU(d.colorFormat);

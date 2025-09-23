@@ -118,6 +118,10 @@ enum class Format : uint16_t {
     R8_UNORM,
     RG8_UNORM,
     RGBA8_UNORM,
+    // SRGB
+    BGRA8_UNORM_SRGB,
+    RGBA8_UNORM_SRGB,
+
     // Unsigned Integer
     R8_UINT,
     R16_UINT,
@@ -130,7 +134,9 @@ enum class Format : uint16_t {
     RGBA32_FLOAT,
     // Depth/Stencil
     D24S8,
-    D32_FLOAT
+    D32_FLOAT,
+    // Preferred Format (Allow the API to choose)
+    PREFERRED
 };
 
 enum class IndexType : uint8_t {

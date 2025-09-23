@@ -29,27 +29,25 @@
 using namespace blok;
 
 // WebGPU Test Helpers
-
 struct alignas(16) Uniforms {
-    float t;     // time (seconds)
-    uint32_t N;  // vertex count
+    float t; // time (seconds)
+    uint32_t N; // vertex count
     uint32_t pad0;
     uint32_t pad1;
 };
 
 struct VertexP4C4 {
-    float px, py, pz, pw; // position (we use xy, keep zw for alignment)
-    float r, g, b, a;     // color
+    float px, py, pz, pw;
+    float r, g, b, a;
 };
 
 static std::vector<VertexP4C4> makeInitialVerts() {
-    // Three triangles offset on X; all will rotate around origin after compute
-    const float s = 0.25f; // size
+    const float s = 0.25f;
     std::vector<VertexP4C4> v;
     auto tri = [&](float cx, float cy, float r, float g, float b) {
-        v.push_back({cx + 0.0f, cy + s,     0.0f, 1.0f,  r,g,b,1.0f});
-        v.push_back({cx - s,   cy - s,     0.0f, 1.0f,  r,g,b,1.0f});
-        v.push_back({cx + s,   cy - s,     0.0f, 1.0f,  r,g,b,1.0f});
+        v.push_back({cx + 0.0f, cy + s,   cx, cy,  r,g,b,1.0f});
+        v.push_back({cx - s,    cy - s,   cx, cy,  r,g,b,1.0f});
+        v.push_back({cx + s,    cy - s,   cx, cy,  r,g,b,1.0f});
     };
     tri(-0.6f, 0.0f, 1.0f, 0.3f, 0.3f);
     tri( 0.0f, 0.0f, 0.3f, 1.0f, 0.3f);
@@ -243,14 +241,16 @@ void App::init() {
             auto gpipe = m_gpu->createGraphicsPipeline(gpd);
 
             // (Just gonna fake a render loop here)
-            auto dt = std::chrono::high_resolution_clock::now();
+            auto last = std::chrono::high_resolution_clock::now();
             while (!m_window->shouldClose()) {
                 Window::pollEvents();
 
                 auto now = std::chrono::high_resolution_clock::now();
-                float t = std::chrono::duration<float>(now - dt).count();
+                float dt_sec = std::chrono::duration<float>(now - last).count();
+                last = now;
+
                 Uniforms u{};
-                u.t = t;
+                u.t = dt_sec;
                 u.N = VERT_COUNT;
                 m_gpu->updateBuffer(ubuf, 0, sizeof(Uniforms), &u);
 
@@ -300,8 +300,6 @@ void App::init() {
                 m_gpu->destroyCommandList(clRender);
             }
 
-            std::cout << "deleting resources" << std::endl;
-            //m_gpu->waitIdle(QueueType::GRAPHICS);
             m_gpu->destroyBuffer(vbuf);
             m_gpu->destroyBuffer(ubuf);
             m_gpu->destroyBindGroup(bgroup);
@@ -311,7 +309,6 @@ void App::init() {
             m_gpu->destroyComputePipeline(cpipe);
             m_gpu->destroyGraphicsPipeline(gpipe);
             m_gpu->destroySwapchain(swap);
-            std::cout << "deleting resources DONE" << std::endl;
         }
             break;
     }
@@ -352,10 +349,7 @@ void App::shutdown() {
     if (m_cudaTracer) { m_cudaTracer->~CudaTracer(); m_cudaTracer.reset(); }
 
     if (m_backend == RenderBackend::WebGPU) {
-        std::cout << "WebGPU shutdown" << std::endl;
         m_gpu.reset();
-        std::cout << "Window shutdown" << std::endl;
         m_window.reset();
-        std::cout << "Window shutdown DONE. All DONE." << std::endl;
     }
 }
