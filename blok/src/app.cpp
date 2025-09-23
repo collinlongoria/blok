@@ -184,8 +184,8 @@ void App::init() {
             gplDesc.setLayouts = {};
             auto gpl = m_gpu->createPipelineLayout(gplDesc);
 
-            auto csSrc = readTextFile("rotate.comp.wgsl");
-            auto vsSrc = readTextFile("tri.wgsl");
+            auto csSrc = readTextFile("assets/shaders/rotate.comp.wgsl");
+            auto vsSrc = readTextFile("assets/shaders/tri.wgsl");
             auto fsSrc = vsSrc;
 
             ShaderModuleDescriptor csMod{};
