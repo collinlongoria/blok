@@ -118,6 +118,8 @@ enum class Format : uint16_t {
     R8_UNORM,
     RG8_UNORM,
     RGBA8_UNORM,
+    BGRA8_UNORM,
+
     // SRGB
     BGRA8_UNORM_SRGB,
     RGBA8_UNORM_SRGB,
