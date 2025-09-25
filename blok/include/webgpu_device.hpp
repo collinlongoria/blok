@@ -96,6 +96,28 @@ namespace detail {
         return WGPUTextureFormat_Undefined;
     }
 
+    inline Format fromWGPU(WGPUTextureFormat f) {
+        switch (f) {
+        case WGPUTextureFormat_Undefined: return Format::UNKNOWN;
+        case WGPUTextureFormat_R8Unorm: return Format::R8_UNORM;
+        case WGPUTextureFormat_RG8Unorm: return Format::RG8_UNORM;
+        case WGPUTextureFormat_RGBA8Unorm: return Format::RGBA8_UNORM;
+        case WGPUTextureFormat_BGRA8UnormSrgb: return Format::BGRA8_UNORM_SRGB;
+        case WGPUTextureFormat_RGBA8UnormSrgb: return Format::RGBA8_UNORM_SRGB;
+        case WGPUTextureFormat_R8Uint: return Format::R8_UINT;
+        case WGPUTextureFormat_R16Uint: return Format::R16_UINT;
+        case WGPUTextureFormat_R32Uint: return Format::R32_UINT;
+        case WGPUTextureFormat_RGBA32Uint: return Format::RGBA32_UINT;
+        case WGPUTextureFormat_R16Float: return Format::R16_FLOAT;
+        case WGPUTextureFormat_R32Float: return Format::R32_FLOAT;
+        case WGPUTextureFormat_RGBA16Float: return Format::RGBA16_FLOAT;
+        case WGPUTextureFormat_RGBA32Float: return Format::RGBA32_FLOAT;
+        case WGPUTextureFormat_Depth24PlusStencil8: return Format::D24S8;
+        case WGPUTextureFormat_Depth32Float: return Format::D32_FLOAT;
+        default: return Format::UNKNOWN;
+        }
+    }
+
     inline WGPUTextureDimension toWGPU(ImageDimensions d) {
         switch (d) {
         case ImageDimensions::D1: return WGPUTextureDimension_1D;
@@ -183,6 +205,20 @@ namespace detail {
         if ((u & ImageUsage::COPYSOURCE) != ImageUsage{}) flags |= WGPUTextureUsage_CopySrc;
         if ((u & ImageUsage::COPYDESTINATION) != ImageUsage{}) flags |= WGPUTextureUsage_CopyDst;
         return flags;
+    }
+
+    inline WGPUBackendType toWGPU(RenderBackend b) {
+        switch (b) {
+        case RenderBackend::OpenGL: /* */ break;
+        case RenderBackend::CUDA: /* */ break;
+        case RenderBackend::WEBGPU_D3D12: return WGPUBackendType_D3D12;
+        case RenderBackend::WEBGPU_VULKAN: return WGPUBackendType_Vulkan;
+        }
+#if(_WIN32)
+        return WGPUBackendType_D3D12;
+#else
+        return WGPUBackendType_Vulkan;
+#endif
     }
 
     inline uint32_t bytesPerPixel(Format f) {
@@ -411,6 +447,7 @@ public:
     bool getQueryResults(QueryPoolHandle, uint32_t first, uint32_t count, std::span<uint64_t> outTimestampNs) override;
 
     [[nodiscard]] WGPUDevice deviceWGPU() const { return (m_device); }
+    [[nodiscard]] Format backbufferFormat() const { return m_backbufferFormat; }
 
 private:
     friend class WebGPUCommandList;
@@ -786,7 +823,9 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     // Adaptor
     WGPURequestAdapterOptions opts = WGPU_REQUEST_ADAPTER_OPTIONS_INIT;
     opts.compatibleSurface = m_surface;
-    opts.backendType = WGPUBackendType_D3D12;
+    opts.powerPreference = WGPUPowerPreference_HighPerformance; // not sure if this really makes a difference
+    // ^^ most likely calls functions like forcing discrete GPU on vulkan?
+    opts.backendType = detail::toWGPU(init.backend);
 
     struct AdapterCtx { WGPUAdapter adapter = nullptr; } actx;
     auto onAdapter = [](WGPURequestAdapterStatus status, WGPUAdapter adapter,
@@ -803,7 +842,7 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     aci.callback = onAdapter;
     aci.userdata1 = &actx;
 
-    // apparently MUST wait on EVERYTHING AHHHHHHHH
+    // Must wait on adapter and device creation
     WGPUFuture aFuture = wgpuInstanceRequestAdapter(m_instance, &opts, aci);
     WGPUFutureWaitInfo aWait = WGPU_FUTURE_WAIT_INFO_INIT;
     aWait.future = aFuture;
@@ -905,25 +944,10 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     wgpuSurfaceGetCapabilities(m_surface, m_adapter, &caps);
 
         // Texture Format
-    /*
+        // For now, I am hardsetting these
     WGPUTextureFormat format = WGPUTextureFormat_Undefined;
-    for (size_t i = 0; i < caps.formatCount; ++i) {
-        if (caps.formats[i] == WGPUTextureFormat_BGRA8UnormSrgb
-            || caps.formats[i] == WGPUTextureFormat_RGBA8UnormSrgb) {
-            format = caps.formats[i];
-            break;
-        }
-    }
-    if (format == WGPUTextureFormat_Undefined && caps.formatCount > 0) {
-        format = caps.formats[0];
-    }
-    */
-    WGPUTextureFormat format = detail::toWGPU(init.backBufferFormat);
-    if (format == WGPUTextureFormat_Undefined) {
-        // Get preferred, using first entry in capabilities
-        // TODO: this currently does not work
-        format = caps.formats[0];
-    }
+    if (init.backend == RenderBackend::WEBGPU_D3D12) format = WGPUTextureFormat_RGBA8Unorm;
+    else if (init.backend == RenderBackend::WEBGPU_VULKAN) format = WGPUTextureFormat_RGBA8UnormSrgb;
 
         // Present Mode (Queried from init)
     WGPUPresentMode present = detail::toWGPU(init.presentMode);
@@ -958,7 +982,7 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     m_deviceCapabilities.hasTimelineSemaphore = false;
     m_deviceCapabilities.hasExternalMemoryInterop = false;
 
-    m_backbufferFormat = init.backBufferFormat;
+    m_backbufferFormat = detail::fromWGPU(format);
     m_presentMode = init.presentMode;
     m_framebufferHeight = init.height; m_framebufferWidth = init.width;
 }

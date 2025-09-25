@@ -346,10 +346,12 @@ struct DeviceInitInfo {
     uint32_t width = 640, height = 480;
 
     // Presentation
-    Format backBufferFormat = Format::RGBA8_UNORM; // Can usually leave default?
+#if(_WIN32)
+    RenderBackend backend = RenderBackend::WEBGPU_D3D12;
+#else
+    RenderBackend backend = RenderBackend::WEBGPU_VULKAN;
+#endif
     PresentMode presentMode = PresentMode::VSYNC;
-
-    // TODO: Finish this as more information is needed
 };
 }
 

@@ -42,7 +42,7 @@ Window::Window(uint32_t width, uint32_t height, const std::string& name, RenderB
         glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
     }
-    else if (backend == RenderBackend::WebGPU) {
+    else if (backend == RenderBackend::WEBGPU_D3D12 || backend == RenderBackend::WEBGPU_VULKAN) {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     }
 

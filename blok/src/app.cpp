@@ -20,11 +20,15 @@
 #include <glad/glad.h>
 
 /* These includes are here so I can test build */
+#include <chrono>
+
 #include "gpu_device.hpp"
 #include "gpu_types.hpp"
 #include "gpu_flags.hpp"
 #include "gpu_handles.hpp"
 #include "webgpu_device.hpp"
+
+#include <windows.h>
 
 using namespace blok;
 
@@ -88,6 +92,8 @@ void App::run() {
 }
 
 void App::init() {
+
+
     m_window = std::make_shared<Window>(800, 600, "blok", m_backend);
 
     GLFWwindow* gw = m_window->getGLFWwindow();
@@ -109,13 +115,14 @@ void App::init() {
             m_cudaTracer->init();
             break;
 
-        case RenderBackend::WebGPU:
+        case RenderBackend::WEBGPU_D3D12:
+        case RenderBackend::WEBGPU_VULKAN:
         {
             DeviceInitInfo init{};
             init.width = static_cast<uint32_t>(m_window->getWidth());
             init.height = static_cast<uint32_t>(m_window->getHeight());
-            init.backBufferFormat = Format::RGBA8_UNORM;
-            init.presentMode = PresentMode::VSYNC;
+            init.presentMode = PresentMode::MAILBOX;
+            init.backend = m_backend;
             init.windowHandle = m_window.get();
 
             m_gpu = std::make_unique<WebGPUDevice>(init);
@@ -123,7 +130,7 @@ void App::init() {
             SwapchainDescriptor sd{};
             sd.width = init.width;
             sd.height = init.height;
-            sd.format = init.backBufferFormat;
+            sd.format = m_gpu->backbufferFormat();
             sd.presentMode = init.presentMode;
             auto swap = m_gpu->createSwapchain(sd);
 
@@ -220,7 +227,7 @@ void App::init() {
             gpd.cull = CullMode::NONE;
             gpd.depth = { .depthTest = false, .depthWrite = false };
             gpd.depthFormat = Format::UNKNOWN;
-            gpd.colorFormat = init.backBufferFormat;
+            gpd.colorFormat = m_gpu->backbufferFormat();
             gpd.blend = { .enable = true };
             gpd.vertexInputs = {
                 VertexAttributeDescriptor{
@@ -329,7 +336,8 @@ void App::update() {
             tex = 0;
             break;
 
-        case RenderBackend::WebGPU:
+        case RenderBackend::WEBGPU_D3D12:
+        case RenderBackend::WEBGPU_VULKAN:
             tex = 0;
             break;
     }
@@ -348,7 +356,7 @@ void App::shutdown() {
     if (m_rendererGL) { m_rendererGL->shutdown(); m_rendererGL.reset(); }
     if (m_cudaTracer) { m_cudaTracer->~CudaTracer(); m_cudaTracer.reset(); }
 
-    if (m_backend == RenderBackend::WebGPU) {
+    if (m_backend == RenderBackend::WEBGPU_D3D12 || m_backend == RenderBackend::WEBGPU_VULKAN) {
         m_gpu.reset();
         m_window.reset();
     }
