@@ -17,6 +17,10 @@
 #include "math.hpp"
 #include "gpu_flags.hpp"
 
+namespace blok {
+
+class Window;
+
 /*
  * Queues and Pipeline stages
  */
@@ -114,6 +118,10 @@ enum class Format : uint16_t {
     R8_UNORM,
     RG8_UNORM,
     RGBA8_UNORM,
+    // SRGB
+    BGRA8_UNORM_SRGB,
+    RGBA8_UNORM_SRGB,
+
     // Unsigned Integer
     R8_UINT,
     R16_UINT,
@@ -126,7 +134,9 @@ enum class Format : uint16_t {
     RGBA32_FLOAT,
     // Depth/Stencil
     D24S8,
-    D32_FLOAT
+    D32_FLOAT,
+    // Preferred Format (Allow the API to choose)
+    PREFERRED
 };
 
 enum class IndexType : uint8_t {
@@ -156,11 +166,12 @@ struct ImageViewDescriptor {
 
 struct SamplerDescriptor {
     enum class Filter { NEAREST, LINEAR };
+    enum class MipFilter { NEAREST, LINEAR }; // Strangely required by WebGPU, which separates the two
     enum class Address { REPEAT, CLAMP, MIRROR };
 
     Filter minFilter = Filter::LINEAR;
     Filter magFilter = Filter::LINEAR;
-    Filter mipFilter = Filter::LINEAR;
+    MipFilter mipFilter = MipFilter::LINEAR;
 
     Address addressU = Address::REPEAT;
     Address addressV = Address::REPEAT;
@@ -331,7 +342,7 @@ enum class PresentMode {
 
 struct DeviceInitInfo {
     // Window
-    void* windowHandle = nullptr;
+    Window* windowHandle = nullptr;
     uint32_t width = 640, height = 480;
 
     // Presentation
@@ -340,5 +351,6 @@ struct DeviceInitInfo {
 
     // TODO: Finish this as more information is needed
 };
+}
 
 #endif //BLOK_GPU_TYPES_HPP

@@ -16,11 +16,13 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include "backend.hpp"
+
 namespace blok {
 
 class Window {
 public:
-    Window(uint32_t width, uint32_t height, const std::string& name);
+    Window(uint32_t width, uint32_t height, const std::string& name, RenderBackend backend);
     ~Window();
 
     static void pollEvents();
@@ -42,6 +44,7 @@ private:
 
     uint32_t    m_width = 0, m_height = 0;
     std::string m_name;
+    RenderBackend m_backend;
     GLFWwindow* m_window = nullptr;
 };
 

@@ -21,8 +21,8 @@
 
 using namespace blok;
 
-Window::Window(uint32_t width, uint32_t height, const std::string& name)
-    : m_width(width), m_height(height), m_name(name), m_window(nullptr)
+Window::Window(uint32_t width, uint32_t height, const std::string& name, RenderBackend backend)
+    : m_width(width), m_height(height), m_name(name), m_window(nullptr), m_backend(backend)
 {
     static bool s_initialized = false;
     if (!s_initialized) {
@@ -32,13 +32,20 @@ Window::Window(uint32_t width, uint32_t height, const std::string& name)
         s_initialized = true;
     }
 
-    glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+    if (backend == RenderBackend::OpenGL || backend == RenderBackend::CUDA) {
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
+        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
+        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
+
 #ifdef __APPLE__
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
+        glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
+    }
+    else if (backend == RenderBackend::WebGPU) {
+        glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
+    }
+
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     m_window = glfwCreateWindow(static_cast<int>(m_width),
