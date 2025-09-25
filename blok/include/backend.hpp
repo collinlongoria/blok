@@ -10,7 +10,8 @@
 namespace blok {
 enum class RenderBackend {
     OpenGL,
-    WebGPU,
+    WEBGPU_VULKAN,
+    WEBGPU_D3D12, // windows only
     CUDA
 };
 

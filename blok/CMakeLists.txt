@@ -42,20 +42,20 @@ if (EXISTS "${TINT_EXE}")
             "${TINT_EXE}" $<TARGET_FILE_DIR:blok>)
 endif()
 
-# (Dawn also needs directX shader compiler - working on fixing this)
-# Collect all DLLs in external/directx
+
 file(GLOB DIRECTX_DLLS "${CMAKE_SOURCE_DIR}/external/directx/*.dll")
 
-# Copy them to the build directory
-foreach(dll ${DIRECTX_DLLS})
-    add_custom_command(
-            TARGET ${PROJECT_NAME} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            ${dll}
-            $<TARGET_FILE_DIR:${PROJECT_NAME}>
-    )
-endforeach()
-
+if(WIN32)
+    # Copy them to the build directory
+    foreach(dll ${DIRECTX_DLLS})
+        add_custom_command(
+                TARGET ${PROJECT_NAME} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${dll}
+                $<TARGET_FILE_DIR:${PROJECT_NAME}>
+        )
+    endforeach()
+endif()
 
 # ---- GLM ----
 add_library(glm INTERFACE)

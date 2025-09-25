@@ -1,5 +1,6 @@
 # ---- Dawn (WebGPU) ----
 set(DAWN_ROOT ${CMAKE_SOURCE_DIR}/external/dawn)
+set(DAWN_DEBUG=1)
 
 add_library(webgpu_dawn SHARED IMPORTED GLOBAL)
 set_target_properties(webgpu_dawn PROPERTIES
