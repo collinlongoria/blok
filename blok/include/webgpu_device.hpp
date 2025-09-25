@@ -79,6 +79,7 @@ namespace detail {
         case Format::R8_UNORM: return WGPUTextureFormat_R8Unorm;
         case Format::RG8_UNORM: return WGPUTextureFormat_RG8Unorm;
         case Format::RGBA8_UNORM: return WGPUTextureFormat_RGBA8Unorm;
+        case Format::BGRA8_UNORM: return WGPUTextureFormat_BGRA8Unorm;
         case Format::BGRA8_UNORM_SRGB: return WGPUTextureFormat_BGRA8UnormSrgb;
         case Format::RGBA8_UNORM_SRGB: return WGPUTextureFormat_RGBA8UnormSrgb;
         case Format::R8_UINT: return WGPUTextureFormat_R8Uint;
@@ -102,6 +103,7 @@ namespace detail {
         case WGPUTextureFormat_R8Unorm: return Format::R8_UNORM;
         case WGPUTextureFormat_RG8Unorm: return Format::RG8_UNORM;
         case WGPUTextureFormat_RGBA8Unorm: return Format::RGBA8_UNORM;
+        case WGPUTextureFormat_BGRA8Unorm: return Format::BGRA8_UNORM;
         case WGPUTextureFormat_BGRA8UnormSrgb: return Format::BGRA8_UNORM_SRGB;
         case WGPUTextureFormat_RGBA8UnormSrgb: return Format::RGBA8_UNORM_SRGB;
         case WGPUTextureFormat_R8Uint: return Format::R8_UINT;
@@ -115,6 +117,14 @@ namespace detail {
         case WGPUTextureFormat_Depth24PlusStencil8: return Format::D24S8;
         case WGPUTextureFormat_Depth32Float: return Format::D32_FLOAT;
         default: return Format::UNKNOWN;
+        }
+    }
+
+    inline Format toSRGB(Format f) {
+        switch (f) {
+        case Format::RGBA8_UNORM: return Format::RGBA8_UNORM_SRGB;
+        case Format::BGRA8_UNORM: return Format::BGRA8_UNORM_SRGB;
+        default: return f;
         }
     }
 
@@ -826,6 +836,8 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     opts.powerPreference = WGPUPowerPreference_HighPerformance; // not sure if this really makes a difference
     // ^^ most likely calls functions like forcing discrete GPU on vulkan?
     opts.backendType = detail::toWGPU(init.backend);
+    opts.forceFallbackAdapter = false;
+    opts.featureLevel = WGPUFeatureLevel_Core;
 
     struct AdapterCtx { WGPUAdapter adapter = nullptr; } actx;
     auto onAdapter = [](WGPURequestAdapterStatus status, WGPUAdapter adapter,
@@ -865,8 +877,6 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
         fprintf(stderr, "Adapter: %.*s | Backend=%d | Vendor=0x%X Device=0x%X\n",
             (int)info.description.length, info.description.data ? info.description.data : "",
             (int)info.backendType, info.vendorID, info.deviceID);
-    } else {
-        fprintf(stderr, "wgpuAdapterGetInfo failed\n");
     }
 */
     // Device
@@ -945,21 +955,27 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
 
         // Texture Format
         // For now, I am hardsetting these
-    WGPUTextureFormat format = WGPUTextureFormat_Undefined;
-    if (init.backend == RenderBackend::WEBGPU_D3D12) format = WGPUTextureFormat_RGBA8Unorm;
+    WGPUTextureFormat format = WGPUTextureFormat_RGBA8Unorm; // seems like a good default?
+    if (init.backend == RenderBackend::WEBGPU_D3D12) format = WGPUTextureFormat_BGRA8Unorm;
     else if (init.backend == RenderBackend::WEBGPU_VULKAN) format = WGPUTextureFormat_RGBA8UnormSrgb;
 
         // Present Mode (Queried from init)
     WGPUPresentMode present = detail::toWGPU(init.presentMode);
 
         // Alpha (just do opaque for now)
-    WGPUCompositeAlphaMode alpha = WGPUCompositeAlphaMode_Opaque;
+    WGPUCompositeAlphaMode alpha = WGPUCompositeAlphaMode_Opaque; // trying this isntead
+    // WGPUCompositeAlphaMode alpha = WGPUCompositeAlphaMode_Auto;
+    /*
     for (size_t i = 0; i < caps.alphaModeCount; ++i) {
         if (caps.alphaModes[i] == WGPUCompositeAlphaMode_Opaque) {
             alpha = caps.alphaModes[i];
             break;
         }
     }
+    */
+
+    // TODO: fix this line
+    WGPUTextureFormat viewFormats[] = { detail::toWGPU(detail::toSRGB(detail::fromWGPU(format))) };
 
     WGPUSurfaceConfiguration sc = WGPU_SURFACE_CONFIGURATION_INIT;
     sc.device = m_device;
@@ -969,6 +985,10 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     sc.alphaMode = alpha;
     sc.width = init.width;
     sc.height = init.height;
+    // try view formats to fix sRGB issues
+    sc.viewFormatCount = 1;
+    sc.viewFormats = viewFormats;
+
     wgpuSurfaceConfigure(m_surface, &sc);
     m_surfaceConfigured = true;
 
@@ -982,7 +1002,7 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     m_deviceCapabilities.hasTimelineSemaphore = false;
     m_deviceCapabilities.hasExternalMemoryInterop = false;
 
-    m_backbufferFormat = detail::fromWGPU(format);
+    m_backbufferFormat = detail::toSRGB(detail::fromWGPU(format));
     m_presentMode = init.presentMode;
     m_framebufferHeight = init.height; m_framebufferWidth = init.width;
 }
@@ -1369,7 +1389,8 @@ inline GraphicsPipelineHandle WebGPUDevice::createGraphicsPipeline(const Graphic
         bs.alpha.dstFactor = WGPUBlendFactor_OneMinusSrcAlpha;
     }
     WGPUColorTargetState cts = WGPU_COLOR_TARGET_STATE_INIT;
-    cts.format = detail::toWGPU(d.colorFormat);
+    // TODO; improve this
+    cts.format = detail::toWGPU(detail::toSRGB(d.colorFormat));
     if (d.blend.enable) cts.blend = &bs;
     cts.writeMask = WGPUColorWriteMask_All;
 
@@ -1511,6 +1532,11 @@ inline ImageViewHandle WebGPUDevice::acquireNextImage(SwapchainHandle h) {
 
     r->currentTexture = st.texture;
     WGPUTextureViewDescriptor vd = WGPU_TEXTURE_VIEW_DESCRIPTOR_INIT;
+
+    // TODO: pick the SRGB version of configured surface format (d3d12 fix)
+    WGPUTextureFormat srgbViewFormat = detail::toWGPU(detail::toSRGB(m_backbufferFormat));
+    vd.format = srgbViewFormat;
+    vd.aspect = WGPUTextureAspect_All;
     r->currentView = wgpuTextureCreateView(st.texture, &vd);
 
     ImageViewRecord rec{};
