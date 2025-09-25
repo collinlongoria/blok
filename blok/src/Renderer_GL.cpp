@@ -58,7 +58,7 @@ RendererGL::RendererGL(std::shared_ptr<Window> window)
 
 RendererGL::~RendererGL() { if (active) { shutdown(); } }
 
-void RendererGL::setTexture(unsigned int tex, unsigned int w, unsigned int h) {
+void RendererGL::setTexture(unsigned int tex, unsigned int w, unsigned int h) { 
     m_tex = tex; m_texW = static_cast<int>(w); m_texH = static_cast<int>(h);
 }
 
@@ -162,6 +162,7 @@ void RendererGL::drawFrame() {
     //glClear(GL_COLOR_BUFFER_BIT);
 
     if (m_tex != 0) {
+        /*
         glUseProgram(m_prog);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, m_tex);
@@ -174,8 +175,14 @@ void RendererGL::drawFrame() {
 
         glBindTexture(GL_TEXTURE_2D, 0);
         glUseProgram(0);
-    }
+        */
 
+        ImGui::Begin("UI Window");
+        ImGui::Text("Where UI stuff get's rendered:");
+        ImGui::Image((ImTextureID)(intptr_t)m_tex, ImVec2((float)m_texW, (float)m_texH));
+        ImGui::End();
+        
+    }
 }
 
 void RendererGL::destroyFullScreenQuad() {
