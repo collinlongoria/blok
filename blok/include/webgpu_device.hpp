@@ -9,7 +9,6 @@
 #ifndef BLOK_WEBGPU_DEVICE_HPP
 #define BLOK_WEBGPU_DEVICE_HPP
 
-#include <GLFW/glfw3.h>
 #include <glfw3webgpu.h>
 #include <thread>
 #include <webgpu.h>
@@ -17,8 +16,6 @@
 #include "gpu_device.hpp"
 #include "gpu_types.hpp"
 #include "gpu_handles.hpp"
-#include "gpu_types.hpp"
-#include "gpu_types.hpp"
 
 namespace blok {
 // For printing WGPUStringView (which may not be null terminated, as I learned)
