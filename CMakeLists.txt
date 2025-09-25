@@ -32,3 +32,6 @@ set_target_properties(blok PROPERTIES
   CXX_EXTENSIONS OFF
   COMPILE_WARNING_AS_ERROR ON
 )
+
+
+

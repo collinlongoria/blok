@@ -342,14 +342,23 @@ void App::update() {
             break;
     }
 
+
+    if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA) {
+        m_rendererGL->beginFrame();
+    }
+
     if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA) {
         dynamic_cast<RendererGL*>(m_rendererGL.get())->setTexture(tex, m_window->getWidth(), m_window->getHeight());
         m_rendererGL->drawFrame();
     }
 
     // TODO: Ideally this is happening in renderer interface
-    if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA)
-        glfwSwapBuffers(m_window->getGLFWwindow());
+    //if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA)
+        //glfwSwapBuffers(m_window->getGLFWwindow());
+
+    if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA) {
+        m_rendererGL->endFrame();
+    }
 }
 
 void App::shutdown() {

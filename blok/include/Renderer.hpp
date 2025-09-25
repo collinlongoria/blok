@@ -15,7 +15,9 @@ namespace blok {
     public:
         virtual ~IRenderer() = default;
         virtual void init() = 0;
+        virtual void beginFrame() = 0;
         virtual void drawFrame() = 0;
+        virtual void endFrame() = 0;
         virtual void shutdown() = 0;
     };
 

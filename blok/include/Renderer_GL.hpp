@@ -14,16 +14,12 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
+#include "Renderer.hpp"
+
+
 namespace blok {
 
 class Window;
-class IRenderer {
-public:
-    virtual ~IRenderer() = default;
-    virtual void init() = 0;
-    virtual void drawFrame() = 0;
-    virtual void shutdown() = 0;
-};
 
 class RendererGL : public IRenderer {
 public:
@@ -35,6 +31,9 @@ public:
     void shutdown() override;
 
     void setTexture(unsigned int tex, unsigned int w, unsigned int h);
+
+    void beginFrame() override;
+    void endFrame() override;
 
 private:
     std::shared_ptr<Window> m_window;
@@ -49,6 +48,8 @@ private:
 
     void createFullScreenQuad();
     void destroyFullScreenQuad();
+
+    bool active = false;
 };
 
 } // namespace blok
