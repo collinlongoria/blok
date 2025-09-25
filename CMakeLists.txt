@@ -5,6 +5,9 @@ project(
   LANGUAGES C CXX
 )
 
+set(CMAKE_SYSTEM_VERSION 10.0.22621.0)
+set(CMAKE_WINDOWS_KIT_VERSION 10.0.22621.0)
+
 # ---- Output dirs ------------------------------------------------------------
 set(OUT_BIN ${CMAKE_SOURCE_DIR}/build/$<CONFIG>/bin)
 set(OUT_LIB ${CMAKE_SOURCE_DIR}/build/$<CONFIG>/lib)
@@ -32,3 +35,5 @@ set_target_properties(blok PROPERTIES
   CXX_EXTENSIONS OFF
   COMPILE_WARNING_AS_ERROR ON
 )
+
+

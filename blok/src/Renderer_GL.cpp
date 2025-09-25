@@ -17,6 +17,11 @@
 #include <stdexcept>
 #include <string>
 
+//imgui
+#include <imgui.h>
+#include "backends/imgui_impl_glfw.h"   
+#include "backends/imgui_impl_opengl3.h"
+
 using namespace blok;
 
 static GLuint compileShader(GLenum type, const char* src) {
@@ -51,10 +56,30 @@ static GLuint linkProgram(GLuint vs, GLuint fs) {
 RendererGL::RendererGL(std::shared_ptr<Window> window)
     : m_window(std::move(window)) {}
 
-RendererGL::~RendererGL() { shutdown(); }
+RendererGL::~RendererGL() { if (active) { shutdown(); } }
 
 void RendererGL::setTexture(unsigned int tex, unsigned int w, unsigned int h) {
     m_tex = tex; m_texW = static_cast<int>(w); m_texH = static_cast<int>(h);
+}
+
+void RendererGL::beginFrame()
+{
+    //imgui
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+
+    glClear(GL_COLOR_BUFFER_BIT);
+}
+
+void RendererGL::endFrame()
+{
+    //imgui
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    glfwSwapBuffers(m_window->getGLFWwindow());
+
+    
 }
 
 void RendererGL::init() {
@@ -84,8 +109,21 @@ void RendererGL::init() {
 
     createFullScreenQuad();
 
+
+    //imgui
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO(); (void)io;
+    ImGui::StyleColorsDark();
+    ImGui_ImplGlfw_InitForOpenGL(m_window->getGLFWwindow(), true);
+    ImGui_ImplOpenGL3_Init("#version 330");
+
+
+
     glViewport(0, 0, m_window->getWidth(), m_window->getHeight());
     glClearColor(0.1f, 0.1f, 0.25f, 1.0f);
+
+    active = true;
 }
 
 void RendererGL::createFullScreenQuad() {
@@ -121,7 +159,7 @@ void RendererGL::createFullScreenQuad() {
 }
 
 void RendererGL::drawFrame() {
-    glClear(GL_COLOR_BUFFER_BIT);
+    //glClear(GL_COLOR_BUFFER_BIT);
 
     if (m_tex != 0) {
         glUseProgram(m_prog);
@@ -137,6 +175,7 @@ void RendererGL::drawFrame() {
         glBindTexture(GL_TEXTURE_2D, 0);
         glUseProgram(0);
     }
+
 }
 
 void RendererGL::destroyFullScreenQuad() {
@@ -146,6 +185,15 @@ void RendererGL::destroyFullScreenQuad() {
 }
 
 void RendererGL::shutdown() {
+
+    //imgui
+    ImGui_ImplOpenGL3_Shutdown(); 
+    ImGui_ImplGlfw_Shutdown(); 
+    ImGui::DestroyContext();
+
     destroyFullScreenQuad();
     if (m_prog) { glDeleteProgram(m_prog); m_prog = 0;}
-    }
+
+    
+    active = false;
+}

@@ -130,7 +130,7 @@ void App::init() {
             SwapchainDescriptor sd{};
             sd.width = init.width;
             sd.height = init.height;
-            sd.format = Format::RGBA8_UNORM_SRGB;//m_gpu->backbufferFormat();
+            sd.format = m_gpu->backbufferFormat();//Format::RGBA8_UNORM_SRGB;//m_gpu->backbufferFormat();
             sd.presentMode = init.presentMode;
             auto swap = m_gpu->createSwapchain(sd);
 
@@ -227,7 +227,7 @@ void App::init() {
             gpd.cull = CullMode::NONE;
             gpd.depth = { .depthTest = false, .depthWrite = false };
             gpd.depthFormat = Format::UNKNOWN;
-            gpd.colorFormat = Format::RGBA8_UNORM_SRGB;//m_gpu->backbufferFormat();
+            gpd.colorFormat = m_gpu->backbufferFormat();//Format::RGBA8_UNORM_SRGB;//m_gpu->backbufferFormat();
             gpd.blend = { .enable = true };
             gpd.vertexInputs = {
                 VertexAttributeDescriptor{
@@ -342,14 +342,23 @@ void App::update() {
             break;
     }
 
+
+    if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA) {
+        m_rendererGL->beginFrame();
+    }
+
     if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA) {
         dynamic_cast<RendererGL*>(m_rendererGL.get())->setTexture(tex, m_window->getWidth(), m_window->getHeight());
         m_rendererGL->drawFrame();
     }
 
     // TODO: Ideally this is happening in renderer interface
-    if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA)
-        glfwSwapBuffers(m_window->getGLFWwindow());
+    //if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA)
+        //glfwSwapBuffers(m_window->getGLFWwindow());
+
+    if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA) {
+        m_rendererGL->endFrame();
+    }
 }
 
 void App::shutdown() {
