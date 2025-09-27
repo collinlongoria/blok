@@ -1,7 +1,7 @@
 #ifndef RENDERER_WGPU_HPP
 #define RENDERER_WGPU_HPP
 
-#include "Renderer.hpp"
+#include "renderer.hpp"
 #include "window.hpp"
 #include <memory>
 

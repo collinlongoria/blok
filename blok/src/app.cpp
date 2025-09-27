@@ -58,6 +58,16 @@ static std::vector<VertexP4C4> makeInitialVerts() {
     tri( 0.6f, 0.0f, 0.3f, 0.3f, 1.0f);
     return v;
 }
+static std::vector<VertexP4C4> makeBackground(){
+    std::vector<VertexP4C4> v;
+    v.push_back({0,0,0,0,1,0,0,1});
+    v.push_back({0.5,0,0,0,0,1,0,1});
+    v.push_back({0,0.5,0,0,0,0,1,1});
+    v.push_back({0.5,0,0,0,0,1,0,1});
+    v.push_back({0.5,0.5,0,0,1,0,0,0});
+    v.push_back({0,0.5,0,0,0,0,1,1});
+    return v;
+}
 
 // Read a whole text file (WGSL) into bytes
 static std::vector<uint8_t> readTextFile(const char* path) {
@@ -142,6 +152,14 @@ void App::init() {
             vbDesc.usage = BufferUsage::VERTEX | BufferUsage::STORAGE | BufferUsage::COPYDESTINATION;
             auto vbuf = m_gpu->createBuffer(vbDesc, nullptr);
             m_gpu->updateBuffer(vbuf, 0, vbDesc.size, verts.data());
+
+            auto verts2 = makeBackground();
+            const uint32_t VERT_COUNT2 = static_cast<uint32_t>(verts2.size());
+            BufferDescriptor vbDesc2{};
+            vbDesc2.size = sizeof(VertexP4C4) * verts2.size();
+            vbDesc2.usage = BufferUsage::VERTEX | BufferUsage::COPYDESTINATION;
+            auto vbuf2 = m_gpu->createBuffer(vbDesc2, nullptr);
+            m_gpu->updateBuffer(vbuf2, 0, vbDesc2.size, verts2.data());
 
             BufferDescriptor ubDesc{};
             ubDesc.size = sizeof(Uniforms);
@@ -290,7 +308,10 @@ void App::init() {
                 clRender->beginRenderPass(rp);
                 clRender->bindGraphicsPipeline(gpipe);
                 std::vector<BufferHandle> vbs = { vbuf };
+                std::vector<BufferHandle> vbs2 = { vbuf2 };
                 std::vector<size_t> offsets = { 0 };
+                clRender->bindVertexBuffers(0, vbs2, offsets);
+                clRender->draw(VERT_COUNT2, 1, 0, 0);
                 clRender->bindVertexBuffers(0, vbs, offsets);
                 clRender->draw(VERT_COUNT, 1, 0, 0);
                 clRender->endRenderPass();

@@ -1,4 +1,4 @@
-#include "Renderer_WGPU.hpp"
+#include "webgpu_renderer.hpp"
 #include <iostream>
 
 using namespace blok;

@@ -14,7 +14,7 @@
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include "Renderer.hpp"
+#include "renderer.hpp"
 
 
 namespace blok {
