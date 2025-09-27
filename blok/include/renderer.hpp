@@ -9,6 +9,7 @@
 #ifndef RENDERER_HPP
 #define RENDERER_HPP
 
+#include <array>
 #include <cstdint>
 #include <span>
 
@@ -149,7 +150,7 @@ struct KernelId { uint64_t id{0}; explicit operator bool() const { return id!=0;
 struct TextureId { uint64_t id{0}; explicit operator bool() const { return id!=0; } };
 
 /*
- * Frame and Render/Compute passes
+ * Frame and Render passes
  */
 class RenderPass;
 
@@ -163,6 +164,10 @@ public:
 
     // Graphics
     RenderPass renderToBackbuffer(const ClearColor& clear = {});
+
+    // Present
+    void end();
+
 private:
     friend class Renderer;
     explicit Frame(class Renderer* R) : m_renderer(R) {}
@@ -170,6 +175,65 @@ private:
     bool m_ok = false;
 };
 
+class RenderPass {
+public:
+    RenderPass() = default;
+    void draw(MeshId mesh, MaterialId mat, uint32_t instances = 1);
+    void end();
+private:
+    friend class Renderer;
+    explicit RenderPass(class Renderer* R) : m_renderer(R) {}
+    class Renderer* m_renderer = nullptr;
+};
+
+/*
+ * Renderer
+ */
+class Renderer {
+public:
+    static std::unique_ptr<Renderer> create(const RendererInit& init);
+
+    virtual ~Renderer() = default;
+
+    // Per-frame
+    virtual Frame beginFrame() = 0;
+
+    // Resources
+    struct MeshData { std::span<const std::byte> bytes; uint32_t vertexCount; };
+    virtual MeshId createMesh(MeshData data, const VertexLayout& layout) = 0;
+    virtual TextureId createTexture2D(const TextureDesc&, std::span<const std::byte> pixels) = 0;
+    virtual MaterialId createMaterial(const GraphicsShaderBytes& shaders, const VertexLayout& layout) = 0;
+    virtual KernelId createKernel(const ComputeShaderBytes& shaders) = 0;
+
+protected:
+    Renderer() = default;
+
+
+    virtual void _dispatch(KernelId, const std::array<uint32_t,3>&) = 0;
+    virtual RenderPass _beginBackbufferPass(const ClearColor&) = 0;
+    virtual void _passDraw(RenderPass&, MeshId, MaterialId, uint32_t) = 0;
+    virtual void _passEnd(RenderPass&) = 0;
+    virtual void _frameEnd() = 0; // submit + present + per-frame cleanup
+
+    // Allow Frame/RenderPass to call the hooks
+    friend class Frame;
+    friend class RenderPass;
+};
+
+// ----------------------------- Inline glue for Frame/Pass -----------------------------
+inline void Frame::dispatch(KernelId kernel, std::array<uint32_t,3> groups) {
+    if (m_renderer) m_renderer->_dispatch(kernel, groups);
+}
+inline RenderPass Frame::renderToBackbuffer(const ClearColor& clear) {
+    return m_renderer ? m_renderer->_beginBackbufferPass(clear) : RenderPass{};
+}
+inline void Frame::end() { if (m_renderer) m_renderer->_frameEnd(); m_ok = false; }
+
+
+inline void RenderPass::draw(MeshId mesh, MaterialId mat, uint32_t instances) {
+    if (m_renderer) m_renderer->_passDraw(*this, mesh, mat, instances);
+}
+inline void RenderPass::end() { if (m_renderer) m_renderer->_passEnd(*this); }
 } // namespace blok
 
 #endif // RENDERER_HPP
