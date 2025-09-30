@@ -454,7 +454,6 @@ public:
     bool getQueryResults(QueryPoolHandle, uint32_t first, uint32_t count, std::span<uint64_t> outTimestampNs) override;
 
     [[nodiscard]] WGPUDevice deviceWGPU() const { return (m_device); }
-    [[nodiscard]] Format backbufferFormat() const { return m_backbufferFormat; }
 
 private:
     friend class WebGPUCommandList;
@@ -465,7 +464,6 @@ private:
     WGPUQueue m_queue{};
     WGPUSurface m_surface{}; bool m_surfaceConfigured = false;
 
-    Format m_backbufferFormat = Format::RGBA8_UNORM;
     PresentMode m_presentMode = PresentMode::VSYNC;
     uint32_t m_framebufferWidth = 0, m_framebufferHeight = 0;
 

@@ -363,7 +363,6 @@ void App::update() {
             break;
     }
 
-
     if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA) {
         m_rendererGL->beginFrame();
     }
