@@ -1,0 +1,86 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\src\Renderer_GL.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\src\Renderer_WGPU.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\src\app.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\src\camera.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\src\main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\src\window.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\Cuda_Tracer.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\Renderer.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\Renderer_GL.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\Renderer_WGPU.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\app.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\backend.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\camera.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\gpu_device.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\gpu_flags.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\gpu_handles.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\gpu_types.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\math.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\scene.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\webgpu_device.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\include\window.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CudaCompile Include="..\..\blok\src\Cuda_Tracer.cu">
+      <Filter>Source Files</Filter>
+    </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\blok\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{2A5BDCF4-95F0-3E57-8F67-71C1BEE67F55}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4D1D37FF-0D99-3720-A7DE-077D8E3ED2B2}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

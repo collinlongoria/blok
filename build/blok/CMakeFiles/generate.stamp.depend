@@ -1,0 +1,19 @@
+# CMake generation dependency list for this directory.
+C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeCUDAInformation.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/CMakeCommonLanguageInclude.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Compiler/CMakeCommonCompilerMacros.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Compiler/NVIDIA-CUDA.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Compiler/NVIDIA.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/FindCUDAToolkit.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/FindOpenGL.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageHandleStandardArgs.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageMessage.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Internal/CMakeCUDALinkerInformation.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Internal/CMakeCommonLinkerInformation.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Platform/Linker/Windows-MSVC-CUDA.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Platform/Linker/Windows-MSVC.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Platform/Windows-MSVC.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/Platform/Windows-NVIDIA-CUDA.cmake
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/blok/CMakeLists.txt
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/CMakeFiles/3.31.0/CMakeCUDACompiler.cmake
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/CMakeFiles/cmake.verify_globs
