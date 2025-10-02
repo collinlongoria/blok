@@ -1,0 +1,13 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CustomBuild Include="C:\Users\rares\Documents\Fall2025\GAM400\BlokRepo\blok\build\CMakeFiles\01241ba67807025a59d61ef24e72edd8\INSTALL_force.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{79500CE4-9C4F-37BB-A675-7A986942A9BD}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

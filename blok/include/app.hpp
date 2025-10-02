@@ -16,7 +16,7 @@
 namespace blok {
 
 class Window;
-class IRenderer;  
+class RendererGL;  
 class CudaTracer;
 class WebGPUDevice;
 
@@ -35,7 +35,7 @@ private:
     RenderBackend m_backend;
 
     std::shared_ptr<Window>  m_window;
-    std::unique_ptr<IRenderer> m_rendererGL;
+    std::unique_ptr<RendererGL> m_rendererGL;
     std::unique_ptr<CudaTracer> m_cudaTracer;
     std::unique_ptr<WebGPUDevice> m_gpu;
 };

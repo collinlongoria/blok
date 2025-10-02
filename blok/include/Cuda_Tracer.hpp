@@ -6,39 +6,44 @@
 *
 * Description: Raytracing core
 */
-#pragma once
+#ifndef RENDERER_CUDA_HPP
+#define RENDERER_CUDA_HPP
 
+#include "Renderer.hpp"
 #include <cstdint>
-
-// Forward declaration only
-struct cudaGraphicsResource;
+#include <memory>
 
 namespace blok {
 
-    class CudaTracer {
-    public:
-        CudaTracer(unsigned int width, unsigned int height);
-        ~CudaTracer();
+class Window;
+class RendererGL;
 
-        void init();
+class CudaTracer : public IRenderer {
+public:
+    CudaTracer(unsigned int width, unsigned int height);
+    ~CudaTracer() override;
 
-        void render();
+    void init() override;
+    void drawFrame(const Camera& cam, const Scene& scene) override;
+    void shutdown() override;
+    void beginFrame() override;
+    void endFrame() override;
 
-        // GL texture that contains the CUDA output
-        unsigned int getGLTex() const { return m_glTex; }
+    unsigned int getGLTex() const { return m_glTex; }
 
-    private:
-        void cleanup();
+private:
+    void cleanup();
 
-        unsigned int m_width = 0;
-        unsigned int m_height = 0;
+    unsigned int m_width = 0;
+    unsigned int m_height = 0;
 
-        // OpenGL objects
-        unsigned int m_pbo = 0;   
-        unsigned int m_glTex = 0; 
+    unsigned int m_pbo = 0;   
+    unsigned int m_glTex = 0; 
 
-        // CUDA handle for the PBO
-        cudaGraphicsResource* m_cudaPBO = nullptr;
-    };
+    struct cudaGraphicsResource* m_cudaPBO = nullptr;
+
+    std::shared_ptr<Window> m_window;
+};
 
 } // namespace blok
+#endif

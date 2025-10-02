@@ -31,6 +31,28 @@
 #include <windows.h>
 
 using namespace blok;
+static Camera g_camera;
+static Scene  g_scene;
+static float lastX = 400.0f;
+static float lastY = 300.0f;
+static bool firstMouse = true;
+
+// ---------------- Input Callbacks ----------------
+void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+    if (firstMouse) {
+        lastX = (float)xpos;
+        lastY = (float)ypos;
+        firstMouse = false;
+    }
+
+    float dx = (float)xpos - lastX;
+    float dy = lastY - (float)ypos;
+    lastX = (float)xpos;
+    lastY = (float)ypos;
+
+    g_camera.processMouse(dx, dy);
+}
+
 
 // WebGPU Test Helpers
 struct alignas(16) Uniforms {
@@ -74,6 +96,8 @@ static std::vector<uint8_t> readTextFile(const char* path) {
 }
 // WebGPU Test Helpers
 
+namespace blok {
+
 App::App(RenderBackend backend)
     : m_backend(backend) {}
 
@@ -104,6 +128,8 @@ void App::init() {
         }
         m_rendererGL = std::make_unique<RendererGL>(m_window);
         m_rendererGL->init();
+        glfwSetCursorPosCallback(gw, mouse_callback);
+        glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
 
     switch (m_backend) {
@@ -324,40 +350,40 @@ void App::init() {
 void App::update() {
     Window::pollEvents();
 
-    unsigned int tex = 0;
+    static double lastFrame = glfwGetTime();
+    double now = glfwGetTime();
+    float dt = static_cast<float>(now - lastFrame);
+    lastFrame = now;
+
+    GLFWwindow* win = m_window->getGLFWwindow();
+    if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS) g_camera.processKeyboard('W', dt);
+    if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) g_camera.processKeyboard('S', dt);
+    if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) g_camera.processKeyboard('A', dt);
+    if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) g_camera.processKeyboard('D', dt);
+
 
     switch (m_backend) {
         case RenderBackend::CUDA:
-            m_cudaTracer->render();
-            tex = m_cudaTracer->getGLTex();
+            // ImGui + present path (one swap inside endFrame)
+            m_cudaTracer->drawFrame(g_camera, g_scene);
+            m_rendererGL->beginFrame();
+            m_rendererGL->setTexture(m_cudaTracer->getGLTex(),
+                                    m_window->getWidth(),
+                                    m_window->getHeight());
+            m_rendererGL->drawFrame(g_camera, g_scene);
+            m_rendererGL->endFrame();
             break;
 
         case RenderBackend::OpenGL:
-            tex = 0;
+            // ImGui + present path (one swap inside endFrame)
+            m_rendererGL->beginFrame();
+            m_rendererGL->drawFrame(g_camera, g_scene);
+            m_rendererGL->endFrame();
             break;
 
         case RenderBackend::WEBGPU_D3D12:
         case RenderBackend::WEBGPU_VULKAN:
-            tex = 0;
             break;
-    }
-
-
-    if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA) {
-        m_rendererGL->beginFrame();
-    }
-
-    if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA) {
-        dynamic_cast<RendererGL*>(m_rendererGL.get())->setTexture(tex, m_window->getWidth(), m_window->getHeight());
-        m_rendererGL->drawFrame();
-    }
-
-    // TODO: Ideally this is happening in renderer interface
-    //if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA)
-        //glfwSwapBuffers(m_window->getGLFWwindow());
-
-    if (m_backend == RenderBackend::OpenGL || m_backend == RenderBackend::CUDA) {
-        m_rendererGL->endFrame();
     }
 }
 
@@ -370,3 +396,5 @@ void App::shutdown() {
         m_window.reset();
     }
 }
+
+} // namespace blok

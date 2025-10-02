@@ -10,8 +10,9 @@ void RendererWGPU::init() {
     std::cout << "[WebGPU] init stub\n";
 }
 
-void RendererWGPU::drawFrame() {
-    std::cout << "[WebGPU] drawFrame stub\n";
+void RendererWGPU::drawFrame(const Camera& cam, const Scene& scene) {
+    (void)cam;   // unused for now
+    (void)scene; // unused for now
 }
 
 void RendererWGPU::shutdown() {

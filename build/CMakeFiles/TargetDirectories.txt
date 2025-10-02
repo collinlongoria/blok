@@ -1,0 +1,17 @@
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/CMakeFiles/INSTALL.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/CMakeFiles/ALL_BUILD.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/CMakeFiles/ZERO_CHECK.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/external/glfw/CMakeFiles/uninstall.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/external/glfw/CMakeFiles/INSTALL.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/external/glfw/CMakeFiles/ALL_BUILD.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/external/glfw/src/CMakeFiles/glfw.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/external/glfw/src/CMakeFiles/update_mappings.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/external/glfw/src/CMakeFiles/INSTALL.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/external/glfw/docs/CMakeFiles/INSTALL.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/external/dawn/CMakeFiles/INSTALL.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/external/dawn/glfw3webgpu/CMakeFiles/glfw3webgpu.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/external/dawn/glfw3webgpu/CMakeFiles/INSTALL.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/blok/CMakeFiles/blok.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/blok/CMakeFiles/glad.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/blok/CMakeFiles/imgui.dir
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/blok/CMakeFiles/INSTALL.dir

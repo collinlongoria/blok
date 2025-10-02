@@ -1,0 +1,6 @@
+# CMake generation dependency list for this directory.
+C:/Program Files/CMake/share/cmake-3.31/Modules/FindDoxygen.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageHandleStandardArgs.cmake
+C:/Program Files/CMake/share/cmake-3.31/Modules/FindPackageMessage.cmake
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/build/CMakeFiles/cmake.verify_globs
+C:/Users/rares/Documents/Fall2025/GAM400/BlokRepo/blok/external/glfw/docs/CMakeLists.txt

@@ -27,6 +27,8 @@ set_target_properties(blok PROPERTIES
 target_include_directories(blok PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(blok PRIVATE ${CUDAToolkit_LIBRARIES})
 
+target_compile_options(blok PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
+
 # ---- WebGPU (dawn) ---
 target_link_libraries(blok PRIVATE glfw3webgpu)
 
