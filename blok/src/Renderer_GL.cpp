@@ -6,9 +6,10 @@
 * Description: GL quad and shader setup
 */
 
-
 #include "Renderer_GL.hpp"
 #include "window.hpp"
+#include "camera.hpp"
+#include "scene.hpp"
 
 #define GLFW_INCLUDE_NONE
 #include <glad/glad.h>
@@ -19,7 +20,7 @@
 
 //imgui
 #include <imgui.h>
-#include "backends/imgui_impl_glfw.h"   
+#include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 
 using namespace blok;
@@ -58,28 +59,21 @@ RendererGL::RendererGL(std::shared_ptr<Window> window)
 
 RendererGL::~RendererGL() { if (active) { shutdown(); } }
 
-void RendererGL::setTexture(unsigned int tex, unsigned int w, unsigned int h) { 
+void RendererGL::setTexture(unsigned int tex, unsigned int w, unsigned int h) {
     m_tex = tex; m_texW = static_cast<int>(w); m_texH = static_cast<int>(h);
 }
 
-void RendererGL::beginFrame()
-{
-    //imgui
+void RendererGL::beginFrame() {
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
-
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
-void RendererGL::endFrame()
-{
-    //imgui
+void RendererGL::endFrame() {
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
     glfwSwapBuffers(m_window->getGLFWwindow());
-
-    
 }
 
 void RendererGL::init() {
@@ -109,16 +103,12 @@ void RendererGL::init() {
 
     createFullScreenQuad();
 
-
-    //imgui
+    // imgui
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
-    ImGuiIO& io = ImGui::GetIO(); (void)io;
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(m_window->getGLFWwindow(), true);
     ImGui_ImplOpenGL3_Init("#version 330");
-
-
 
     glViewport(0, 0, m_window->getWidth(), m_window->getHeight());
     glClearColor(0.1f, 0.1f, 0.25f, 1.0f);
@@ -158,11 +148,9 @@ void RendererGL::createFullScreenQuad() {
     glBindVertexArray(0);
 }
 
-void RendererGL::drawFrame() {
-    //glClear(GL_COLOR_BUFFER_BIT);
-
+void RendererGL::drawFrame(const Camera& /*cam*/, const Scene& /*scene*/) {
+    /*
     if (m_tex != 0) {
-        /*
         glUseProgram(m_prog);
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, m_tex);
@@ -175,13 +163,14 @@ void RendererGL::drawFrame() {
 
         glBindTexture(GL_TEXTURE_2D, 0);
         glUseProgram(0);
-        */
+    }
+    */
 
-        ImGui::Begin("UI Window");
-        ImGui::Text("Where UI stuff get's rendered:");
+    if (m_tex != 0) {
+        ImGui::Begin("CUDA Output");
+        ImGui::Text("Displaying raytraced texture:");
         ImGui::Image((ImTextureID)(intptr_t)m_tex, ImVec2((float)m_texW, (float)m_texH));
         ImGui::End();
-        
     }
 }
 
@@ -192,15 +181,10 @@ void RendererGL::destroyFullScreenQuad() {
 }
 
 void RendererGL::shutdown() {
-
-    //imgui
-    ImGui_ImplOpenGL3_Shutdown(); 
-    ImGui_ImplGlfw_Shutdown(); 
+    ImGui_ImplOpenGL3_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
 
     destroyFullScreenQuad();
-    if (m_prog) { glDeleteProgram(m_prog); m_prog = 0;}
-
-    
-    active = false;
+    if (m_prog) { glDeleteProgram(m_prog); m_prog = 0; }
 }
