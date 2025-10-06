@@ -82,12 +82,12 @@ static std::vector<VertexP4C4> makeInitialVerts() {
 }
 static std::vector<VertexP4C4> makeBackground(){
     std::vector<VertexP4C4> v;
-    v.push_back({0,0,0,0,1,0,0,1});
-    v.push_back({0.5,0,0,0,0,1,0,1});
-    v.push_back({0,0.5,0,0,0,0,1,1});
-    v.push_back({0.5,0,0,0,0,1,0,1});
-    v.push_back({0.5,0.5,0,0,1,0,0,0});
-    v.push_back({0,0.5,0,0,0,0,1,1});
+    v.push_back({-1,1,0,0,1,0,0,1});
+    v.push_back({1,1,0,0,0,1,0,1});
+    v.push_back({-1,-1,0,0,0,0,1,1});
+    v.push_back({-1,-1,0,0,0,0,1,1});
+    v.push_back({1,1,0,0,0,1,0,0});
+    v.push_back({1,-1,0,0,0,1,0,1});
     return v;
 }
 

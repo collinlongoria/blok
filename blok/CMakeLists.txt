@@ -105,6 +105,9 @@ target_include_directories(blok PUBLIC
 target_compile_definitions(imgui PRIVATE IMGUI_IMPL_OPENGL_LOADER_GLAD)
 target_link_libraries(blok PRIVATE imgui)
 
+# ---- Shader Pipeline ----
+target_link_libraries(blok PRIVATE shaderpipe)
+
 # ---- Assets (Shaders, Textures, etc.) ------------------------------------------------
 add_custom_command(
         TARGET ${PROJECT_NAME} POST_BUILD
