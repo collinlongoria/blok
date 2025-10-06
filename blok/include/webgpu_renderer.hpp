@@ -13,7 +13,7 @@ namespace blok {
         ~RendererWGPU() override;
 
         void init() override;
-        void drawFrame() override;
+        void drawFrame(const Camera& cam, const Scene& scene) override;
         void shutdown() override;
 
     private:

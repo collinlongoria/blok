@@ -10,16 +10,18 @@
 #define RENDERER_GL_HPP
 #include <memory>
 #include <cstdint>
-
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 
-#include "renderer.hpp"
+
+#include "Renderer.hpp"
 
 
 namespace blok {
 
 class Window;
+class Camera;
+struct Scene;
 
 class RendererGL : public IRenderer {
 public:
@@ -27,9 +29,10 @@ public:
     ~RendererGL() override;
 
     void init() override;
-    void drawFrame() override;
+    void drawFrame(const Camera& cam, const Scene& scene) override;
     void shutdown() override;
 
+    // external (e.g. CUDA) provides texture to display
     void setTexture(unsigned int tex, unsigned int w, unsigned int h);
 
     void beginFrame() override;
