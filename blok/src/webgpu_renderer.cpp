@@ -35,7 +35,7 @@ void main(){
     vec3 col = mix(vec3(a, b, 1.0-a), sky(uv*2.0-1.0), 0.25);
 
     // optional simple gamma
-    col = pow(clamp(col,0.0,1.0), vec3(1.0/2.2));
+    //col = pow(clamp(col,0.0,1.0), vec3(1.0/2.2));
     imageStore(outImage, gid, vec4(col, 1.0));
 }
 )GLSL";
@@ -116,7 +116,7 @@ void RendererWebGPU::createComputePipeline(){
     m_cpl = m_gpu->createPipelineLayout(pl);
 
     // Compile GLSL -> SPIR-V
-    auto csSPV = glsl_to_spirv(kComputeGLSL, ::ShaderStage::COMPUTE);
+    auto csSPV = shaderpipe::glsl_to_spirv(kComputeGLSL, shaderpipe::ShaderStage::COMPUTE);
     ShaderModuleDescriptor smd{}; smd.ir = ShaderIR::SPIRV; smd.stage = ShaderStage::COMPUTE; smd.bytes = std::span<const uint8_t>((const uint8_t*)csSPV.data(), csSPV.size()*sizeof(uint32_t)); smd.entryPoint = "main";
     m_cs = m_gpu->createShaderModule(smd);
 
@@ -142,8 +142,8 @@ void RendererWebGPU::createBlitPipeline(){
     PipelineLayoutDescriptor pl{}; pl.setLayouts = { m_gbgl }; m_gpl = m_gpu->createPipelineLayout(pl);
 
     // GLSL -> SPIR-V
-    auto vsSPV = glsl_to_spirv(kBlitVS, ::ShaderStage::VERTEX);
-    auto fsSPV = glsl_to_spirv(kBlitFS, ::ShaderStage::FRAGMENT);
+    auto vsSPV = shaderpipe::glsl_to_spirv(kBlitVS, shaderpipe::ShaderStage::VERTEX);
+    auto fsSPV = shaderpipe::glsl_to_spirv(kBlitFS, shaderpipe::ShaderStage::FRAGMENT);
 
     ShaderModuleDescriptor vsm{}; vsm.ir=ShaderIR::SPIRV; vsm.stage=ShaderStage::VERTEX;   vsm.bytes=std::span<const uint8_t>((const uint8_t*)vsSPV.data(), vsSPV.size()*sizeof(uint32_t)); vsm.entryPoint="main";
     ShaderModuleDescriptor fsm{}; fsm.ir=ShaderIR::SPIRV; fsm.stage=ShaderStage::FRAGMENT; fsm.bytes=std::span<const uint8_t>((const uint8_t*)fsSPV.data(), fsSPV.size()*sizeof(uint32_t)); fsm.entryPoint="main";
@@ -237,8 +237,8 @@ void RendererWebGPU::shutdown(){
 
     if (m_swap) m_gpu->destroySwapchain(m_swap);
 
-    m_gpu->waitIdle(QueueType::GRAPHICS);
-    m_gpu->waitIdle(QueueType::COMPUTE);
+    //m_gpu->waitIdle(QueueType::GRAPHICS);
+    //m_gpu->waitIdle(QueueType::COMPUTE);
     m_gpu.reset();
 }
 
