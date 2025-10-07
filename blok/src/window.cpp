@@ -21,7 +21,7 @@
 
 using namespace blok;
 
-Window::Window(uint32_t width, uint32_t height, const std::string& name, RenderBackend backend)
+Window::Window(uint32_t width, uint32_t height, const std::string& name, GraphicsApi backend)
     : m_width(width), m_height(height), m_name(name), m_window(nullptr), m_backend(backend)
 {
     static bool s_initialized = false;
@@ -32,7 +32,7 @@ Window::Window(uint32_t width, uint32_t height, const std::string& name, RenderB
         s_initialized = true;
     }
 
-    if (backend == RenderBackend::OpenGL || backend == RenderBackend::CUDA) {
+    if (backend == GraphicsApi::OpenGL || backend == GraphicsApi::CUDA) {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
@@ -42,7 +42,7 @@ Window::Window(uint32_t width, uint32_t height, const std::string& name, RenderB
         glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GLFW_TRUE);
 #endif
     }
-    else if (backend == RenderBackend::WEBGPU_D3D12 || backend == RenderBackend::WEBGPU_VULKAN) {
+    else if (backend == GraphicsApi::Vulkan) {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     }
 

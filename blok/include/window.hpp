@@ -22,7 +22,7 @@ namespace blok {
 
 class Window {
 public:
-    Window(uint32_t width, uint32_t height, const std::string& name, RenderBackend backend);
+    Window(uint32_t width, uint32_t height, const std::string& name, GraphicsApi backend);
     ~Window();
 
     static void pollEvents();
@@ -34,6 +34,7 @@ public:
     [[nodiscard]] uint32_t getWidth() const { return m_width; }
     [[nodiscard]] uint32_t getHeight() const { return m_height; }
     [[nodiscard]] const std::string& getName() const { return m_name; }
+    [[nodiscard]] GraphicsApi getApi() const { return m_backend; }
 
     void setKeyCallback(const GLFWkeyfun callback) const {
         if (m_window) glfwSetKeyCallback(m_window, callback);
@@ -44,7 +45,7 @@ private:
 
     uint32_t    m_width = 0, m_height = 0;
     std::string m_name;
-    RenderBackend m_backend;
+    GraphicsApi m_backend;
     GLFWwindow* m_window = nullptr;
 };
 

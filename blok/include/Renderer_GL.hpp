@@ -14,7 +14,7 @@
 #include <GLFW/glfw3.h>
 
 
-#include "Renderer.hpp"
+#include "renderer.hpp"
 
 
 namespace blok {
@@ -23,7 +23,7 @@ class Window;
 class Camera;
 struct Scene;
 
-class RendererGL : public IRenderer {
+class RendererGL : public Renderer {
 public:
     explicit RendererGL(std::shared_ptr<Window> window);
     ~RendererGL() override;
