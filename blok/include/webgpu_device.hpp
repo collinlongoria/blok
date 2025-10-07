@@ -88,6 +88,7 @@ namespace detail {
         case Format::RGBA32_UINT: return WGPUTextureFormat_RGBA32Uint;
         case Format::R16_FLOAT: return WGPUTextureFormat_R16Float;
         case Format::R32_FLOAT: return WGPUTextureFormat_R32Float;
+        case Format::RG32_FLOAT: return WGPUTextureFormat_RG32Float;
         case Format::RGBA16_FLOAT: return WGPUTextureFormat_RGBA16Float;
         case Format::RGBA32_FLOAT: return WGPUTextureFormat_RGBA32Float;
         case Format::D24S8: return WGPUTextureFormat_Depth24PlusStencil8;
@@ -112,6 +113,7 @@ namespace detail {
         case WGPUTextureFormat_RGBA32Uint: return Format::RGBA32_UINT;
         case WGPUTextureFormat_R16Float: return Format::R16_FLOAT;
         case WGPUTextureFormat_R32Float: return Format::R32_FLOAT;
+        case WGPUTextureFormat_RG32Float: return Format::RG32_FLOAT;
         case WGPUTextureFormat_RGBA16Float: return Format::RGBA16_FLOAT;
         case WGPUTextureFormat_RGBA32Float: return Format::RGBA32_FLOAT;
         case WGPUTextureFormat_Depth24PlusStencil8: return Format::D24S8;
