@@ -7,6 +7,3 @@
 [submodule "external/imgui"]
 	path = external/imgui
 	url = https://github.com/ocornut/imgui.git
-[submodule "external/shader-pipe"]
-	path = external/shader-pipe
-	url = https://github.com/collinlongoria/shader-pipe.git
