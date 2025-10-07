@@ -9,7 +9,7 @@
 #ifndef RENDERER_CUDA_HPP
 #define RENDERER_CUDA_HPP
 
-#include "Renderer.hpp"
+#include "renderer.hpp"
 #include <cstdint>
 #include <memory>
 
@@ -18,7 +18,7 @@ namespace blok {
 class Window;
 class RendererGL;
 
-class CudaTracer : public IRenderer {
+class CudaTracer : public Renderer {
 public:
     CudaTracer(unsigned int width, unsigned int height);
     ~CudaTracer() override;

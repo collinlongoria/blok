@@ -10,3 +10,6 @@
 [submodule "external/shader-pipe"]
 	path = external/shader-pipe
 	url = https://github.com/collinlongoria/shader-pipe.git
+[submodule "external/VulkanMemoryAllocator"]
+	path = external/VulkanMemoryAllocator
+	url = https://github.com/GPUOpen-LibrariesAndSDKs/VulkanMemoryAllocator.git

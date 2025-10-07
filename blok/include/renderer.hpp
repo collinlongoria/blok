@@ -8,24 +8,26 @@
 */
 #ifndef RENDERER_HPP
 #define RENDERER_HPP
+
 #include "camera.hpp"
 #include "scene.hpp"
+
 namespace blok {
 
 class Camera;
 struct Scene;
 
-class IRenderer {
+class Renderer {
 public:
-    virtual ~IRenderer() = default;
+    virtual ~Renderer() = default;
 
     virtual void init() = 0;
-    virtual void shutdown() = 0;
+
     virtual void beginFrame() = 0;
+    virtual void drawFrame(const Camera& cam, const Scene& scene) = 0;
     virtual void endFrame() = 0;
 
-    // Fix signature to match derived classes
-    virtual void drawFrame(const Camera& cam, const Scene& scene) = 0;
+    virtual void shutdown() = 0;
 };
 
 } // namespace blok

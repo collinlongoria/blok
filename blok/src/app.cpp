@@ -22,11 +22,6 @@
 /* These includes are here so I can test build */
 #include <chrono>
 
-#include "webgpu_device.hpp"
-#include "webgpu_renderer.hpp"
-
-#include <windows.h>
-
 using namespace blok;
 static Camera g_camera;
 static Scene  g_scene;
@@ -52,7 +47,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 
 namespace blok {
 
-App::App(RenderBackend backend)
+App::App(GraphicsApi backend)
     : m_backend(backend) {}
 
 App::~App() {
@@ -73,7 +68,7 @@ void App::init() {
     m_window = std::make_shared<Window>(800, 600, "blok", m_backend);
 
     GLFWwindow* gw = m_window->getGLFWwindow();
-    if (m_backend == RenderBackend::CUDA || m_backend == RenderBackend::OpenGL) {
+    if (m_backend == GraphicsApi::CUDA || m_backend == GraphicsApi::OpenGL) {
         glfwMakeContextCurrent(gw);
         if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
             throw std::runtime_error("Failed to load GL with GLAD");
@@ -83,25 +78,18 @@ void App::init() {
         glfwSetCursorPosCallback(gw, mouse_callback);
         glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
-    else if (m_backend == RenderBackend::WEBGPU_VULKAN || m_backend == RenderBackend::WEBGPU_D3D12) {
-        m_rendererWebGPU = std::make_unique<RendererWebGPU>(m_window);
-        glfwSetCursorPosCallback(gw, mouse_callback);
-        //glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-    }
 
     switch (m_backend) {
-        case RenderBackend::OpenGL:
+        case GraphicsApi::OpenGL:
             break;
 
-        case RenderBackend::CUDA:
+        case GraphicsApi::CUDA:
             m_cudaTracer = std::make_unique<CudaTracer>(m_window->getWidth(), m_window->getHeight());
             m_cudaTracer->init();
             break;
 
-        case RenderBackend::WEBGPU_D3D12:
-        case RenderBackend::WEBGPU_VULKAN:
+    case GraphicsApi::Vulkan:
         {
-           m_rendererWebGPU->init();
         }
             break;
     }
@@ -123,7 +111,7 @@ void App::update() {
 
 
     switch (m_backend) {
-        case RenderBackend::CUDA:
+        case GraphicsApi::CUDA:
             // ImGui + present path (one swap inside endFrame)
             m_cudaTracer->drawFrame(g_camera, g_scene);
             m_rendererGL->beginFrame();
@@ -134,18 +122,14 @@ void App::update() {
             m_rendererGL->endFrame();
             break;
 
-        case RenderBackend::OpenGL:
+        case GraphicsApi::OpenGL:
             // ImGui + present path (one swap inside endFrame)
             m_rendererGL->beginFrame();
             m_rendererGL->drawFrame(g_camera, g_scene);
             m_rendererGL->endFrame();
             break;
 
-        case RenderBackend::WEBGPU_D3D12:
-        case RenderBackend::WEBGPU_VULKAN:
-            m_rendererWebGPU->beginFrame();
-            m_rendererWebGPU->drawFrame(g_camera, g_scene);
-            m_rendererWebGPU->endFrame();
+        case GraphicsApi::Vulkan:
             break;
     }
 }
@@ -154,8 +138,7 @@ void App::shutdown() {
     if (m_rendererGL) { m_rendererGL->shutdown(); m_rendererGL.reset(); }
     if (m_cudaTracer) { m_cudaTracer->~CudaTracer(); m_cudaTracer.reset(); }
 
-    if (m_backend == RenderBackend::WEBGPU_D3D12 || m_backend == RenderBackend::WEBGPU_VULKAN) {
-       m_rendererWebGPU->shutdown();
+    if (m_backend == GraphicsApi::Vulkan) {
         m_window.reset();
     }
 }

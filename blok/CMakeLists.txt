@@ -30,34 +30,34 @@ target_link_libraries(blok PRIVATE ${CUDAToolkit_LIBRARIES})
 target_compile_options(blok PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
 
 # ---- WebGPU (dawn) ---
-target_link_libraries(blok PRIVATE glfw3webgpu)
+#target_link_libraries(blok PRIVATE glfw3webgpu)
 
-add_custom_command(TARGET blok POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        $<TARGET_RUNTIME_DLLS:blok> $<TARGET_FILE_DIR:blok>
-        COMMAND_EXPAND_LISTS
-)
+#add_custom_command(TARGET blok POST_BUILD
+#        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+#        $<TARGET_RUNTIME_DLLS:blok> $<TARGET_FILE_DIR:blok>
+ #       COMMAND_EXPAND_LISTS
+#)
 
-if (EXISTS "${TINT_EXE}")
-    add_custom_command(TARGET blok POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${TINT_EXE}" $<TARGET_FILE_DIR:blok>)
-endif()
+#if (EXISTS "${TINT_EXE}")
+#    add_custom_command(TARGET blok POST_BUILD
+#            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+#            "${TINT_EXE}" $<TARGET_FILE_DIR:blok>)
+#endif()
 
 
-file(GLOB DIRECTX_DLLS "${CMAKE_SOURCE_DIR}/external/directx/*.dll")
+#file(GLOB DIRECTX_DLLS "${CMAKE_SOURCE_DIR}/external/directx/*.dll")
 
-if(WIN32)
+#if(WIN32)
     # Copy them to the build directory
-    foreach(dll ${DIRECTX_DLLS})
-        add_custom_command(
-                TARGET ${PROJECT_NAME} POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                ${dll}
-                $<TARGET_FILE_DIR:${PROJECT_NAME}>
-        )
-    endforeach()
-endif()
+#    foreach(dll ${DIRECTX_DLLS})
+ #       add_custom_command(
+ #               TARGET ${PROJECT_NAME} POST_BUILD
+ #               COMMAND ${CMAKE_COMMAND} -E copy_if_different
+   #             ${dll}
+    #            $<TARGET_FILE_DIR:${PROJECT_NAME}>
+  #      )
+ #   endforeach()
+#endif()
 
 # ---- GLM ----
 add_library(glm INTERFACE)
@@ -82,6 +82,14 @@ target_link_libraries(blok PRIVATE glad)
 find_package(OpenGL REQUIRED)
 target_link_libraries(blok PRIVATE OpenGL::GL)
 
+# ---- Vulkan ----
+find_package(Vulkan REQUIRED)
+target_include_directories(blok PRIVATE ${Vulkan_INCLUDE_DIRS})
+target_link_libraries(blok PRIVATE Vulkan::Vulkan)
+
+# ---- Vulkan Memory Allocator ----
+target_link_libraries(blok PRIVATE GPUOpen::VulkanMemoryAllocator)
+
 # ---- ImGui ----
 add_library(imgui STATIC
         ${CMAKE_SOURCE_DIR}/external/imgui/imgui.cpp
@@ -98,7 +106,7 @@ target_include_directories(imgui PRIVATE
         ${CMAKE_SOURCE_DIR}/external/imgui/backends
         ${CMAKE_SOURCE_DIR}/external/glfw/include
 )
-target_include_directories(blok PUBLIC 
+target_include_directories(blok PUBLIC
         ${CMAKE_SOURCE_DIR}/external/imgui
         ${CMAKE_SOURCE_DIR}/external/imgui/backends
 )
