@@ -107,12 +107,3 @@ target_link_libraries(blok PRIVATE imgui)
 
 # ---- Shader Pipeline ----
 target_link_libraries(blok PRIVATE shaderpipe)
-
-# ---- Assets (Shaders, Textures, etc.) ------------------------------------------------
-add_custom_command(
-        TARGET ${PROJECT_NAME} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-        ${CMAKE_SOURCE_DIR}/assets
-        $<TARGET_FILE_DIR:${PROJECT_NAME}>/assets
-)
-

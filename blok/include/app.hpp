@@ -14,7 +14,7 @@
 #include "backend.hpp"
 
 namespace blok {
-
+class RendererWebGPU;
 class Window;
 class RendererGL;  
 class CudaTracer;
@@ -36,6 +36,7 @@ private:
 
     std::shared_ptr<Window>  m_window;
     std::unique_ptr<RendererGL> m_rendererGL;
+    std::unique_ptr<RendererWebGPU> m_rendererWebGPU;
     std::unique_ptr<CudaTracer> m_cudaTracer;
     std::unique_ptr<WebGPUDevice> m_gpu;
 };
