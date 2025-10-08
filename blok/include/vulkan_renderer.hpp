@@ -14,7 +14,7 @@
 #include "renderer.hpp"
 
 #include "vulkan/vulkan.hpp"
-#include <vma/vk_mem_alloc.h>
+#include <vk_mem_alloc.h>
 
 namespace blok {
 class Window;
@@ -137,36 +137,22 @@ private: // functions
     void createPerFrameUniforms();
 
     // Upload
-    Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags,
-        VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO, bool mapped = false);
+    Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO, bool mapped = false);
     void uploadToBuffer(const void* src, vk::DeviceSize size, Buffer& dst, vk::DeviceSize dstOffset = 0);
     void copyBuffer(Buffer& src, Buffer& dst, vk::DeviceSize size);
 
-    Image createImage(uint32_t w, uint32_t h, vk::Format fmt, vk::ImageUsageFlags usage,
-        vk::ImageTiling tiling = vk::ImageTiling::eOptimal,
-        vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1, uint32_t mipLevels = 1, uint32_t layers = 1,
-        VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO);
-    void transitionImage(Image& img, vk::ImageLayout newLayout,
-    vk::PipelineStageFlags2 srcStage, vk::AccessFlags2 srcAccess,
-    vk::PipelineStageFlags2 dstStage, vk::AccessFlags2 dstAccess,
-    vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor,
-    uint32_t baseMip = 0, uint32_t levelCount = VK_REMAINING_MIP_LEVELS,
-    uint32_t baseLayer = 0, uint32_t layerCount = VK_REMAINING_ARRAY_LAYERS);
-    void copyBufferToImage(Buffer& staging, Image& img, uint32_t w, uint32_t h,
-    uint32_t baseLayer = 0, uint32_t layerCount = 1);
+    Image createImage(uint32_t w, uint32_t h, vk::Format fmt, vk::ImageUsageFlags usage, vk::ImageTiling tiling = vk::ImageTiling::eOptimal, vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1, uint32_t mipLevels = 1, uint32_t layers = 1, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO);
+    void transitionImage(Image& img, vk::ImageLayout newLayout, vk::PipelineStageFlags2 srcStage, vk::AccessFlags2 srcAccess, vk::PipelineStageFlags2 dstStage, vk::AccessFlags2 dstAccess, vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor, uint32_t baseMip = 0, uint32_t levelCount = VK_REMAINING_MIP_LEVELS, uint32_t baseLayer = 0, uint32_t layerCount = VK_REMAINING_ARRAY_LAYERS);
+    void copyBufferToImage(Buffer& staging, Image& img, uint32_t w, uint32_t h, uint32_t baseLayer = 0, uint32_t layerCount = 1);
     void generateMipmaps(Image& img);
 
-
     // Dynamic rendering helpers
-    void beginRendering(vk::CommandBuffer cmd, vk::ImageView colorView, vk::ImageView depthView,
-    vk::Extent2D extent, const std::array<float,4>& clearColor, float clearDepth = 1.0f, uint32_t clearStencil = 0);
+    void beginRendering(vk::CommandBuffer cmd, vk::ImageView colorView, vk::ImageView depthView, vk::Extent2D extent, const std::array<float,4>& clearColor, float clearDepth = 1.0f, uint32_t clearStencil = 0);
     void endRendering(vk::CommandBuffer cmd);
-
 
     // Utilities
     [[nodiscard]] vk::Format findDepthFormat() const;
     [[nodiscard]] vk::SampleCountFlagBits getMaxUsableSampleCount() const;
-
 
     // Recording
     void recordGraphicsCommands(uint32_t imageIndex, const Camera& cam, const Scene& scene);
@@ -195,7 +181,7 @@ private: // resources
     vk::Queue m_presentQueue{};
     vk::Queue m_computeQueue{};
 
-    // Swaphcain
+    // SwapChain
     vk::SwapchainKHR m_swapchain{};
     std::vector<vk::Image> m_swapImages{};
     std::vector<vk::ImageView> m_swapViews{};

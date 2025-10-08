@@ -16,7 +16,7 @@
 namespace blok {
 
 class Window;
-class RendererGL;  
+class Renderer;
 class CudaTracer;
 
 class App {
@@ -34,7 +34,7 @@ private:
     GraphicsApi m_backend;
 
     std::shared_ptr<Window>  m_window;
-    std::unique_ptr<RendererGL> m_rendererGL;
+    std::unique_ptr<Renderer> m_renderer;
     std::unique_ptr<CudaTracer> m_cudaTracer;
 };
 
