@@ -9,6 +9,7 @@
 #include "window.hpp"
 
 #include "Renderer_GL.hpp"
+#include "vulkan_renderer.hpp"
 
 #include "Cuda_Tracer.hpp"
 
@@ -73,8 +74,8 @@ void App::init() {
         if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
             throw std::runtime_error("Failed to load GL with GLAD");
         }
-        m_rendererGL = std::make_unique<RendererGL>(m_window);
-        m_rendererGL->init();
+        m_renderer = std::make_unique<RendererGL>(m_window);
+        m_renderer->init();
         glfwSetCursorPosCallback(gw, mouse_callback);
         glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
@@ -90,6 +91,8 @@ void App::init() {
 
     case GraphicsApi::Vulkan:
         {
+            m_renderer = std::make_unique<VulkanRenderer>(m_window.get());
+            m_renderer->init();
         }
             break;
     }
@@ -114,28 +117,31 @@ void App::update() {
         case GraphicsApi::CUDA:
             // ImGui + present path (one swap inside endFrame)
             m_cudaTracer->drawFrame(g_camera, g_scene);
-            m_rendererGL->beginFrame();
-            m_rendererGL->setTexture(m_cudaTracer->getGLTex(),
-                                    m_window->getWidth(),
-                                    m_window->getHeight());
-            m_rendererGL->drawFrame(g_camera, g_scene);
-            m_rendererGL->endFrame();
+            m_renderer->beginFrame();
+            //static_cast<RendererGL>(m_renderer.get())->setTexture(m_cudaTracer->getGLTex(),
+                                           //                  m_window->getWidth(),
+                                         //                    m_window->getHeight()));
+            m_renderer->drawFrame(g_camera, g_scene);
+            m_renderer->endFrame();
             break;
 
         case GraphicsApi::OpenGL:
             // ImGui + present path (one swap inside endFrame)
-            m_rendererGL->beginFrame();
-            m_rendererGL->drawFrame(g_camera, g_scene);
-            m_rendererGL->endFrame();
+            m_renderer->beginFrame();
+            m_renderer->drawFrame(g_camera, g_scene);
+            m_renderer->endFrame();
             break;
 
         case GraphicsApi::Vulkan:
+        m_renderer->beginFrame();
+        m_renderer->drawFrame(g_camera, g_scene);
+        m_renderer->endFrame();
             break;
     }
 }
 
 void App::shutdown() {
-    if (m_rendererGL) { m_rendererGL->shutdown(); m_rendererGL.reset(); }
+    if (m_renderer) { /*m_renderer->shutdown();*/ m_renderer.reset(); }
     if (m_cudaTracer) { m_cudaTracer->~CudaTracer(); m_cudaTracer.reset(); }
 
     if (m_backend == GraphicsApi::Vulkan) {
