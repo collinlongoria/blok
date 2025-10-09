@@ -86,6 +86,12 @@ struct FrameResources {
     vk::DescriptorSet computeSet{};
 };
 
+struct ComputePC {
+    int32_t width;
+    int32_t height;
+    float   tFrame;
+};
+
 struct QueueFamilyIndices {
     std::optional<uint32_t> graphics;
     std::optional<uint32_t> present;
@@ -209,9 +215,6 @@ private: // resources
     Pipeline m_gfx{};
     vk::VertexInputBindingDescription m_vertexBinding{};
     std::vector<vk::VertexInputAttributeDescription> m_vertexAttrs{};
-
-    // Compute Pipeline
-    Pipeline m_comp{};
 
     // Fullscreen geometry and output image
     Buffer m_fsVBO{};

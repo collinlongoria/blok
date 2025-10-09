@@ -26,6 +26,7 @@ namespace blok {
 static std::vector<vk::Semaphore> g_presentSignals;
 static std::vector<vk::Fence> g_imagesInFlight;
 static std::vector<vk::ImageLayout> g_swapImageLayouts;
+static float timer = 0.0f;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
     VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
@@ -529,11 +530,27 @@ void VulkanRenderer::createGraphicsPipeline() {
 
     vk::PipelineInputAssemblyStateCreateInfo ia{ {}, vk::PrimitiveTopology::eTriangleList, VK_FALSE };
 
-    vk::PipelineViewportStateCreateInfo vp{}; // dynamic
+    vk::Viewport vp{}; // dynamic
+    vp.x        = 0.0f;
+    vp.y        = 0.0f;
+    vp.width    = static_cast<float>(m_swapExtent.width);
+    vp.height   = static_cast<float>(m_swapExtent.height);
+    vp.minDepth = 0.0f;
+    vp.maxDepth = 1.0f;
+
+    vk::Rect2D sc{};
+    sc.offset = vk::Offset2D{0, 0};
+    sc.extent = m_swapExtent;
+
+    vk::PipelineViewportStateCreateInfo vpState{};
+    vpState.viewportCount = 1;              // must be > 0
+    vpState.pViewports    = &vp;            // static viewport
+    vpState.scissorCount  = 1;              // must be > 0
+    vpState.pScissors     = &sc;
 
     vk::PipelineRasterizationStateCreateInfo rs{};
     rs.polygonMode = vk::PolygonMode::eFill;
-    rs.cullMode = vk::CullModeFlagBits::eBack;
+    rs.cullMode = vk::CullModeFlagBits::eNone;
     rs.frontFace = vk::FrontFace::eCounterClockwise;
     rs.lineWidth = 1.0f;
 
@@ -569,7 +586,7 @@ void VulkanRenderer::createGraphicsPipeline() {
     gp.stageCount = 2; gp.pStages = stages;
     gp.pVertexInputState   = &vi;
     gp.pInputAssemblyState = &ia;
-    gp.pViewportState      = &vp;
+    gp.pViewportState      = &vpState;
     gp.pRasterizationState = &rs;
     gp.pMultisampleState   = &ms;
     gp.pDepthStencilState  = &ds;
@@ -585,18 +602,28 @@ void VulkanRenderer::createGraphicsPipeline() {
 }
 
 void VulkanRenderer::createComputePipeline() {
-    auto csBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/raytrace.comp.glsl"), shaderpipe::ShaderStage::COMPUTE);
-    auto cs = createShaderModule(csBytes); // TODO
+    auto csBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/raytrace.comp.glsl"),
+                                             shaderpipe::ShaderStage::COMPUTE);
+    auto cs = createShaderModule(csBytes);
 
-    // layout: set0 global, set1 object, set3 compute
-    std::array<vk::DescriptorSetLayout,3> sets = { m_descLayouts.global, m_descLayouts.object, m_descLayouts.compute };
-    vk::PipelineLayoutCreateInfo pl{}; pl.setLayoutCount = sets.size(); pl.pSetLayouts = sets.data();
-    m_comp.layout = m_device.createPipelineLayout(pl);
+    vk::DescriptorSetLayout computeOnly[] = { m_descLayouts.compute };
+
+    vk::PushConstantRange pcr{};
+    pcr.stageFlags = vk::ShaderStageFlagBits::eCompute;
+    pcr.offset     = 0;
+    pcr.size       = sizeof(ComputePC);
+
+    vk::PipelineLayoutCreateInfo pl{};
+    pl.setLayoutCount = 1;
+    pl.pSetLayouts    = computeOnly;
+    pl.pushConstantRangeCount = 1;
+    pl.pPushConstantRanges    = &pcr;
+    m_compute.layout = m_device.createPipelineLayout(pl);
 
     vk::ComputePipelineCreateInfo ci{};
-    ci.stage = { {}, vk::ShaderStageFlagBits::eCompute, cs.module, "main" };
-    ci.layout = m_comp.layout;
-    m_comp.handle = m_device.createComputePipeline(m_pipelineCache, ci).value;
+    ci.stage  = { {}, vk::ShaderStageFlagBits::eCompute, cs.module, "main" };
+    ci.layout = m_compute.layout;
+    m_compute.handle = m_device.createComputePipeline(m_pipelineCache, ci).value;
 
     m_device.destroyShaderModule(cs.module);
 }
@@ -646,26 +673,51 @@ void VulkanRenderer::createDescriptorSetLayouts() {
 
     // set = 3 : compute (storage image @ binding 0)
     vk::DescriptorSetLayoutBinding c0{};
-    c0.binding = 0;
-    c0.descriptorType = vk::DescriptorType::eStorageImage;
+    c0.binding         = 0;
+    c0.descriptorType  = vk::DescriptorType::eStorageImage;
     c0.descriptorCount = 1;
-    c0.stageFlags = vk::ShaderStageFlagBits::eCompute;
+    c0.stageFlags      = vk::ShaderStageFlagBits::eCompute;
 
     vk::DescriptorSetLayoutCreateInfo cci{};
     cci.bindingCount = 1;
-    cci.pBindings = &c0;
+    cci.pBindings    = &c0;
     m_descLayouts.compute = m_device.createDescriptorSetLayout(cci);
 }
 
 void VulkanRenderer::createDescriptorPools() {
+    // How many sets do we make per frame?
+    // set0: global UBO
+    // set1: object UBO
+    // set2: material (combined image sampler)
+    // set3: compute  (storage image)
+    const uint32_t setsPerFrame = 4;
+
+    // Headroom for anything else that might grab sets from the same pool
+    // (e.g., transient materials, imgui, etc.)
+    const uint32_t extraSets = 16;
+
+    // Descriptor counts per frame (match what you're writing)
+    const uint32_t ubosPerFrame      = 2; // global + object
+    const uint32_t samplersPerFrame  = 1; // material combined image sampler
+    const uint32_t storageImgPerFrame= 1; // compute storage image
+
+    const uint32_t frames = MAX_FRAMES_IN_FLIGHT;
+
+    // OVERSIZE THESE to avoid VK_ERROR_OUT_OF_POOL_MEMORY
+    const uint32_t totalUBOs        = ubosPerFrame       * frames + 16;   // + headroom
+    const uint32_t totalCombinedImg = samplersPerFrame   * frames + 16;
+    const uint32_t totalStorageImg  = storageImgPerFrame * frames + 16;
+
     std::array<vk::DescriptorPoolSize, 3> sizes = {
-        vk::DescriptorPoolSize{vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT * 2u},
-        vk::DescriptorPoolSize{vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT },
-        vk::DescriptorPoolSize{vk::DescriptorType::eStorageImage, MAX_FRAMES_IN_FLIGHT }
+        vk::DescriptorPoolSize{ vk::DescriptorType::eUniformBuffer,        totalUBOs        },
+        vk::DescriptorPoolSize{ vk::DescriptorType::eCombinedImageSampler, totalCombinedImg },
+        vk::DescriptorPoolSize{ vk::DescriptorType::eStorageImage,         totalStorageImg  },
     };
 
     vk::DescriptorPoolCreateInfo pci{};
-    pci.maxSets = MAX_FRAMES_IN_FLIGHT * 4u;
+    // Allow freeing sets individually if you recreate per-frame (optional but handy)
+    pci.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
+    pci.maxSets = setsPerFrame * frames + extraSets;  // <-- IMPORTANT
     pci.poolSizeCount = static_cast<uint32_t>(sizes.size());
     pci.pPoolSizes = sizes.data();
 
@@ -1058,7 +1110,7 @@ void VulkanRenderer::beginRendering(vk::CommandBuffer cmd, vk::ImageView colorVi
 
     vk::RenderingAttachmentInfo color{};
     color.imageView = colorView;
-    color.imageLayout = vk::ImageLayout::eAttachmentOptimal;
+    color.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
     color.loadOp = vk::AttachmentLoadOp::eClear;
     color.storeOp = vk::AttachmentStoreOp::eStore;
     color.clearValue = cv;
@@ -1136,7 +1188,7 @@ void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &c
     toColor.srcAccessMask = {};
     toColor.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
     toColor.oldLayout = oldSwapLayout;
-    toColor.newLayout = vk::ImageLayout::eAttachmentOptimal;
+    toColor.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
     toColor.image = m_swapImages[imageIndex];
     toColor.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
     toColor.subresourceRange.baseMipLevel = 0;
@@ -1148,7 +1200,7 @@ void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &c
     depToColor.imageMemoryBarrierCount = 1;
     depToColor.pImageMemoryBarriers = &toColor;
     cmd.pipelineBarrier2(depToColor);
-    if (imageIndex < g_swapImageLayouts.size()) g_swapImageLayouts[imageIndex] = vk::ImageLayout::eAttachmentOptimal;
+    if (imageIndex < g_swapImageLayouts.size()) g_swapImageLayouts[imageIndex] = vk::ImageLayout::eColorAttachmentOptimal;
 
     // depth image to DEPTH_ATTACHMENT_OPTIMAL
     vk::ImageMemoryBarrier2 toDepth{};
@@ -1180,10 +1232,21 @@ void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &c
             vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
     }
 
-    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_comp.handle);
-    std::array<vk::DescriptorSet,3> csSets = { fr.globalSet, fr.objectSet, fr.computeSet };
-    cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_comp.layout, 0,
-                           static_cast<uint32_t>(csSets.size()), csSets.data(), 0, nullptr);
+    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute.handle);
+
+    cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_compute.layout,
+                           /*firstSet*/ 0,
+                           /*descriptorSetCount*/ 1,
+                           &fr.computeSet,
+                           /*dynamicOffsetCount*/ 0, /*pDynamicOffsets*/ nullptr);
+
+    ComputePC pc;
+    pc.width  = static_cast<int32_t>(m_swapExtent.width);
+    pc.height = static_cast<int32_t>(m_swapExtent.height);
+    pc.tFrame = timer;
+    timer += 0.001f;
+
+    cmd.pushConstants(m_compute.layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(ComputePC), &pc);
 
     // Dispatch sized to image
     const uint32_t localX = 8, localY = 8; // keep in sync with your CS
@@ -1208,7 +1271,7 @@ void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &c
 
     // begin render and clear
     // TODO: move clear color elsewhere
-    const std::array<float, 4> clear = { 0.05f, 0.05f, 0.09f, 1.0f };
+    const std::array<float, 4> clear = { 1.0f, 0.0f, 0.0f, 1.0f };
     beginRendering(cmd, m_swapViews[imageIndex], m_depth.view, m_swapExtent, clear, 1.0f, 0);
 
     // TODO: bind pipeline and draw here
@@ -1231,7 +1294,7 @@ void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &c
     toPresent.dstStageMask = vk::PipelineStageFlagBits2::eNone;
     toPresent.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
     toPresent.dstAccessMask = {};
-    toPresent.oldLayout = (imageIndex < g_swapImageLayouts.size()) ? g_swapImageLayouts[imageIndex] : vk::ImageLayout::eAttachmentOptimal;
+    toPresent.oldLayout = (imageIndex < g_swapImageLayouts.size()) ? g_swapImageLayouts[imageIndex] : vk::ImageLayout::eColorAttachmentOptimal;
     toPresent.newLayout = vk::ImageLayout::ePresentSrcKHR;
     toPresent.image = m_swapImages[imageIndex];
     toPresent.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
@@ -1305,6 +1368,7 @@ void VulkanRenderer::allocateMaterialAndComputeDescriptorSets() {
     for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
         auto& fr = m_frames[i];
 
+        // Allocate [ material , compute ]
         std::array<vk::DescriptorSetLayout,2> layouts = { m_descLayouts.material, m_descLayouts.compute };
         vk::DescriptorSetAllocateInfo ai{ m_descPools.pool,
                                           static_cast<uint32_t>(layouts.size()),
@@ -1313,21 +1377,23 @@ void VulkanRenderer::allocateMaterialAndComputeDescriptorSets() {
         fr.materialSet = sets[0];
         fr.computeSet  = sets[1];
 
-        // material: sampled image (m_rayImage) + default sampler
+        // Material: sampled read of the compute image
         vk::DescriptorImageInfo sampled{};
-        sampled.sampler = m_defaultSampler.handle;
-        sampled.imageView = m_rayImage.view;
+        sampled.sampler     = m_defaultSampler.handle;
+        sampled.imageView   = m_rayImage.view;
         sampled.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 
-        // compute: storage image (m_rayImage)
+        // Compute: storage write into the same image
         vk::DescriptorImageInfo storage{};
-        storage.sampler = vk::Sampler{}; // not used
-        storage.imageView = m_rayImage.view;
+        storage.imageView   = m_rayImage.view;
         storage.imageLayout = vk::ImageLayout::eGeneral;
 
         std::array<vk::WriteDescriptorSet,2> writes{};
+        // set=2 material, binding=0 (combined image sampler)
         writes[0] = { fr.materialSet, 0, 0, 1, vk::DescriptorType::eCombinedImageSampler, &sampled };
-        writes[1] = { fr.computeSet,  0, 0, 1, vk::DescriptorType::eStorageImage,         &storage  };
+        // set=3 compute,   binding=0 (storage image)
+        writes[1] = { fr.computeSet,  0, 0, 1, vk::DescriptorType::eStorageImage,         &storage };
+
         m_device.updateDescriptorSets(static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
     }
 }
