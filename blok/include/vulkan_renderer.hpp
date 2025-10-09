@@ -82,6 +82,8 @@ struct FrameResources {
     // Descriptor sets
     vk::DescriptorSet globalSet{};
     vk::DescriptorSet objectSet{};
+    vk::DescriptorSet materialSet{};
+    vk::DescriptorSet computeSet{};
 };
 
 struct QueueFamilyIndices {
@@ -120,8 +122,9 @@ private: // functions
     void createDepthResources();
 
     // Pipelines
-    [[nodiscard]] Shader createShaderModule(const std::vector<uint8_t>& code) const;
+    [[nodiscard]] Shader createShaderModule(const std::vector<uint32_t>& code) const;
     void createGraphicsPipeline();
+    void createComputePipeline();
     void createPipelineCache();
 
     // Descriptors
@@ -160,6 +163,11 @@ private: // functions
     // Cleanup and Recreation
     void cleanupSwapChain();
     void recreateSwapChain();
+
+    // Current Render Pipeline
+    void createFullscreenQuadBuffers();
+    void createRayTarget();
+    void allocateMaterialAndComputeDescriptorSets();
 
     std::vector<const char*> getRequiredExtensions();
     std::vector<const char*> getRequiredDeviceExtensions();
@@ -201,6 +209,15 @@ private: // resources
     Pipeline m_gfx{};
     vk::VertexInputBindingDescription m_vertexBinding{};
     std::vector<vk::VertexInputAttributeDescription> m_vertexAttrs{};
+
+    // Compute Pipeline
+    Pipeline m_comp{};
+
+    // Fullscreen geometry and output image
+    Buffer m_fsVBO{};
+    Buffer m_fsIBO{};
+    uint32_t m_fsIndexCount = 0;
+    Image m_rayImage{};
 
     // Descriptor layouts
     DescriptorLayouts m_descLayouts{};
