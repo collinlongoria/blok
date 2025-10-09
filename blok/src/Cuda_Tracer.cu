@@ -81,7 +81,6 @@ __device__ bool hit_plane(const PlaneCUDA& p, float3 ro, float3 rd, float& tHit)
     return false;
 }
 
-// --- Added: scene helpers for shading, shadows, background, gamma ---
 struct HitInfo {
     float  t;
     float3 n;
@@ -276,7 +275,6 @@ static CameraCUDA toDevice(const Camera& c, int width, int height) {
     };
 }
 
-// ---------------- Class ----------------
 CudaTracer::CudaTracer(unsigned int width, unsigned int height)
     : m_width(width), m_height(height) {}
 
