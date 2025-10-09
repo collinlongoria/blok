@@ -2,7 +2,7 @@
 
 layout(local_size_x = 8, local_size_y = 8) in; // config
 
-layout(binding = 0, rgba8) uniform writeonly image2D outImage;
+layout(set = 3, binding = 0, rgba8) uniform writeonly image2D outImage;
 
 layout(push_constant) uniform Push {
     int width;

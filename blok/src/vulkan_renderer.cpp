@@ -15,6 +15,7 @@
 #define GLFW_INCLUDE_NONE
 #include <set>
 
+#include "shader_pipe.hpp"
 #include "GLFW/glfw3.h"
 
 #include "window.hpp"
@@ -24,6 +25,7 @@ namespace blok {
 // per swapchain image signaling for present and image-in-flight
 static std::vector<vk::Semaphore> g_presentSignals;
 static std::vector<vk::Fence> g_imagesInFlight;
+static std::vector<vk::ImageLayout> g_swapImageLayouts;
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
     VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
@@ -94,8 +96,8 @@ void VulkanRenderer::init() {
     allocatePerFrameDescriptorSets();
 
     createPipelineCache();
-    createGraphicsPipeline();
-
+    createFullscreenQuadBuffers();
+    createRayTarget();
     // default sampler
     vk::SamplerCreateInfo si{};
     si.magFilter = vk::Filter::eLinear;
@@ -106,6 +108,11 @@ void VulkanRenderer::init() {
     si.addressModeW = vk::SamplerAddressMode::eRepeat;
     si.maxAnisotropy = 1.0f;
     m_defaultSampler.handle = m_device.createSampler(si);
+    allocateMaterialAndComputeDescriptorSets();
+    createComputePipeline();
+    createGraphicsPipeline();
+
+
 
     std::cout << "Vulkan API initialized!"  << std::endl;
 }
@@ -226,6 +233,13 @@ void VulkanRenderer::shutdown() {
     if (m_descPools.pool) { m_device.destroyDescriptorPool(m_descPools.pool); }
 
     cleanupSwapChain();
+
+    // Destroy custom GPU resources
+    if (m_rayImage.view)  m_device.destroyImageView(m_rayImage.view);
+    if (m_rayImage.handle) vmaDestroyImage(m_allocator, m_rayImage.handle, m_rayImage.alloc);
+    if (m_fsVBO.handle)    vmaDestroyBuffer(m_allocator, m_fsVBO.handle, m_fsVBO.alloc);
+    if (m_fsIBO.handle)    vmaDestroyBuffer(m_allocator, m_fsIBO.handle, m_fsIBO.alloc);
+
 
     destroyAllocator();
 
@@ -469,28 +483,124 @@ void VulkanRenderer::createSwapChain() {
     for (auto &s : g_presentSignals) { s = m_device.createSemaphore({}); }
 
     g_imagesInFlight.assign(m_swapImages.size(), VK_NULL_HANDLE);
+    g_swapImageLayouts.assign(m_swapImages.size(), vk::ImageLayout::eUndefined);
 }
 
 void VulkanRenderer::createDepthResources() {
     m_depthFormat = findDepthFormat();
 
+    // getMaxUsableSampleCount()
+    constexpr vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1;
+
     m_depth = createImage(m_swapExtent.width, m_swapExtent.height, m_depthFormat,
         vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
-        vk::ImageTiling::eOptimal, getMaxUsableSampleCount(), 1, 1, VMA_MEMORY_USAGE_AUTO);
+        vk::ImageTiling::eOptimal, samples, 1, 1, VMA_MEMORY_USAGE_AUTO);
 }
 
-Shader VulkanRenderer::createShaderModule(const std::vector<uint8_t> &code) const {
+Shader VulkanRenderer::createShaderModule(const std::vector<uint32_t> &code) const {
     vk::ShaderModuleCreateInfo ci{};
-    ci.codeSize = code.size();
-    ci.pCode = reinterpret_cast<const uint32_t*>(code.data());
+    ci.codeSize = code.size() * sizeof(uint32_t);
+    ci.pCode = code.data();
     Shader s{};
     s.module = m_device.createShaderModule(ci);
     return s;
 }
 
 void VulkanRenderer::createGraphicsPipeline() {
-    // todo
+    // Compile shaders (assumed provided)
+    // glsl_to_spriv(path, stage) -> std::vector<uint8_t>
+    auto vsBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/fullscreen.vert.glsl"), shaderpipe::ShaderStage::VERTEX);
+    auto fsBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/fullscreen.frag.glsl"), shaderpipe::ShaderStage::FRAGMENT);
+    auto vs = createShaderModule(vsBytes);
+    auto fs = createShaderModule(fsBytes);
+
+    vk::PipelineShaderStageCreateInfo stages[2] = {
+        { {}, vk::ShaderStageFlagBits::eVertex,   vs.module, "main" },
+        { {}, vk::ShaderStageFlagBits::eFragment, fs.module, "main" }
+    };
+
+    // Vertex layout: vec2 pos (loc 0), vec2 uv (loc 1)
+    vk::VertexInputBindingDescription bind{ 0, 4 * sizeof(float), vk::VertexInputRate::eVertex };
+    std::array<vk::VertexInputAttributeDescription,2> attrs = {{
+        {0, 0, vk::Format::eR32G32Sfloat,            0},
+        {1, 0, vk::Format::eR32G32Sfloat, 2*sizeof(float)}
+    }};
+    vk::PipelineVertexInputStateCreateInfo vi{ {}, 1, &bind, static_cast<uint32_t>(attrs.size()), attrs.data() };
+
+    vk::PipelineInputAssemblyStateCreateInfo ia{ {}, vk::PrimitiveTopology::eTriangleList, VK_FALSE };
+
+    vk::PipelineViewportStateCreateInfo vp{}; // dynamic
+
+    vk::PipelineRasterizationStateCreateInfo rs{};
+    rs.polygonMode = vk::PolygonMode::eFill;
+    rs.cullMode = vk::CullModeFlagBits::eBack;
+    rs.frontFace = vk::FrontFace::eCounterClockwise;
+    rs.lineWidth = 1.0f;
+
+    vk::PipelineMultisampleStateCreateInfo ms{}; // sampleCount implicitly 1 when dynamic rendering uses 1
+
+    vk::PipelineDepthStencilStateCreateInfo ds{};
+    ds.depthTestEnable  = VK_FALSE; // fullscreen pass; depth clear is fine
+    ds.depthWriteEnable = VK_FALSE;
+
+    vk::PipelineColorBlendAttachmentState cba{};
+    cba.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
+                         vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
+    vk::PipelineColorBlendStateCreateInfo cb{ {}, VK_FALSE, vk::LogicOp::eClear, 1, &cba };
+
+    std::array<vk::DynamicState,2> dyn{ vk::DynamicState::eViewport, vk::DynamicState::eScissor };
+    vk::PipelineDynamicStateCreateInfo dynCI{ {}, static_cast<uint32_t>(dyn.size()), dyn.data() };
+
+    // Pipeline layout: set0 global, set1 object, set2 material
+    std::array<vk::DescriptorSetLayout,3> sets = { m_descLayouts.global, m_descLayouts.object, m_descLayouts.material };
+    vk::PipelineLayoutCreateInfo pl{};
+    pl.setLayoutCount = static_cast<uint32_t>(sets.size());
+    pl.pSetLayouts = sets.data();
+    m_gfx.layout = m_device.createPipelineLayout(pl);
+
+    // Dynamic rendering formats (+ sample count = 1)
+    vk::PipelineRenderingCreateInfo renderCI{};
+    renderCI.colorAttachmentCount = 1;
+    renderCI.pColorAttachmentFormats = &m_colorFormat;
+    renderCI.depthAttachmentFormat   = m_depthFormat;
+
+    vk::GraphicsPipelineCreateInfo gp{};
+    gp.pNext = &renderCI;
+    gp.stageCount = 2; gp.pStages = stages;
+    gp.pVertexInputState   = &vi;
+    gp.pInputAssemblyState = &ia;
+    gp.pViewportState      = &vp;
+    gp.pRasterizationState = &rs;
+    gp.pMultisampleState   = &ms;
+    gp.pDepthStencilState  = &ds;
+    gp.pColorBlendState    = &cb;
+    gp.pDynamicState       = &dynCI;
+    gp.layout = m_gfx.layout;
+
+    m_gfx.handle = m_device.createGraphicsPipeline(m_pipelineCache, gp).value;
+
+    // Clean up shader modules
+    m_device.destroyShaderModule(vs.module);
+    m_device.destroyShaderModule(fs.module);
 }
+
+void VulkanRenderer::createComputePipeline() {
+    auto csBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/raytrace.comp.glsl"), shaderpipe::ShaderStage::COMPUTE);
+    auto cs = createShaderModule(csBytes); // TODO
+
+    // layout: set0 global, set1 object, set3 compute
+    std::array<vk::DescriptorSetLayout,3> sets = { m_descLayouts.global, m_descLayouts.object, m_descLayouts.compute };
+    vk::PipelineLayoutCreateInfo pl{}; pl.setLayoutCount = sets.size(); pl.pSetLayouts = sets.data();
+    m_comp.layout = m_device.createPipelineLayout(pl);
+
+    vk::ComputePipelineCreateInfo ci{};
+    ci.stage = { {}, vk::ShaderStageFlagBits::eCompute, cs.module, "main" };
+    ci.layout = m_comp.layout;
+    m_comp.handle = m_device.createComputePipeline(m_pipelineCache, ci).value;
+
+    m_device.destroyShaderModule(cs.module);
+}
+
 
 void VulkanRenderer::createPipelineCache() {
     vk::PipelineCacheCreateInfo ci{};
@@ -500,34 +610,62 @@ void VulkanRenderer::createPipelineCache() {
 void VulkanRenderer::createDescriptorSetLayouts() {
     // set = 0 : global UBO @ binding 0
     vk::DescriptorSetLayoutBinding g0{};
-    g0.binding = 0;g0.descriptorType = vk::DescriptorType::eUniformBuffer; g0.descriptorCount = 1;
-    g0.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment |
-        vk::ShaderStageFlagBits::eCompute;
+    g0.binding = 0;
+    g0.descriptorType = vk::DescriptorType::eUniformBuffer;
+    g0.descriptorCount = 1;
+    g0.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute;
 
-    vk::DescriptorSetLayoutCreateInfo gci{}; gci.bindingCount = 1; gci.pBindings = &g0;
+    vk::DescriptorSetLayoutCreateInfo gci{};
+    gci.bindingCount = 1;
+    gci.pBindings = &g0;
     m_descLayouts.global = m_device.createDescriptorSetLayout(gci);
 
     // set = 1 : object UBO @ binding 0
     vk::DescriptorSetLayoutBinding o0{};
-    o0.binding = 0; o0.descriptorType = vk::DescriptorType::eUniformBuffer; o0.descriptorCount = 1;
-    o0.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment |
-        vk::ShaderStageFlagBits::eCompute;
+    o0.binding = 0;
+    o0.descriptorType = vk::DescriptorType::eUniformBuffer;
+    o0.descriptorCount = 1;
+    o0.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute;
 
-    vk::DescriptorSetLayoutCreateInfo oci{}; oci.bindingCount = 1; oci.pBindings = &o0;
+    vk::DescriptorSetLayoutCreateInfo oci{};
+    oci.bindingCount = 1;
+    oci.pBindings = &o0;
     m_descLayouts.object = m_device.createDescriptorSetLayout(oci);
 
-    // TODO: finish this
-    m_descLayouts.material = m_device.createDescriptorSetLayout({});
-    m_descLayouts.compute = m_device.createDescriptorSetLayout({});
+    // set = 2 : material (combined image sampler @ binding 0)
+    vk::DescriptorSetLayoutBinding m0{};
+    m0.binding = 0;
+    m0.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+    m0.descriptorCount = 1;
+    m0.stageFlags = vk::ShaderStageFlagBits::eFragment;
+
+    vk::DescriptorSetLayoutCreateInfo mci{};
+    mci.bindingCount = 1;
+    mci.pBindings = &m0;
+    m_descLayouts.material = m_device.createDescriptorSetLayout(mci);
+
+    // set = 3 : compute (storage image @ binding 0)
+    vk::DescriptorSetLayoutBinding c0{};
+    c0.binding = 0;
+    c0.descriptorType = vk::DescriptorType::eStorageImage;
+    c0.descriptorCount = 1;
+    c0.stageFlags = vk::ShaderStageFlagBits::eCompute;
+
+    vk::DescriptorSetLayoutCreateInfo cci{};
+    cci.bindingCount = 1;
+    cci.pBindings = &c0;
+    m_descLayouts.compute = m_device.createDescriptorSetLayout(cci);
 }
 
 void VulkanRenderer::createDescriptorPools() {
-    std::array<vk::DescriptorPoolSize, 1> sizes = {
-        vk::DescriptorPoolSize{vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT * 2u}
+    std::array<vk::DescriptorPoolSize, 3> sizes = {
+        vk::DescriptorPoolSize{vk::DescriptorType::eUniformBuffer, MAX_FRAMES_IN_FLIGHT * 2u},
+        vk::DescriptorPoolSize{vk::DescriptorType::eCombinedImageSampler, MAX_FRAMES_IN_FLIGHT },
+        vk::DescriptorPoolSize{vk::DescriptorType::eStorageImage, MAX_FRAMES_IN_FLIGHT }
     };
 
     vk::DescriptorPoolCreateInfo pci{};
-    pci.maxSets = MAX_FRAMES_IN_FLIGHT * 2u;
+    pci.maxSets = MAX_FRAMES_IN_FLIGHT * 4u;
     pci.poolSizeCount = static_cast<uint32_t>(sizes.size());
     pci.pPoolSizes = sizes.data();
 
@@ -629,7 +767,8 @@ Buffer VulkanRenderer::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags us
 
     out.handle = buf;
     out.alloc = alloc;
-    //out.alignment = ainfo.requiredAlignment; // TODO
+    out.alignment = ainfo.offset;
+    //out.alignment = ainfo.requiredAlignment; // borken line. top is potential fix.
     if (mapped || (allocFlags & VMA_ALLOCATION_CREATE_MAPPED_BIT)) {
         out.mapped = ainfo.pMappedData;
         if (!out.mapped) vmaMapMemory(m_allocator, alloc, &out.mapped);
@@ -795,7 +934,119 @@ void VulkanRenderer::copyBufferToImage(Buffer &staging, Image &img, uint32_t w, 
 }
 
 void VulkanRenderer::generateMipmaps(Image &img) {
-    /* TODO */
+    // verify linear blit support
+    auto props = m_physicalDevice.getFormatProperties(img.format);
+    if (!(props.optimalTilingFeatures & vk::FormatFeatureFlagBits::eSampledImageFilterLinear)) {
+        return; // no mips generated
+    }
+
+    m_device.resetFences(m_uploadFence);
+    m_device.resetCommandPool(m_uploadPool);
+
+    vk::CommandBufferBeginInfo bi{vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
+    m_uploadCmd.begin(bi);
+
+    vk::ImageMemoryBarrier2 barrier{};
+    barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+    barrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    barrier.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
+    barrier.image = img.handle;
+    barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = img.layers;
+    barrier.subresourceRange.levelCount = 1;
+
+    int32_t mipW = static_cast<int32_t>(img.extent.width);
+    int32_t mipH = static_cast<int32_t>(img.extent.height);
+
+    for (uint32_t i = 1; i < img.mipLevels; ++i) {
+        // transition (i-1) to TRANSFER_SRC_OPTIMAL
+        barrier.oldLayout = (i == 1) ? vk::ImageLayout::eTransferDstOptimal : vk::ImageLayout::eShaderReadOnlyOptimal;
+        barrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        {
+            vk::DependencyInfo dep{};
+            dep.imageMemoryBarrierCount = 1;
+            dep.pImageMemoryBarriers = &barrier;
+            m_uploadCmd.pipelineBarrier2(dep);
+        }
+
+        // blit from (i-1) -> (i)
+        vk::ImageBlit2 blit{};
+        blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+        blit.srcSubresource.mipLevel = i - 1;
+        blit.srcSubresource.baseArrayLayer = 0;
+        blit.srcSubresource.layerCount = img.layers;
+        blit.srcOffsets[0] = vk::Offset3D{0,0,0};
+        blit.srcOffsets[1] = vk::Offset3D{mipW,mipH,1};
+
+        int32_t nextW = std::max(1, mipW / 2);
+        int32_t nextH = std::max(1, mipH / 2);
+
+        blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+        blit.dstSubresource.mipLevel = i;
+        blit.dstSubresource.baseArrayLayer = 0;
+        blit.dstSubresource.layerCount = img.layers;
+        blit.dstOffsets[0] = vk::Offset3D{ 0,0,0 };
+        blit.dstOffsets[1] = vk::Offset3D{nextW,nextH,1};
+
+        vk::BlitImageInfo2 bi2{};
+        bi2.srcImage = img.handle;
+        bi2.srcImageLayout = vk::ImageLayout::eTransferSrcOptimal;
+        bi2.dstImage = img.handle;
+        bi2.dstImageLayout = vk::ImageLayout::eTransferDstOptimal;
+        bi2.regionCount = 1;
+        bi2.pRegions = { &blit };
+        bi2.filter = vk::Filter::eLinear;
+        m_uploadCmd.blitImage2(bi2);
+
+        // Transition (i-1) to SHADER_READ_ONLY
+        barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+        barrier.srcAccessMask = vk::AccessFlagBits2::eTransferRead;
+        barrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+        barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+        barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
+        barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+        {
+            vk::DependencyInfo dep{};
+            dep.imageMemoryBarrierCount = 1;
+            dep.pImageMemoryBarriers = &barrier;
+            m_uploadCmd.pipelineBarrier2(dep);
+        }
+
+        mipW = nextW;
+        mipH = nextH;
+    }
+
+    // transition last level to sahder read
+    barrier.subresourceRange.baseMipLevel = img.mipLevels - 1;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+    barrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
+    barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+    barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+    barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    {
+        vk::DependencyInfo dep{};
+        dep.imageMemoryBarrierCount = 1;
+        dep.pImageMemoryBarriers = &barrier;
+        m_uploadCmd.pipelineBarrier2(dep);
+    }
+
+    m_uploadCmd.end();
+
+    vk::CommandBufferSubmitInfo cbsi{};
+    cbsi.commandBuffer = m_uploadCmd;
+
+    vk::SubmitInfo2 si{};
+    si.commandBufferInfoCount = 1;
+    si.pCommandBufferInfos = &cbsi;
+    auto r = m_graphicsQueue.submit2(1, &si, m_uploadFence);
+    (void)m_device.waitForFences(m_uploadFence, VK_TRUE, UINT64_MAX);
+
+    img.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 }
 
 void VulkanRenderer::beginRendering(vk::CommandBuffer cmd, vk::ImageView colorView, vk::ImageView depthView, vk::Extent2D extent, const std::array<float, 4> &clearColor, float clearDepth, uint32_t clearStencil) {
@@ -872,7 +1123,128 @@ vk::SampleCountFlagBits VulkanRenderer::getMaxUsableSampleCount() const {
 }
 
 void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &cam, const Scene &scene) {
-    /* TODO */
+    auto& fr = m_frames[m_frameIndex];
+    auto cmd = fr.cmd;
+
+    // transition swap image to COLOR_ATTACHMENT_OPTIMAL
+    vk::ImageLayout oldSwapLayout = vk::ImageLayout::eUndefined;
+    if (imageIndex < g_swapImageLayouts.size()) oldSwapLayout = g_swapImageLayouts[imageIndex];
+
+    vk::ImageMemoryBarrier2 toColor{};
+    toColor.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+    toColor.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+    toColor.srcAccessMask = {};
+    toColor.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+    toColor.oldLayout = oldSwapLayout;
+    toColor.newLayout = vk::ImageLayout::eAttachmentOptimal;
+    toColor.image = m_swapImages[imageIndex];
+    toColor.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    toColor.subresourceRange.baseMipLevel = 0;
+    toColor.subresourceRange.levelCount = 1;
+    toColor.subresourceRange.baseArrayLayer = 0;
+    toColor.subresourceRange.layerCount = 1;
+
+    vk::DependencyInfo depToColor{};
+    depToColor.imageMemoryBarrierCount = 1;
+    depToColor.pImageMemoryBarriers = &toColor;
+    cmd.pipelineBarrier2(depToColor);
+    if (imageIndex < g_swapImageLayouts.size()) g_swapImageLayouts[imageIndex] = vk::ImageLayout::eAttachmentOptimal;
+
+    // depth image to DEPTH_ATTACHMENT_OPTIMAL
+    vk::ImageMemoryBarrier2 toDepth{};
+    toDepth.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+    toDepth.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests;
+    toDepth.srcAccessMask = {};
+    toDepth.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
+    toDepth.oldLayout = m_depth.currentLayout;
+    toDepth.newLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+    toDepth.image = m_depth.handle;
+    toDepth.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
+    toDepth.subresourceRange.baseMipLevel = 0;
+    toDepth.subresourceRange.levelCount = 1;
+    toDepth.subresourceRange.baseArrayLayer = 0;
+    toDepth.subresourceRange.layerCount = 1;
+
+    vk::DependencyInfo depToDepth{};
+    depToDepth.imageMemoryBarrierCount = 1;
+    depToDepth.pImageMemoryBarriers = &toDepth;
+    cmd.pipelineBarrier2(depToDepth);
+    m_depth.currentLayout = vk::ImageLayout::eDepthAttachmentOptimal;
+
+    // COMPUTE
+    if (m_rayImage.currentLayout != vk::ImageLayout::eGeneral) {
+        transitionImage(m_rayImage,
+            vk::ImageLayout::eGeneral,
+            vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead,  // src (if sampling previously)
+            vk::PipelineStageFlagBits2::eComputeShader,  vk::AccessFlagBits2::eShaderWrite, // dst
+            vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+    }
+
+    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_comp.handle);
+    std::array<vk::DescriptorSet,3> csSets = { fr.globalSet, fr.objectSet, fr.computeSet };
+    cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_comp.layout, 0,
+                           static_cast<uint32_t>(csSets.size()), csSets.data(), 0, nullptr);
+
+    // Dispatch sized to image
+    const uint32_t localX = 8, localY = 8; // keep in sync with your CS
+    uint32_t gx = (m_swapExtent.width  + localX - 1) / localX;
+    uint32_t gy = (m_swapExtent.height + localY - 1) / localY;
+    cmd.dispatch(gx, gy, 1);
+
+    // Barrier: storage image (write) -> sampled (read)
+    vk::ImageMemoryBarrier2 toSample{};
+    toSample.srcStageMask  = vk::PipelineStageFlagBits2::eComputeShader;
+    toSample.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
+    toSample.dstStageMask  = vk::PipelineStageFlagBits2::eFragmentShader;
+    toSample.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+    toSample.oldLayout = vk::ImageLayout::eGeneral;
+    toSample.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    toSample.image = m_rayImage.handle;
+    toSample.subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 };
+
+    vk::DependencyInfo depToSample{ {}, 0, nullptr, 0, nullptr, 1, &toSample };
+    cmd.pipelineBarrier2(depToSample);
+    m_rayImage.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+
+    // begin render and clear
+    // TODO: move clear color elsewhere
+    const std::array<float, 4> clear = { 0.05f, 0.05f, 0.09f, 1.0f };
+    beginRendering(cmd, m_swapViews[imageIndex], m_depth.view, m_swapExtent, clear, 1.0f, 0);
+
+    // TODO: bind pipeline and draw here
+    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_gfx.handle);
+
+    std::array<vk::DescriptorSet,3> gfxSets = { fr.globalSet, fr.objectSet, fr.materialSet };
+    cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_gfx.layout, 0,
+                           static_cast<uint32_t>(gfxSets.size()), gfxSets.data(), 0, nullptr);
+
+    vk::DeviceSize offsets[] = { 0 };
+    cmd.bindVertexBuffers(0, 1, &m_fsVBO.handle, offsets);
+    cmd.bindIndexBuffer(m_fsIBO.handle, 0, vk::IndexType::eUint32);
+    cmd.drawIndexed(m_fsIndexCount, 1, 0, 0, 0);
+
+    endRendering(cmd);
+
+    // transition swap image to PRESENT_SRC
+    vk::ImageMemoryBarrier2 toPresent{};
+    toPresent.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+    toPresent.dstStageMask = vk::PipelineStageFlagBits2::eNone;
+    toPresent.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
+    toPresent.dstAccessMask = {};
+    toPresent.oldLayout = (imageIndex < g_swapImageLayouts.size()) ? g_swapImageLayouts[imageIndex] : vk::ImageLayout::eAttachmentOptimal;
+    toPresent.newLayout = vk::ImageLayout::ePresentSrcKHR;
+    toPresent.image = m_swapImages[imageIndex];
+    toPresent.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+    toPresent.subresourceRange.baseMipLevel = 0;
+    toPresent.subresourceRange.levelCount = 1;
+    toPresent.subresourceRange.baseArrayLayer = 0;
+    toPresent.subresourceRange.layerCount = 1;
+
+    vk::DependencyInfo depToPresent{};
+    depToPresent.imageMemoryBarrierCount = 1;
+    depToPresent.pImageMemoryBarriers = &toPresent;
+    cmd.pipelineBarrier2(depToPresent);
+    if (imageIndex < g_swapImageLayouts.size()) g_swapImageLayouts[imageIndex] = vk::ImageLayout::ePresentSrcKHR;
 }
 
 void VulkanRenderer::cleanupSwapChain() {
@@ -894,6 +1266,7 @@ void VulkanRenderer::cleanupSwapChain() {
     for (auto s : g_presentSignals) if (s) m_device.destroySemaphore(s);
     g_presentSignals.clear();
     g_imagesInFlight.clear();
+    g_swapImageLayouts.clear();
 }
 
 void VulkanRenderer::recreateSwapChain() {
@@ -926,4 +1299,85 @@ std::vector<char const *> VulkanRenderer::getRequiredDeviceExtensions() {
     };
     return out;
 }
+
+// everything below here probably wont stay long. just to get to feature parity
+void VulkanRenderer::allocateMaterialAndComputeDescriptorSets() {
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        auto& fr = m_frames[i];
+
+        std::array<vk::DescriptorSetLayout,2> layouts = { m_descLayouts.material, m_descLayouts.compute };
+        vk::DescriptorSetAllocateInfo ai{ m_descPools.pool,
+                                          static_cast<uint32_t>(layouts.size()),
+                                          layouts.data() };
+        auto sets = m_device.allocateDescriptorSets(ai);
+        fr.materialSet = sets[0];
+        fr.computeSet  = sets[1];
+
+        // material: sampled image (m_rayImage) + default sampler
+        vk::DescriptorImageInfo sampled{};
+        sampled.sampler = m_defaultSampler.handle;
+        sampled.imageView = m_rayImage.view;
+        sampled.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+
+        // compute: storage image (m_rayImage)
+        vk::DescriptorImageInfo storage{};
+        storage.sampler = vk::Sampler{}; // not used
+        storage.imageView = m_rayImage.view;
+        storage.imageLayout = vk::ImageLayout::eGeneral;
+
+        std::array<vk::WriteDescriptorSet,2> writes{};
+        writes[0] = { fr.materialSet, 0, 0, 1, vk::DescriptorType::eCombinedImageSampler, &sampled };
+        writes[1] = { fr.computeSet,  0, 0, 1, vk::DescriptorType::eStorageImage,         &storage  };
+        m_device.updateDescriptorSets(static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+    }
+}
+
+void VulkanRenderer::createFullscreenQuadBuffers() {
+    // positions (x,y) + uv (u,v)
+    const float verts[] = {
+        -1.f,-1.f, 0.f,0.f,
+         1.f,-1.f, 1.f,0.f,
+         1.f, 1.f, 1.f,1.f,
+        -1.f, 1.f, 0.f,1.f
+    };
+    const uint32_t idx[] = { 0,1,2, 2,3,0 };
+    m_fsIndexCount = 6;
+
+    m_fsVBO = createBuffer(sizeof(verts),
+        vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, false);
+
+    m_fsIBO = createBuffer(sizeof(idx),
+        vk::BufferUsageFlagBits::eIndexBuffer  | vk::BufferUsageFlagBits::eTransferDst,
+        VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, false);
+
+    // Upload via staging
+    uploadToBuffer(verts, sizeof(verts), m_fsVBO, 0);
+    uploadToBuffer(idx,   sizeof(idx),   m_fsIBO, 0);
+}
+
+void VulkanRenderer::createRayTarget() {
+    // Destroy previous on resize
+    if (m_rayImage.view)  m_device.destroyImageView(m_rayImage.view);
+    if (m_rayImage.handle) vmaDestroyImage(m_allocator, m_rayImage.handle, m_rayImage.alloc);
+    m_rayImage = {};
+
+    // RGBA8 storage+sampled so CS can write and FS can sample
+    m_rayImage = createImage(
+        m_swapExtent.width, m_swapExtent.height,
+        vk::Format::eR8G8B8A8Unorm,
+        vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst,
+        vk::ImageTiling::eOptimal,
+        vk::SampleCountFlagBits::e1, 1, 1, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
+    );
+
+    // Transition to GENERAL for first compute write
+    transitionImage(m_rayImage,
+        vk::ImageLayout::eGeneral,
+        vk::PipelineStageFlagBits2::eTopOfPipe, {},
+        vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite,
+        vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
+}
+
+
 }
