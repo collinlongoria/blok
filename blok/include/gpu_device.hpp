@@ -242,6 +242,12 @@ public:
     virtual void destroyQueryPool(QueryPoolHandle) = 0;
     virtual bool getQueryResults(QueryPoolHandle, uint32_t first, uint32_t count, std::span<uint64_t> outTimestampNs) = 0;
 
+    [[nodiscard]] Format backbufferFormat() const { return m_backbufferFormat; }
+
+protected:
+    // TODO: refactor so this is somewhere else.
+    Format m_backbufferFormat = Format::RGBA8_UNORM;
+
 };
 }
 #endif //BLOK_GPU_DEVICE_HPP
