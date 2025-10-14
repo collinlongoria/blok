@@ -9,7 +9,6 @@
 #ifndef BLOK_WEBGPU_DEVICE_HPP
 #define BLOK_WEBGPU_DEVICE_HPP
 
-#include <GLFW/glfw3.h>
 #include <glfw3webgpu.h>
 #include <thread>
 #include <webgpu.h>
@@ -17,8 +16,7 @@
 #include "gpu_device.hpp"
 #include "gpu_types.hpp"
 #include "gpu_handles.hpp"
-#include "gpu_types.hpp"
-#include "gpu_types.hpp"
+#include "window.hpp"
 
 namespace blok {
 // For printing WGPUStringView (which may not be null terminated, as I learned)
@@ -459,7 +457,6 @@ public:
     bool getQueryResults(QueryPoolHandle, uint32_t first, uint32_t count, std::span<uint64_t> outTimestampNs) override;
 
     [[nodiscard]] WGPUDevice deviceWGPU() const { return (m_device); }
-    [[nodiscard]] Format backbufferFormat() const { return m_backbufferFormat; }
 
 private:
     friend class WebGPUCommandList;
@@ -470,7 +467,6 @@ private:
     WGPUQueue m_queue{};
     WGPUSurface m_surface{}; bool m_surfaceConfigured = false;
 
-    Format m_backbufferFormat = Format::RGBA8_UNORM;
     PresentMode m_presentMode = PresentMode::VSYNC;
     uint32_t m_framebufferWidth = 0, m_framebufferHeight = 0;
 
@@ -817,16 +813,13 @@ inline WGPUDevice WebGPUCommandList::deviceWGPU() const {
 
 inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     // Instance
-    /*
-    WGPUInstanceFeatureName feats[] = { WGPUInstanceFeatureName_TimedWaitAny };
-    WGPUInstanceLimits il = {}; il.nextInChain = nullptr; il.timedWaitAnyMaxcount = 4;
+    WGPUInstanceFeatureName feats[] = { WGPUInstanceFeatureName_TimedWaitAny, WGPUInstanceFeatureName_ShaderSourceSPIRV };
+    WGPUInstanceLimits il = {}; il.nextInChain = nullptr; il.timedWaitAnyMaxCount = 4;
 
     WGPUInstanceDescriptor id = WGPU_INSTANCE_DESCRIPTOR_INIT;
-    id.requiredFeatureCount = 1;
+    id.requiredFeatureCount = 2;
     id.requiredFeatures = feats;
     id.requiredLimits = &il;
-     */
-    WGPUInstanceDescriptor id = WGPU_INSTANCE_DESCRIPTOR_INIT;
     m_instance = wgpuCreateInstance(&id);
 
     // Surface
@@ -860,7 +853,7 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     WGPUFuture aFuture = wgpuInstanceRequestAdapter(m_instance, &opts, aci);
     WGPUFutureWaitInfo aWait = WGPU_FUTURE_WAIT_INFO_INIT;
     aWait.future = aFuture;
-    for (;;) {
+    for (;;) { // TODO: I added the extension for timedwaitany, update these
         WGPUWaitStatus st = wgpuInstanceWaitAny(m_instance, 1, &aWait, 0);
         if (st == WGPUWaitStatus_Success) break;
         wgpuInstanceProcessEvents(m_instance); // flushes pending callbacks
@@ -907,9 +900,9 @@ inline WebGPUDevice::WebGPUDevice(const DeviceInitInfo &init) {
     dd.uncapturedErrorCallbackInfo.userdata1 = nullptr;
 
     WGPUDawnTogglesDescriptor toggles = WGPU_DAWN_TOGGLES_DESCRIPTOR_INIT;
-    const char* enabled[] = { "use_dxc" };
+    const char* enabled[] = { "use_dxc", "allow_unsafe_apis" };
     toggles.enabledToggles = enabled;
-    toggles.enabledToggleCount = 1;
+    toggles.enabledToggleCount = 2;
     toggles.chain.next = dd.nextInChain;
     dd.nextInChain = &toggles.chain;
 

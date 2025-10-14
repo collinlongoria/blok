@@ -15,6 +15,7 @@
 #include <string>
 
 #include "math.hpp"
+#include "backend.hpp"
 #include "gpu_flags.hpp"
 
 namespace blok {
