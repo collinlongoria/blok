@@ -510,8 +510,8 @@ Shader VulkanRenderer::createShaderModule(const std::vector<uint32_t> &code) con
 void VulkanRenderer::createGraphicsPipeline() {
     // Compile shaders (assumed provided)
     // glsl_to_spriv(path, stage) -> std::vector<uint8_t>
-    auto vsBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/fullscreen.vert.glsl"), shaderpipe::ShaderStage::VERTEX);
-    auto fsBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/fullscreen.frag.glsl"), shaderpipe::ShaderStage::FRAGMENT);
+    auto vsBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/fullscreen.vert.glsl"), shaderpipe::ShaderStage::VERTEX, shaderpipe::VKVersion::VK_1_4);
+    auto fsBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/fullscreen.frag.glsl"), shaderpipe::ShaderStage::FRAGMENT, shaderpipe::VKVersion::VK_1_4);
     auto vs = createShaderModule(vsBytes);
     auto fs = createShaderModule(fsBytes);
 
@@ -602,8 +602,7 @@ void VulkanRenderer::createGraphicsPipeline() {
 }
 
 void VulkanRenderer::createComputePipeline() {
-    auto csBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/raytrace.comp.glsl"),
-                                             shaderpipe::ShaderStage::COMPUTE);
+    auto csBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/raytrace.comp.glsl"), shaderpipe::ShaderStage::COMPUTE, shaderpipe::VKVersion::VK_1_4);
     auto cs = createShaderModule(csBytes);
 
     vk::DescriptorSetLayout computeOnly[] = { m_descLayouts.compute };
