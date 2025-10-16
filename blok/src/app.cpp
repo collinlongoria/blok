@@ -76,8 +76,8 @@ void App::init() {
         }
         m_renderer = std::make_unique<RendererGL>(m_window);
         m_renderer->init();
-        glfwSetCursorPosCallback(gw, mouse_callback);
-        glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        //glfwSetCursorPosCallback(gw, mouse_callback);
+        //glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
 
     switch (m_backend) {
@@ -118,9 +118,9 @@ void App::update() {
             // ImGui + present path (one swap inside endFrame)
             m_cudaTracer->drawFrame(g_camera, g_scene);
             m_renderer->beginFrame();
-            //static_cast<RendererGL>(m_renderer.get())->setTexture(m_cudaTracer->getGLTex(),
-                                           //                  m_window->getWidth(),
-                                         //                    m_window->getHeight()));
+            reinterpret_cast<RendererGL*>(m_renderer.get())->setTexture(m_cudaTracer->getGLTex(),
+                                                             m_window->getWidth(),
+                                                             m_window->getHeight());
             m_renderer->drawFrame(g_camera, g_scene);
             m_renderer->endFrame();
             break;

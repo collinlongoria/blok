@@ -22,7 +22,6 @@
 #include <imgui.h>
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
-//#include "imgui_renderer.hpp"
 
 using namespace blok;
 
@@ -171,6 +170,12 @@ void RendererGL::drawFrame(const Camera& /*cam*/, const Scene& /*scene*/) {
         ImGui::Begin("CUDA Output");
         ImGui::Text("Displaying raytraced texture:");
         ImGui::Image((ImTextureID)(intptr_t)m_tex, ImVec2((float)m_texW, (float)m_texH));
+        ImGui::End();
+    }
+    else
+    {
+        ImGui::Begin("Test Window");
+        ImGui::Text("OpenGL Window");
         ImGui::End();
     }
 }
