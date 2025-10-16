@@ -605,8 +605,6 @@ void VulkanRenderer::createComputePipeline() {
     auto csBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/raytrace.comp.glsl"), shaderpipe::ShaderStage::COMPUTE, shaderpipe::VKVersion::VK_1_4);
     auto cs = createShaderModule(csBytes);
 
-    auto csReflec = shaderpipe::glsl_to_spirv_with_reflection(shaderpipe::load_shader_file("assets/shaders/raytrace.comp.glsl"), shaderpipe::ShaderStage::COMPUTE, shaderpipe::VKVersion::VK_1_4);
-
     vk::DescriptorSetLayout computeOnly[] = { m_descLayouts.compute };
 
     vk::PushConstantRange pcr{};
