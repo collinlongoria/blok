@@ -9,8 +9,7 @@
 #pragma once
 namespace blok {
 enum class GraphicsApi {
-    OpenGL, /* Not currently supported */
-    CUDA,
+    OpenGL,
     Vulkan
 };
 

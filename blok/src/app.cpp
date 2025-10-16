@@ -69,7 +69,7 @@ void App::init() {
     m_window = std::make_shared<Window>(800, 600, "blok", m_backend);
 
     GLFWwindow* gw = m_window->getGLFWwindow();
-    if (m_backend == GraphicsApi::CUDA || m_backend == GraphicsApi::OpenGL) {
+    if (m_backend == GraphicsApi::OpenGL) {
         glfwMakeContextCurrent(gw);
         if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
             throw std::runtime_error("Failed to load GL with GLAD");
@@ -81,14 +81,10 @@ void App::init() {
     }
 
     switch (m_backend) {
-        case GraphicsApi::OpenGL:
-            break;
-
-        case GraphicsApi::CUDA:
-            m_cudaTracer = std::make_unique<CudaTracer>(m_window->getWidth(), m_window->getHeight());
-            m_cudaTracer->init();
-            break;
-
+    case GraphicsApi::OpenGL:
+        m_cudaTracer = std::make_unique<CudaTracer>(m_window->getWidth(), m_window->getHeight());
+        m_cudaTracer->init();
+        break;
     case GraphicsApi::Vulkan:
         {
             m_renderer = std::make_unique<VulkanRenderer>(m_window.get());
@@ -114,20 +110,11 @@ void App::update() {
 
 
     switch (m_backend) {
-        case GraphicsApi::CUDA:
+        case GraphicsApi::OpenGL:
             // ImGui + present path (one swap inside endFrame)
             m_cudaTracer->drawFrame(g_camera, g_scene);
             m_renderer->beginFrame();
-            //static_cast<RendererGL>(m_renderer.get())->setTexture(m_cudaTracer->getGLTex(),
-                                           //                  m_window->getWidth(),
-                                         //                    m_window->getHeight()));
-            m_renderer->drawFrame(g_camera, g_scene);
-            m_renderer->endFrame();
-            break;
-
-        case GraphicsApi::OpenGL:
-            // ImGui + present path (one swap inside endFrame)
-            m_renderer->beginFrame();
+            reinterpret_cast<RendererGL*>(m_renderer.get())->setTexture(m_cudaTracer->getGLTex(), m_window->getWidth(), m_window->getHeight());
             m_renderer->drawFrame(g_camera, g_scene);
             m_renderer->endFrame();
             break;
