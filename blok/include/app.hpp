@@ -14,15 +14,14 @@
 #include "backend.hpp"
 
 namespace blok {
-class RendererWebGPU;
+
 class Window;
-class RendererGL;  
+class Renderer;
 class CudaTracer;
-class WebGPUDevice;
 
 class App {
 public:
-    explicit App(RenderBackend backend);
+    explicit App(GraphicsApi backend);
     ~App();
 
     void run();
@@ -32,13 +31,11 @@ private:
     void update();
     void shutdown();
 
-    RenderBackend m_backend;
+    GraphicsApi m_backend;
 
     std::shared_ptr<Window>  m_window;
-    std::unique_ptr<RendererGL> m_rendererGL;
-    std::unique_ptr<RendererWebGPU> m_rendererWebGPU;
+    std::unique_ptr<Renderer> m_renderer;
     std::unique_ptr<CudaTracer> m_cudaTracer;
-    std::unique_ptr<WebGPUDevice> m_gpu;
 };
 
 } // namespace blok

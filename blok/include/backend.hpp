@@ -8,11 +8,10 @@
 */
 #pragma once
 namespace blok {
-enum class RenderBackend {
-    OpenGL,
-    WEBGPU_VULKAN,
-    WEBGPU_D3D12, // windows only
-    CUDA
+enum class GraphicsApi {
+    OpenGL, /* Not currently supported */
+    CUDA,
+    Vulkan
 };
 
 }

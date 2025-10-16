@@ -31,7 +31,8 @@ set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
 
 # ---- Subdirectories ----
 add_subdirectory(external/glfw) # builds glfw3
-add_subdirectory(external/dawn) # builds dawn and glfw3webgpu extension
+#add_subdirectory(external/dawn) # builds dawn and glfw3webgpu extension
+add_subdirectory(external/VulkanMemoryAllocator) # builds vma
 add_subdirectory(external/shader-pipe)
 add_subdirectory(blok)
 
