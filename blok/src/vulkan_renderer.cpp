@@ -18,6 +18,9 @@
 #include "shader_pipe.hpp"
 #include "GLFW/glfw3.h"
 
+#include "shader_system.hpp"
+#include "descriptor_system.hpp"
+#include "pipeline_system.hpp"
 #include "window.hpp"
 
 namespace blok {
@@ -91,12 +94,17 @@ void VulkanRenderer::init() {
     createCommandPoolAndBuffers();
     createSyncObjects();
 
-    createDescriptorSetLayouts();
-    createDescriptorPools();
-    createPerFrameUniforms();
-    allocatePerFrameDescriptorSets();
+    //createDescriptorSetLayouts();
+    //createDescriptorPools();
+    //createPerFrameUniforms();
+    //allocatePerFrameDescriptorSets();
 
-    createPipelineCache();
+    m_shaderManager = std::make_unique<ShaderManager>(m_device);
+    m_descriptorSetLayoutCache = std::make_unique<DescriptorSetLayoutCache>(m_device);
+    m_descriptorAllocator = std::make_unique<DescriptorAllocator>(m_device);
+    m_pipelineManager = std::make_unique<PipelineManager>(m_device, m_device.createPipelineCache({}), *m_shaderManager, *m_descriptorSetLayoutCache);
+
+    //createPipelineCache();
     createFullscreenQuadBuffers();
     createRayTarget();
     // default sampler
@@ -109,11 +117,9 @@ void VulkanRenderer::init() {
     si.addressModeW = vk::SamplerAddressMode::eRepeat;
     si.maxAnisotropy = 1.0f;
     m_defaultSampler.handle = m_device.createSampler(si);
-    allocateMaterialAndComputeDescriptorSets();
-    createComputePipeline();
-    createGraphicsPipeline();
-
-
+    //allocateMaterialAndComputeDescriptorSets();
+    //createComputePipeline();
+    //createGraphicsPipeline();
 
     std::cout << "Vulkan API initialized!"  << std::endl;
 }
