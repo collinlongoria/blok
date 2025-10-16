@@ -16,8 +16,14 @@
 #include "vulkan/vulkan.hpp"
 #include <vk_mem_alloc.h>
 
+
+
 namespace blok {
 class Window;
+class ShaderManager;
+class DescriptorSetLayoutCache;
+class DescriptorAllocator;
+class PipelineManager;
 
 struct Buffer {
     vk::Buffer handle{};
@@ -42,16 +48,6 @@ struct Image {
 
 struct Sampler {
     vk::Sampler handle{};
-};
-
-struct Shader {
-    vk::ShaderModule module{};
-    std::string entry{"main"};
-};
-
-struct Pipeline {
-    vk::Pipeline handle{};
-    vk::PipelineLayout layout{};
 };
 
 struct DescriptorLayouts {
@@ -128,10 +124,8 @@ private: // functions
     void createDepthResources();
 
     // Pipelines
-    [[nodiscard]] Shader createShaderModule(const std::vector<uint32_t>& code) const;
-    void createGraphicsPipeline();
-    void createComputePipeline();
     void createPipelineCache();
+    void createDefaultPipeline(); // test for now
 
     // Descriptors
     void createDescriptorSetLayouts();
@@ -212,9 +206,14 @@ private: // resources
     vk::PipelineCache m_pipelineCache{};
 
     // Graphics Pipeline
-    Pipeline m_gfx{};
     vk::VertexInputBindingDescription m_vertexBinding{};
     std::vector<vk::VertexInputAttributeDescription> m_vertexAttrs{};
+
+    // Resources
+    std::unique_ptr<ShaderManager> m_shaderManager;
+    std::unique_ptr<DescriptorSetLayoutCache> m_descriptorSetLayoutCache;
+    std::unique_ptr<DescriptorAllocator> m_descriptorAllocator;
+    std::unique_ptr<PipelineManager> m_pipelineManager;
 
     // Fullscreen geometry and output image
     Buffer m_fsVBO{};
@@ -240,7 +239,6 @@ private: // resources
     Sampler m_defaultSampler{};
 
     // Compute
-    Pipeline m_compute{};
     vk::DescriptorSet m_computeSet{};
 
     // Flags
