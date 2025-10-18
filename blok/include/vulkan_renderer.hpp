@@ -19,6 +19,7 @@
 
 
 namespace blok {
+struct BuiltProgram;
 class Window;
 class ShaderManager;
 class DescriptorSetLayoutCache;
@@ -50,17 +51,6 @@ struct Sampler {
     vk::Sampler handle{};
 };
 
-struct DescriptorLayouts {
-    vk::DescriptorSetLayout global{};
-    vk::DescriptorSetLayout material{};
-    vk::DescriptorSetLayout object{};
-    vk::DescriptorSetLayout compute{};
-};
-
-struct DescriptorPoolPack {
-    vk::DescriptorPool pool{};
-};
-
 struct FrameResources {
     // Sync
     vk::Semaphore imageAvailable{};
@@ -73,19 +63,7 @@ struct FrameResources {
 
     // Uniforms
     Buffer globalUBO{};
-    Buffer objectUBO{};
-
-    // Descriptor sets
-    vk::DescriptorSet globalSet{};
-    vk::DescriptorSet objectSet{};
-    vk::DescriptorSet materialSet{};
-    vk::DescriptorSet computeSet{};
-};
-
-struct ComputePC {
-    int32_t width;
-    int32_t height;
-    float   tFrame;
+    vk::DeviceSize uboHead = 0;
 };
 
 struct QueueFamilyIndices {
@@ -125,19 +103,19 @@ private: // functions
 
     // Pipelines
     void createPipelineCache();
-    void createDefaultPipeline(); // test for now
-
-    // Descriptors
-    void createDescriptorSetLayouts();
-    void createDescriptorPools();
-    void allocatePerFrameDescriptorSets();
 
     // Commands and Sync
     void createCommandPoolAndBuffers();
     void createSyncObjects();
 
+    // Descriptor Sets
+    std::vector<vk::DescriptorSet> prepareDescriptorSets(const BuiltProgram& program, FrameResources& fr);
+
     // Per frame UBOs
     void createPerFrameUniforms();
+
+    // Push Constants
+    void pushProgramConstants(const BuiltProgram& program, vk::CommandBuffer cmd);
 
     // Upload
     Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO, bool mapped = false);
@@ -163,11 +141,6 @@ private: // functions
     // Cleanup and Recreation
     void cleanupSwapChain();
     void recreateSwapChain();
-
-    // Current Render Pipeline
-    void createFullscreenQuadBuffers();
-    void createRayTarget();
-    void allocateMaterialAndComputeDescriptorSets();
 
     std::vector<const char*> getRequiredExtensions();
     std::vector<const char*> getRequiredDeviceExtensions();
@@ -215,16 +188,6 @@ private: // resources
     std::unique_ptr<DescriptorAllocator> m_descriptorAllocator;
     std::unique_ptr<PipelineManager> m_pipelineManager;
 
-    // Fullscreen geometry and output image
-    Buffer m_fsVBO{};
-    Buffer m_fsIBO{};
-    uint32_t m_fsIndexCount = 0;
-    Image m_rayImage{};
-
-    // Descriptor layouts
-    DescriptorLayouts m_descLayouts{};
-    DescriptorPoolPack m_descPools{};
-
     // Per-frame
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
     uint32_t m_frameIndex = 0;
@@ -234,12 +197,6 @@ private: // resources
     vk::CommandPool m_uploadPool{};
     vk::CommandBuffer m_uploadCmd{};
     vk::Fence m_uploadFence{};
-
-    // Samplers
-    Sampler m_defaultSampler{};
-
-    // Compute
-    vk::DescriptorSet m_computeSet{};
 
     // Flags
     bool m_swapchainDirty = false;

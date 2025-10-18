@@ -33,10 +33,27 @@ struct PipelineDesc {
     bool isCompute = false;
 };
 
+struct BindingInfo {
+    uint32_t set;
+    uint32_t binding;
+    VkDescriptorType type;
+    uint32_t count;
+    VkShaderStageFlags stageFlags;
+};
+
+struct PCRange {
+    uint32_t offset;
+    uint32_t size;
+    VkShaderStageFlags stageFlags;
+};
+
 struct BuiltProgram {
     vk::PipelineLayout layout{};
     vk::Pipeline pipeline{};
     std::vector<vk::DescriptorSetLayout> setLayouts;
+    std::vector<BindingInfo> bindings;
+    std::vector<PCRange> pushConstants;
+    bool isCompute = false;
 };
 
 class PipelineManager {
