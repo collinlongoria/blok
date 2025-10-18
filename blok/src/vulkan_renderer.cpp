@@ -72,6 +72,16 @@ static vk::ImageAspectFlags aspectFromFormat(vk::Format fmt) {
     }
 }
 
+static vk::DescriptorBufferInfo suballocUbo(FrameResources& fr, size_t bytes, size_t alignment = 256) {
+    fr.uboHead = (fr.uboHead + alignment - 1) & ~(alignment - 1);
+    if (fr.uboHead + bytes > fr.globalUBO.size) {
+        bytes = std::min<size_t>(bytes, size_t(fr.globalUBO.size - fr.uboHead));
+    }
+    auto offset = fr.uboHead;
+    fr.uboHead += bytes;
+    return vk::DescriptorBufferInfo{ fr.globalUBO.handle, offset, bytes };
+}
+
 VulkanRenderer::VulkanRenderer(Window* window) {
     m_window = std::shared_ptr<Window>(window, [](Window*){});
 }
@@ -94,32 +104,12 @@ void VulkanRenderer::init() {
     createCommandPoolAndBuffers();
     createSyncObjects();
 
-    //createDescriptorSetLayouts();
-    //createDescriptorPools();
-    //createPerFrameUniforms();
-    //allocatePerFrameDescriptorSets();
-
     m_shaderManager = std::make_unique<ShaderManager>(m_device);
     m_descriptorSetLayoutCache = std::make_unique<DescriptorSetLayoutCache>(m_device);
     m_descriptorAllocator = std::make_unique<DescriptorAllocator>(m_device);
     m_pipelineManager = std::make_unique<PipelineManager>(m_device, m_device.createPipelineCache({}), *m_shaderManager, *m_descriptorSetLayoutCache);
 
-    //createPipelineCache();
-    createFullscreenQuadBuffers();
-    createRayTarget();
-    // default sampler
-    vk::SamplerCreateInfo si{};
-    si.magFilter = vk::Filter::eLinear;
-    si.minFilter = vk::Filter::eLinear;
-    si.mipmapMode = vk::SamplerMipmapMode::eLinear;
-    si.addressModeU = vk::SamplerAddressMode::eRepeat;
-    si.addressModeV = vk::SamplerAddressMode::eRepeat;
-    si.addressModeW = vk::SamplerAddressMode::eRepeat;
-    si.maxAnisotropy = 1.0f;
-    m_defaultSampler.handle = m_device.createSampler(si);
-    //allocateMaterialAndComputeDescriptorSets();
-    //createComputePipeline();
-    //createGraphicsPipeline();
+    createPerFrameUniforms();
 
     std::cout << "Vulkan API initialized!"  << std::endl;
 }
@@ -214,7 +204,6 @@ void VulkanRenderer::shutdown() {
     // per frame resources
     for (auto& fr : m_frames) {
         if (fr.globalUBO.handle) { vmaDestroyBuffer(m_allocator, fr.globalUBO.handle, fr.globalUBO.alloc); }
-        if (fr.objectUBO.handle) { vmaDestroyBuffer(m_allocator, fr.objectUBO.handle, fr.objectUBO.alloc); }
         if (fr.cmdPool) { m_device.destroyCommandPool(fr.cmdPool); }
         if (fr.imageAvailable) { m_device.destroySemaphore(fr.imageAvailable); }
         if (fr.renderFinished) { m_device.destroySemaphore(fr.renderFinished); }
@@ -225,28 +214,7 @@ void VulkanRenderer::shutdown() {
     if (m_uploadCmd) { m_device.freeCommandBuffers(m_uploadPool, 1, &m_uploadCmd); }
     if (m_uploadPool) { m_device.destroyCommandPool(m_uploadPool); }
 
-    if (m_defaultSampler.handle) { m_device.destroySampler(m_defaultSampler.handle); }
-
-    // pipeline and device
-    if (m_gfx.handle) { m_device.destroyPipeline(m_gfx.handle); }
-    if (m_gfx.layout) { m_device.destroyPipelineLayout(m_gfx.layout); }
-    if (m_pipelineCache) { m_device.destroyPipelineCache(m_pipelineCache); }
-
-    if (m_descLayouts.global) { m_device.destroyDescriptorSetLayout(m_descLayouts.global); }
-    if (m_descLayouts.material) { m_device.destroyDescriptorSetLayout(m_descLayouts.material); }
-    if (m_descLayouts.object) { m_device.destroyDescriptorSetLayout(m_descLayouts.object); }
-    if (m_descLayouts.compute) { m_device.destroyDescriptorSetLayout(m_descLayouts.compute); }
-
-    if (m_descPools.pool) { m_device.destroyDescriptorPool(m_descPools.pool); }
-
     cleanupSwapChain();
-
-    // Destroy custom GPU resources
-    if (m_rayImage.view)  m_device.destroyImageView(m_rayImage.view);
-    if (m_rayImage.handle) vmaDestroyImage(m_allocator, m_rayImage.handle, m_rayImage.alloc);
-    if (m_fsVBO.handle)    vmaDestroyBuffer(m_allocator, m_fsVBO.handle, m_fsVBO.alloc);
-    if (m_fsIBO.handle)    vmaDestroyBuffer(m_allocator, m_fsIBO.handle, m_fsIBO.alloc);
-
 
     destroyAllocator();
 
@@ -504,251 +472,9 @@ void VulkanRenderer::createDepthResources() {
         vk::ImageTiling::eOptimal, samples, 1, 1, VMA_MEMORY_USAGE_AUTO);
 }
 
-Shader VulkanRenderer::createShaderModule(const std::vector<uint32_t> &code) const {
-    vk::ShaderModuleCreateInfo ci{};
-    ci.codeSize = code.size() * sizeof(uint32_t);
-    ci.pCode = code.data();
-    Shader s{};
-    s.module = m_device.createShaderModule(ci);
-    return s;
-}
-
-void VulkanRenderer::createGraphicsPipeline() {
-    // Compile shaders (assumed provided)
-    // glsl_to_spriv(path, stage) -> std::vector<uint8_t>
-    auto vsBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/fullscreen.vert.glsl"), shaderpipe::ShaderStage::VERTEX, shaderpipe::VKVersion::VK_1_4);
-    auto fsBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/fullscreen.frag.glsl"), shaderpipe::ShaderStage::FRAGMENT, shaderpipe::VKVersion::VK_1_4);
-    auto vs = createShaderModule(vsBytes);
-    auto fs = createShaderModule(fsBytes);
-
-    vk::PipelineShaderStageCreateInfo stages[2] = {
-        { {}, vk::ShaderStageFlagBits::eVertex,   vs.module, "main" },
-        { {}, vk::ShaderStageFlagBits::eFragment, fs.module, "main" }
-    };
-
-    // Vertex layout: vec2 pos (loc 0), vec2 uv (loc 1)
-    vk::VertexInputBindingDescription bind{ 0, 4 * sizeof(float), vk::VertexInputRate::eVertex };
-    std::array<vk::VertexInputAttributeDescription,2> attrs = {{
-        {0, 0, vk::Format::eR32G32Sfloat,            0},
-        {1, 0, vk::Format::eR32G32Sfloat, 2*sizeof(float)}
-    }};
-    vk::PipelineVertexInputStateCreateInfo vi{ {}, 1, &bind, static_cast<uint32_t>(attrs.size()), attrs.data() };
-
-    vk::PipelineInputAssemblyStateCreateInfo ia{ {}, vk::PrimitiveTopology::eTriangleList, VK_FALSE };
-
-    vk::Viewport vp{}; // dynamic
-    vp.x        = 0.0f;
-    vp.y        = 0.0f;
-    vp.width    = static_cast<float>(m_swapExtent.width);
-    vp.height   = static_cast<float>(m_swapExtent.height);
-    vp.minDepth = 0.0f;
-    vp.maxDepth = 1.0f;
-
-    vk::Rect2D sc{};
-    sc.offset = vk::Offset2D{0, 0};
-    sc.extent = m_swapExtent;
-
-    vk::PipelineViewportStateCreateInfo vpState{};
-    vpState.viewportCount = 1;              // must be > 0
-    vpState.pViewports    = &vp;            // static viewport
-    vpState.scissorCount  = 1;              // must be > 0
-    vpState.pScissors     = &sc;
-
-    vk::PipelineRasterizationStateCreateInfo rs{};
-    rs.polygonMode = vk::PolygonMode::eFill;
-    rs.cullMode = vk::CullModeFlagBits::eNone;
-    rs.frontFace = vk::FrontFace::eCounterClockwise;
-    rs.lineWidth = 1.0f;
-
-    vk::PipelineMultisampleStateCreateInfo ms{}; // sampleCount implicitly 1 when dynamic rendering uses 1
-
-    vk::PipelineDepthStencilStateCreateInfo ds{};
-    ds.depthTestEnable  = VK_FALSE; // fullscreen pass; depth clear is fine
-    ds.depthWriteEnable = VK_FALSE;
-
-    vk::PipelineColorBlendAttachmentState cba{};
-    cba.colorWriteMask = vk::ColorComponentFlagBits::eR | vk::ColorComponentFlagBits::eG |
-                         vk::ColorComponentFlagBits::eB | vk::ColorComponentFlagBits::eA;
-    vk::PipelineColorBlendStateCreateInfo cb{ {}, VK_FALSE, vk::LogicOp::eClear, 1, &cba };
-
-    std::array<vk::DynamicState,2> dyn{ vk::DynamicState::eViewport, vk::DynamicState::eScissor };
-    vk::PipelineDynamicStateCreateInfo dynCI{ {}, static_cast<uint32_t>(dyn.size()), dyn.data() };
-
-    // Pipeline layout: set0 global, set1 object, set2 material
-    std::array<vk::DescriptorSetLayout,3> sets = { m_descLayouts.global, m_descLayouts.object, m_descLayouts.material };
-    vk::PipelineLayoutCreateInfo pl{};
-    pl.setLayoutCount = static_cast<uint32_t>(sets.size());
-    pl.pSetLayouts = sets.data();
-    m_gfx.layout = m_device.createPipelineLayout(pl);
-
-    // Dynamic rendering formats (+ sample count = 1)
-    vk::PipelineRenderingCreateInfo renderCI{};
-    renderCI.colorAttachmentCount = 1;
-    renderCI.pColorAttachmentFormats = &m_colorFormat;
-    renderCI.depthAttachmentFormat   = m_depthFormat;
-
-    vk::GraphicsPipelineCreateInfo gp{};
-    gp.pNext = &renderCI;
-    gp.stageCount = 2; gp.pStages = stages;
-    gp.pVertexInputState   = &vi;
-    gp.pInputAssemblyState = &ia;
-    gp.pViewportState      = &vpState;
-    gp.pRasterizationState = &rs;
-    gp.pMultisampleState   = &ms;
-    gp.pDepthStencilState  = &ds;
-    gp.pColorBlendState    = &cb;
-    gp.pDynamicState       = &dynCI;
-    gp.layout = m_gfx.layout;
-
-    m_gfx.handle = m_device.createGraphicsPipeline(m_pipelineCache, gp).value;
-
-    // Clean up shader modules
-    m_device.destroyShaderModule(vs.module);
-    m_device.destroyShaderModule(fs.module);
-}
-
-void VulkanRenderer::createComputePipeline() {
-    auto csBytes = shaderpipe::glsl_to_spirv(shaderpipe::load_shader_file("assets/shaders/raytrace.comp.glsl"), shaderpipe::ShaderStage::COMPUTE, shaderpipe::VKVersion::VK_1_4);
-    auto cs = createShaderModule(csBytes);
-
-    vk::DescriptorSetLayout computeOnly[] = { m_descLayouts.compute };
-
-    vk::PushConstantRange pcr{};
-    pcr.stageFlags = vk::ShaderStageFlagBits::eCompute;
-    pcr.offset     = 0;
-    pcr.size       = sizeof(ComputePC);
-
-    vk::PipelineLayoutCreateInfo pl{};
-    pl.setLayoutCount = 1;
-    pl.pSetLayouts    = computeOnly;
-    pl.pushConstantRangeCount = 1;
-    pl.pPushConstantRanges    = &pcr;
-    m_compute.layout = m_device.createPipelineLayout(pl);
-
-    vk::ComputePipelineCreateInfo ci{};
-    ci.stage  = { {}, vk::ShaderStageFlagBits::eCompute, cs.module, "main" };
-    ci.layout = m_compute.layout;
-    m_compute.handle = m_device.createComputePipeline(m_pipelineCache, ci).value;
-
-    m_device.destroyShaderModule(cs.module);
-}
-
-
 void VulkanRenderer::createPipelineCache() {
     vk::PipelineCacheCreateInfo ci{};
     m_pipelineCache = m_device.createPipelineCache(ci);
-}
-
-void VulkanRenderer::createDescriptorSetLayouts() {
-    // set = 0 : global UBO @ binding 0
-    vk::DescriptorSetLayoutBinding g0{};
-    g0.binding = 0;
-    g0.descriptorType = vk::DescriptorType::eUniformBuffer;
-    g0.descriptorCount = 1;
-    g0.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute;
-
-    vk::DescriptorSetLayoutCreateInfo gci{};
-    gci.bindingCount = 1;
-    gci.pBindings = &g0;
-    m_descLayouts.global = m_device.createDescriptorSetLayout(gci);
-
-    // set = 1 : object UBO @ binding 0
-    vk::DescriptorSetLayoutBinding o0{};
-    o0.binding = 0;
-    o0.descriptorType = vk::DescriptorType::eUniformBuffer;
-    o0.descriptorCount = 1;
-    o0.stageFlags = vk::ShaderStageFlagBits::eVertex | vk::ShaderStageFlagBits::eFragment | vk::ShaderStageFlagBits::eCompute;
-
-    vk::DescriptorSetLayoutCreateInfo oci{};
-    oci.bindingCount = 1;
-    oci.pBindings = &o0;
-    m_descLayouts.object = m_device.createDescriptorSetLayout(oci);
-
-    // set = 2 : material (combined image sampler @ binding 0)
-    vk::DescriptorSetLayoutBinding m0{};
-    m0.binding = 0;
-    m0.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-    m0.descriptorCount = 1;
-    m0.stageFlags = vk::ShaderStageFlagBits::eFragment;
-
-    vk::DescriptorSetLayoutCreateInfo mci{};
-    mci.bindingCount = 1;
-    mci.pBindings = &m0;
-    m_descLayouts.material = m_device.createDescriptorSetLayout(mci);
-
-    // set = 3 : compute (storage image @ binding 0)
-    vk::DescriptorSetLayoutBinding c0{};
-    c0.binding         = 0;
-    c0.descriptorType  = vk::DescriptorType::eStorageImage;
-    c0.descriptorCount = 1;
-    c0.stageFlags      = vk::ShaderStageFlagBits::eCompute;
-
-    vk::DescriptorSetLayoutCreateInfo cci{};
-    cci.bindingCount = 1;
-    cci.pBindings    = &c0;
-    m_descLayouts.compute = m_device.createDescriptorSetLayout(cci);
-}
-
-void VulkanRenderer::createDescriptorPools() {
-    // How many sets do we make per frame?
-    // set0: global UBO
-    // set1: object UBO
-    // set2: material (combined image sampler)
-    // set3: compute  (storage image)
-    const uint32_t setsPerFrame = 4;
-
-    // Headroom for anything else that might grab sets from the same pool
-    // (e.g., transient materials, imgui, etc.)
-    const uint32_t extraSets = 16;
-
-    // Descriptor counts per frame (match what you're writing)
-    const uint32_t ubosPerFrame      = 2; // global + object
-    const uint32_t samplersPerFrame  = 1; // material combined image sampler
-    const uint32_t storageImgPerFrame= 1; // compute storage image
-
-    const uint32_t frames = MAX_FRAMES_IN_FLIGHT;
-
-    // OVERSIZE THESE to avoid VK_ERROR_OUT_OF_POOL_MEMORY
-    const uint32_t totalUBOs        = ubosPerFrame       * frames + 16;   // + headroom
-    const uint32_t totalCombinedImg = samplersPerFrame   * frames + 16;
-    const uint32_t totalStorageImg  = storageImgPerFrame * frames + 16;
-
-    std::array<vk::DescriptorPoolSize, 3> sizes = {
-        vk::DescriptorPoolSize{ vk::DescriptorType::eUniformBuffer,        totalUBOs        },
-        vk::DescriptorPoolSize{ vk::DescriptorType::eCombinedImageSampler, totalCombinedImg },
-        vk::DescriptorPoolSize{ vk::DescriptorType::eStorageImage,         totalStorageImg  },
-    };
-
-    vk::DescriptorPoolCreateInfo pci{};
-    // Allow freeing sets individually if you recreate per-frame (optional but handy)
-    pci.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
-    pci.maxSets = setsPerFrame * frames + extraSets;  // <-- IMPORTANT
-    pci.poolSizeCount = static_cast<uint32_t>(sizes.size());
-    pci.pPoolSizes = sizes.data();
-
-    m_descPools.pool = m_device.createDescriptorPool(pci);
-}
-
-void VulkanRenderer::allocatePerFrameDescriptorSets() {
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        auto& fr = m_frames[i];
-
-        std::array<vk::DescriptorSetLayout,2> layouts = { m_descLayouts.global, m_descLayouts.object };
-        vk::DescriptorSetAllocateInfo ai{}; ai.descriptorPool = m_descPools.pool;
-        ai.descriptorSetCount = layouts.size(); ai.pSetLayouts = layouts.data();
-        auto out = m_device.allocateDescriptorSets(ai); //TODO: fix this line
-        fr.globalSet = out[0];
-        fr.objectSet = out[1];
-
-        vk::DescriptorBufferInfo gbi{ fr.globalUBO.handle, 0, VK_WHOLE_SIZE };
-        vk::DescriptorBufferInfo obi{ fr.objectUBO.handle, 0, VK_WHOLE_SIZE };
-
-        std::array<vk::WriteDescriptorSet, 2> writes{};
-        writes[0].dstSet = fr.globalSet; writes[0].dstBinding = 0; writes[0].descriptorType = vk::DescriptorType::eUniformBuffer; writes[0].descriptorCount = 1; writes[0].pBufferInfo = &gbi;
-        writes[1].dstSet = fr.objectSet; writes[1].dstBinding = 0; writes[1].descriptorType = vk::DescriptorType::eUniformBuffer; writes[1].descriptorCount = 1; writes[1].pBufferInfo = &obi;
-
-        m_device.updateDescriptorSets(static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-    }
 }
 
 void VulkanRenderer::createCommandPoolAndBuffers() {
@@ -799,7 +525,53 @@ void VulkanRenderer::createPerFrameUniforms() {
     constexpr vk::DeviceSize defaultUBOSize = 64ull * 1024ull; // 64 KiB
     for (auto& fr : m_frames) {
         fr.globalUBO = createBuffer(defaultUBOSize, vk::BufferUsageFlagBits::eUniformBuffer, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, true);
-        fr.objectUBO = createBuffer(defaultUBOSize, vk::BufferUsageFlagBits::eUniformBuffer, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, true);
+    }
+}
+
+std::vector<vk::DescriptorSet> VulkanRenderer::prepareDescriptorSets(const BuiltProgram &program, FrameResources &fr) {
+    std::vector<vk::DescriptorSet> out(program.setLayouts.size(), {});
+
+    // allocate one set per layout
+    for (uint32_t set = 0; set < program.setLayouts.size(); ++set)
+        out[set] = m_descriptorAllocator->allocate(program.setLayouts[set]);
+
+    // accumulate writes
+    std::vector<vk::WriteDescriptorSet> writes;
+    writes.reserve(program.bindings.size());
+
+    // temp holders for buffer/image infos
+    std::vector<vk::DescriptorBufferInfo> bufferInfos;
+    std::vector<vk::DescriptorImageInfo> imageInfos;
+    bufferInfos.reserve(program.bindings.size());
+    imageInfos.reserve(program.bindings.size());
+
+    for (auto& b : program.bindings) {
+        auto dstSet = out.at(b.set);
+
+        switch (static_cast<vk::DescriptorType>(b.type)) {
+        case vk::DescriptorType::eUniformBuffer: {
+            constexpr size_t defaultSize = 256;
+            auto info = suballocUbo(fr, defaultSize);
+            bufferInfos.push_back(info);
+
+            vk::WriteDescriptorSet w{};
+            w.dstSet = dstSet;
+            w.dstBinding = b.binding;
+            w.descriptorType = vk::DescriptorType::eUniformBuffer;
+            w.descriptorCount = 1;
+            w.pBufferInfo = &bufferInfos.back();
+            writes.push_back(w);
+            break;
+        }
+        case vk::DescriptorType::eStorageBuffer: {
+            break;
+        }
+        case vk::DescriptorType::eStorageImage: {
+            vk::DescriptorImageInfo ii{};
+            ii.imageLayout = vk::ImageLayout::eGeneral;
+           // ii.imageView = m_ray
+        }
+        }
     }
 }
 
@@ -1180,139 +952,7 @@ vk::SampleCountFlagBits VulkanRenderer::getMaxUsableSampleCount() const {
 }
 
 void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &cam, const Scene &scene) {
-    auto& fr = m_frames[m_frameIndex];
-    auto cmd = fr.cmd;
 
-    // transition swap image to COLOR_ATTACHMENT_OPTIMAL
-    vk::ImageLayout oldSwapLayout = vk::ImageLayout::eUndefined;
-    if (imageIndex < g_swapImageLayouts.size()) oldSwapLayout = g_swapImageLayouts[imageIndex];
-
-    vk::ImageMemoryBarrier2 toColor{};
-    toColor.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
-    toColor.dstStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
-    toColor.srcAccessMask = {};
-    toColor.dstAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-    toColor.oldLayout = oldSwapLayout;
-    toColor.newLayout = vk::ImageLayout::eColorAttachmentOptimal;
-    toColor.image = m_swapImages[imageIndex];
-    toColor.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    toColor.subresourceRange.baseMipLevel = 0;
-    toColor.subresourceRange.levelCount = 1;
-    toColor.subresourceRange.baseArrayLayer = 0;
-    toColor.subresourceRange.layerCount = 1;
-
-    vk::DependencyInfo depToColor{};
-    depToColor.imageMemoryBarrierCount = 1;
-    depToColor.pImageMemoryBarriers = &toColor;
-    cmd.pipelineBarrier2(depToColor);
-    if (imageIndex < g_swapImageLayouts.size()) g_swapImageLayouts[imageIndex] = vk::ImageLayout::eColorAttachmentOptimal;
-
-    // depth image to DEPTH_ATTACHMENT_OPTIMAL
-    vk::ImageMemoryBarrier2 toDepth{};
-    toDepth.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
-    toDepth.dstStageMask = vk::PipelineStageFlagBits2::eEarlyFragmentTests;
-    toDepth.srcAccessMask = {};
-    toDepth.dstAccessMask = vk::AccessFlagBits2::eDepthStencilAttachmentWrite;
-    toDepth.oldLayout = m_depth.currentLayout;
-    toDepth.newLayout = vk::ImageLayout::eDepthAttachmentOptimal;
-    toDepth.image = m_depth.handle;
-    toDepth.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eDepth;
-    toDepth.subresourceRange.baseMipLevel = 0;
-    toDepth.subresourceRange.levelCount = 1;
-    toDepth.subresourceRange.baseArrayLayer = 0;
-    toDepth.subresourceRange.layerCount = 1;
-
-    vk::DependencyInfo depToDepth{};
-    depToDepth.imageMemoryBarrierCount = 1;
-    depToDepth.pImageMemoryBarriers = &toDepth;
-    cmd.pipelineBarrier2(depToDepth);
-    m_depth.currentLayout = vk::ImageLayout::eDepthAttachmentOptimal;
-
-    // COMPUTE
-    if (m_rayImage.currentLayout != vk::ImageLayout::eGeneral) {
-        transitionImage(m_rayImage,
-            vk::ImageLayout::eGeneral,
-            vk::PipelineStageFlagBits2::eFragmentShader, vk::AccessFlagBits2::eShaderRead,  // src (if sampling previously)
-            vk::PipelineStageFlagBits2::eComputeShader,  vk::AccessFlagBits2::eShaderWrite, // dst
-            vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
-    }
-
-    cmd.bindPipeline(vk::PipelineBindPoint::eCompute, m_compute.handle);
-
-    cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, m_compute.layout,
-                           /*firstSet*/ 0,
-                           /*descriptorSetCount*/ 1,
-                           &fr.computeSet,
-                           /*dynamicOffsetCount*/ 0, /*pDynamicOffsets*/ nullptr);
-
-    ComputePC pc;
-    pc.width  = static_cast<int32_t>(m_swapExtent.width);
-    pc.height = static_cast<int32_t>(m_swapExtent.height);
-    pc.tFrame = timer;
-    timer += 0.001f;
-
-    cmd.pushConstants(m_compute.layout, vk::ShaderStageFlagBits::eCompute, 0, sizeof(ComputePC), &pc);
-
-    // Dispatch sized to image
-    const uint32_t localX = 8, localY = 8; // keep in sync with your CS
-    uint32_t gx = (m_swapExtent.width  + localX - 1) / localX;
-    uint32_t gy = (m_swapExtent.height + localY - 1) / localY;
-    cmd.dispatch(gx, gy, 1);
-
-    // Barrier: storage image (write) -> sampled (read)
-    vk::ImageMemoryBarrier2 toSample{};
-    toSample.srcStageMask  = vk::PipelineStageFlagBits2::eComputeShader;
-    toSample.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
-    toSample.dstStageMask  = vk::PipelineStageFlagBits2::eFragmentShader;
-    toSample.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
-    toSample.oldLayout = vk::ImageLayout::eGeneral;
-    toSample.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    toSample.image = m_rayImage.handle;
-    toSample.subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 };
-
-    vk::DependencyInfo depToSample{ {}, 0, nullptr, 0, nullptr, 1, &toSample };
-    cmd.pipelineBarrier2(depToSample);
-    m_rayImage.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-
-    // begin render and clear
-    // TODO: move clear color elsewhere
-    const std::array<float, 4> clear = { 1.0f, 0.0f, 0.0f, 1.0f };
-    beginRendering(cmd, m_swapViews[imageIndex], m_depth.view, m_swapExtent, clear, 1.0f, 0);
-
-    // TODO: bind pipeline and draw here
-    cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, m_gfx.handle);
-
-    std::array<vk::DescriptorSet,3> gfxSets = { fr.globalSet, fr.objectSet, fr.materialSet };
-    cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, m_gfx.layout, 0,
-                           static_cast<uint32_t>(gfxSets.size()), gfxSets.data(), 0, nullptr);
-
-    vk::DeviceSize offsets[] = { 0 };
-    cmd.bindVertexBuffers(0, 1, &m_fsVBO.handle, offsets);
-    cmd.bindIndexBuffer(m_fsIBO.handle, 0, vk::IndexType::eUint32);
-    cmd.drawIndexed(m_fsIndexCount, 1, 0, 0, 0);
-
-    endRendering(cmd);
-
-    // transition swap image to PRESENT_SRC
-    vk::ImageMemoryBarrier2 toPresent{};
-    toPresent.srcStageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
-    toPresent.dstStageMask = vk::PipelineStageFlagBits2::eNone;
-    toPresent.srcAccessMask = vk::AccessFlagBits2::eColorAttachmentWrite;
-    toPresent.dstAccessMask = {};
-    toPresent.oldLayout = (imageIndex < g_swapImageLayouts.size()) ? g_swapImageLayouts[imageIndex] : vk::ImageLayout::eColorAttachmentOptimal;
-    toPresent.newLayout = vk::ImageLayout::ePresentSrcKHR;
-    toPresent.image = m_swapImages[imageIndex];
-    toPresent.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    toPresent.subresourceRange.baseMipLevel = 0;
-    toPresent.subresourceRange.levelCount = 1;
-    toPresent.subresourceRange.baseArrayLayer = 0;
-    toPresent.subresourceRange.layerCount = 1;
-
-    vk::DependencyInfo depToPresent{};
-    depToPresent.imageMemoryBarrierCount = 1;
-    depToPresent.pImageMemoryBarriers = &toPresent;
-    cmd.pipelineBarrier2(depToPresent);
-    if (imageIndex < g_swapImageLayouts.size()) g_swapImageLayouts[imageIndex] = vk::ImageLayout::ePresentSrcKHR;
 }
 
 void VulkanRenderer::cleanupSwapChain() {
@@ -1367,88 +1007,5 @@ std::vector<char const *> VulkanRenderer::getRequiredDeviceExtensions() {
     };
     return out;
 }
-
-// everything below here probably wont stay long. just to get to feature parity
-void VulkanRenderer::allocateMaterialAndComputeDescriptorSets() {
-    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
-        auto& fr = m_frames[i];
-
-        // Allocate [ material , compute ]
-        std::array<vk::DescriptorSetLayout,2> layouts = { m_descLayouts.material, m_descLayouts.compute };
-        vk::DescriptorSetAllocateInfo ai{ m_descPools.pool,
-                                          static_cast<uint32_t>(layouts.size()),
-                                          layouts.data() };
-        auto sets = m_device.allocateDescriptorSets(ai);
-        fr.materialSet = sets[0];
-        fr.computeSet  = sets[1];
-
-        // Material: sampled read of the compute image
-        vk::DescriptorImageInfo sampled{};
-        sampled.sampler     = m_defaultSampler.handle;
-        sampled.imageView   = m_rayImage.view;
-        sampled.imageLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-
-        // Compute: storage write into the same image
-        vk::DescriptorImageInfo storage{};
-        storage.imageView   = m_rayImage.view;
-        storage.imageLayout = vk::ImageLayout::eGeneral;
-
-        std::array<vk::WriteDescriptorSet,2> writes{};
-        // set=2 material, binding=0 (combined image sampler)
-        writes[0] = { fr.materialSet, 0, 0, 1, vk::DescriptorType::eCombinedImageSampler, &sampled };
-        // set=3 compute,   binding=0 (storage image)
-        writes[1] = { fr.computeSet,  0, 0, 1, vk::DescriptorType::eStorageImage,         &storage };
-
-        m_device.updateDescriptorSets(static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-    }
-}
-
-void VulkanRenderer::createFullscreenQuadBuffers() {
-    // positions (x,y) + uv (u,v)
-    const float verts[] = {
-        -1.f,-1.f, 0.f,0.f,
-         1.f,-1.f, 1.f,0.f,
-         1.f, 1.f, 1.f,1.f,
-        -1.f, 1.f, 0.f,1.f
-    };
-    const uint32_t idx[] = { 0,1,2, 2,3,0 };
-    m_fsIndexCount = 6;
-
-    m_fsVBO = createBuffer(sizeof(verts),
-        vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
-        VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, false);
-
-    m_fsIBO = createBuffer(sizeof(idx),
-        vk::BufferUsageFlagBits::eIndexBuffer  | vk::BufferUsageFlagBits::eTransferDst,
-        VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, false);
-
-    // Upload via staging
-    uploadToBuffer(verts, sizeof(verts), m_fsVBO, 0);
-    uploadToBuffer(idx,   sizeof(idx),   m_fsIBO, 0);
-}
-
-void VulkanRenderer::createRayTarget() {
-    // Destroy previous on resize
-    if (m_rayImage.view)  m_device.destroyImageView(m_rayImage.view);
-    if (m_rayImage.handle) vmaDestroyImage(m_allocator, m_rayImage.handle, m_rayImage.alloc);
-    m_rayImage = {};
-
-    // RGBA8 storage+sampled so CS can write and FS can sample
-    m_rayImage = createImage(
-        m_swapExtent.width, m_swapExtent.height,
-        vk::Format::eR8G8B8A8Unorm,
-        vk::ImageUsageFlagBits::eStorage | vk::ImageUsageFlagBits::eSampled | vk::ImageUsageFlagBits::eTransferDst,
-        vk::ImageTiling::eOptimal,
-        vk::SampleCountFlagBits::e1, 1, 1, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
-    );
-
-    // Transition to GENERAL for first compute write
-    transitionImage(m_rayImage,
-        vk::ImageLayout::eGeneral,
-        vk::PipelineStageFlagBits2::eTopOfPipe, {},
-        vk::PipelineStageFlagBits2::eComputeShader, vk::AccessFlagBits2::eShaderWrite,
-        vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1);
-}
-
 
 }
