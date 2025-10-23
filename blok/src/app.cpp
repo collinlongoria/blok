@@ -26,6 +26,7 @@
 using namespace blok;
 static Camera g_camera;
 static Scene  g_scene;
+static VulkanScene temp_scene{};
 static float lastX = 400.0f;
 static float lastY = 300.0f;
 static bool firstMouse = true;
@@ -86,11 +87,9 @@ void App::init() {
         m_cudaTracer->init();
         break;
     case GraphicsApi::Vulkan:
-        {
-            m_renderer = std::make_unique<VulkanRenderer>(m_window.get());
-            m_renderer->init();
-        }
-            break;
+        m_renderer = std::make_unique<VulkanRenderer>(m_window.get());
+        m_renderer->init();
+        break;
     }
 }
 
@@ -121,7 +120,7 @@ void App::update() {
 
         case GraphicsApi::Vulkan:
         m_renderer->beginFrame();
-        m_renderer->drawFrame(g_camera, g_scene);
+        reinterpret_cast<VulkanRenderer*>(m_renderer.get())->realDrawFrame(g_camera, temp_scene);
         m_renderer->endFrame();
             break;
     }

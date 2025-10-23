@@ -16,6 +16,7 @@
 #include "vulkan/vulkan.hpp"
 #include <vk_mem_alloc.h>
 
+#include "pipeline_system.hpp"
 
 
 namespace blok {
@@ -24,7 +25,6 @@ class Window;
 class ShaderManager;
 class DescriptorSetLayoutCache;
 class DescriptorAllocator;
-class PipelineManager;
 
 struct Buffer {
     vk::Buffer handle{};
@@ -50,6 +50,40 @@ struct Image {
 struct Sampler {
     vk::Sampler handle{};
 };
+
+// Scene stuff, may move.
+enum class ResourceKind {
+    Buffer,
+    StorageImage,
+    SampledImage,
+    CombinedImageSampler
+};
+
+struct PassResource {
+    uint32_t set;
+    uint32_t binding;
+    ResourceKind kind;
+    std::string name;
+    std::string samplerName; // for CombinedImageSampler
+    size_t byteSize = 0;
+    const void* initData = nullptr;
+};
+
+struct PassResources {
+    std::vector<PassResource> items;
+};
+
+struct ScenePass {
+    std::string pipelineName;
+    PipelineDesc desc;
+    bool isCompute = false;
+    uint32_t groupsX=0,groupsY=0,groupsZ=0; // for compute
+    uint32_t vertexCount=0; // for graphics
+    PassResources resources; // descriptors requested by the pass
+    std::vector<std::byte> pushConstantBytes;
+};
+
+struct VulkanScene { std::vector<ScenePass> passes; };
 
 struct FrameResources {
     // Sync
@@ -82,7 +116,10 @@ public:
 
     void beginFrame() override;
     void drawFrame(const Camera &cam, const Scene &scene) override;
+    void realDrawFrame(const Camera &cam, const VulkanScene& scene);
     void endFrame() override;
+
+    [[nodiscard]] vk::Format getColorFormat() const { return m_colorFormat; }
 
     void shutdown() override;
 private: // functions
@@ -109,13 +146,13 @@ private: // functions
     void createSyncObjects();
 
     // Descriptor Sets
-    std::vector<vk::DescriptorSet> prepareDescriptorSets(const BuiltProgram& program, FrameResources& fr);
+    std::vector<vk::DescriptorSet> prepareDescriptorSets(const BuiltProgram& program, FrameResources& fr, const PassResources& res);
 
     // Per frame UBOs
     void createPerFrameUniforms();
 
     // Push Constants
-    void pushProgramConstants(const BuiltProgram& program, vk::CommandBuffer cmd);
+    void pushProgramConstants(const BuiltProgram& program, vk::CommandBuffer cmd, std::span<const std::byte> data);
 
     // Upload
     Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO, bool mapped = false);
@@ -136,7 +173,7 @@ private: // functions
     [[nodiscard]] vk::SampleCountFlagBits getMaxUsableSampleCount() const;
 
     // Recording
-    void recordGraphicsCommands(uint32_t imageIndex, const Camera& cam, const Scene& scene);
+    void recordGraphicsCommands(uint32_t imageIndex, const Camera& cam, const VulkanScene& scene);
 
     // Cleanup and Recreation
     void cleanupSwapChain();
@@ -187,6 +224,10 @@ private: // resources
     std::unique_ptr<DescriptorSetLayoutCache> m_descriptorSetLayoutCache;
     std::unique_ptr<DescriptorAllocator> m_descriptorAllocator;
     std::unique_ptr<PipelineManager> m_pipelineManager;
+
+    std::unordered_map<std::string, Image>   m_images;
+    std::unordered_map<std::string, Buffer>  m_buffers;
+    std::unordered_map<std::string, Sampler> m_samplers;
 
     // Per-frame
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
