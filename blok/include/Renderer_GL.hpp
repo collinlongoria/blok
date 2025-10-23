@@ -29,7 +29,7 @@ public:
     ~RendererGL() override;
 
     void init() override;
-    void drawFrame(const Camera& cam, const Scene& scene) override;
+    void drawFrame(Camera& cam, const Scene& scene) override;
     void shutdown() override;
 
     // external (e.g. CUDA) provides texture to display

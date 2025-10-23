@@ -308,7 +308,7 @@ void CudaTracer::init() {
     glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-void CudaTracer::drawFrame(const Camera& cam, const Scene& scene) {
+void CudaTracer::drawFrame(Camera& cam, const Scene& scene) {
     std::vector<SphereCUDA> spheres;
     for (auto& s : scene.spheres) spheres.push_back(toDevice(s));
     std::vector<PlaneCUDA> planes;

@@ -129,7 +129,7 @@ void VulkanRenderer::beginFrame() {
         m_device.resetCommandPool(fr.cmdPool);
 }
 
-void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
+void VulkanRenderer::drawFrame(Camera &cam, const Scene &scene) {
     FrameResources& fr = m_frames[m_frameIndex];
 
     // acquire

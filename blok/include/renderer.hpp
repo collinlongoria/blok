@@ -24,7 +24,7 @@ public:
     virtual void init() = 0;
 
     virtual void beginFrame() = 0;
-    virtual void drawFrame(const Camera& cam, const Scene& scene) = 0;
+    virtual void drawFrame(Camera& cam, const Scene& scene) = 0;
     virtual void endFrame() = 0;
 
     virtual void shutdown() = 0;

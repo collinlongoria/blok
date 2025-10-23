@@ -26,12 +26,13 @@
 using namespace blok;
 static Camera g_camera;
 static Scene  g_scene;
+/* This was all moved to ui.cpp
 static float lastX = 400.0f;
 static float lastY = 300.0f;
 static bool firstMouse = true;
 
 // ---------------- Input Callbacks ----------------
-void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+void mouse_pcallback(GLFWwindow* window, double xpos, double ypos) {
     if (firstMouse) {
         lastX = (float)xpos;
         lastY = (float)ypos;
@@ -45,6 +46,7 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
 
     g_camera.processMouse(dx, dy);
 }
+*/
 
 namespace blok {
 
@@ -76,8 +78,6 @@ void App::init() {
         }
         m_renderer = std::make_unique<RendererGL>(m_window);
         m_renderer->init();
-        //glfwSetCursorPosCallback(gw, mouse_callback);
-        //glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
 
     switch (m_backend) {
@@ -112,16 +112,23 @@ void App::update() {
     if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) g_camera.processKeyboard('A', dt);
     if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) g_camera.processKeyboard('D', dt);
 
+    if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(win, GLFW_TRUE);
+
+
+
 
     switch (m_backend) {
-        case GraphicsApi::CUDA:
+    case GraphicsApi::CUDA: 
             // ImGui + present path (one swap inside endFrame)
             m_cudaTracer->drawFrame(g_camera, g_scene);
             m_renderer->beginFrame();
             reinterpret_cast<RendererGL*>(m_renderer.get())->setTexture(m_cudaTracer->getGLTex(),
-                                                             m_window->getWidth(),
-                                                             m_window->getHeight());
+                m_window->getWidth(),
+                m_window->getHeight());
             m_renderer->drawFrame(g_camera, g_scene);
+
+            //addWindow();
+
             m_renderer->endFrame();
             break;
 

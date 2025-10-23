@@ -23,7 +23,12 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 
+#include "ui.hpp"
+
 using namespace blok;
+
+//remove static
+static UI* m_UI;
 
 static GLuint compileShader(GLenum type, const char* src) {
     GLuint s = glCreateShader(type);
@@ -109,6 +114,7 @@ void RendererGL::init() {
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(m_window->getGLFWwindow(), true);
     ImGui_ImplOpenGL3_Init("#version 330");
+    m_UI = new UI(m_window->getGLFWwindow());
 
     glViewport(0, 0, m_window->getWidth(), m_window->getHeight());
     glClearColor(0.1f, 0.1f, 0.25f, 1.0f);
@@ -148,7 +154,7 @@ void RendererGL::createFullScreenQuad() {
     glBindVertexArray(0);
 }
 
-void RendererGL::drawFrame(const Camera& /*cam*/, const Scene& /*scene*/) {
+void RendererGL::drawFrame(Camera& cam, const Scene& /*scene*/) {
     /*
     if (m_tex != 0) {
         glUseProgram(m_prog);
@@ -170,7 +176,11 @@ void RendererGL::drawFrame(const Camera& /*cam*/, const Scene& /*scene*/) {
         ImGui::Begin("CUDA Output");
         ImGui::Text("Displaying raytraced texture:");
         ImGui::Image((ImTextureID)(intptr_t)m_tex, ImVec2((float)m_texW, (float)m_texH));
+
+        m_UI->handleCameraControls(&cam);
+
         ImGui::End();
+
     }
     else
     {
@@ -190,6 +200,7 @@ void RendererGL::shutdown() {
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
+    delete m_UI;
 
     destroyFullScreenQuad();
     if (m_prog) { glDeleteProgram(m_prog); m_prog = 0; }

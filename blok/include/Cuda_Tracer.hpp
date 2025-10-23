@@ -24,7 +24,7 @@ public:
     ~CudaTracer() override;
 
     void init() override;
-    void drawFrame(const Camera& cam, const Scene& scene) override;
+    void drawFrame(Camera& cam, const Scene& scene) override;
     void shutdown() override;
     void beginFrame() override;
     void endFrame() override;
