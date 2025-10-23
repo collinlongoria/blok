@@ -119,9 +119,9 @@ void App::update() {
             break;
 
         case GraphicsApi::Vulkan:
-        m_renderer->beginFrame();
-        reinterpret_cast<VulkanRenderer*>(m_renderer.get())->realDrawFrame(g_camera, temp_scene);
-        m_renderer->endFrame();
+            m_renderer->beginFrame();
+            m_renderer->drawFrame(g_camera, g_scene);
+            m_renderer->endFrame();
             break;
     }
 }

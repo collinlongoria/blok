@@ -16,61 +16,97 @@
 
 namespace blok {
 
-struct GraphicsFixedFunc {
-    vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList;
-    bool depthTest = false;
-    bool depthWrite = false;
-    bool blending = false;
-    vk::CullModeFlags cull = vk::CullModeFlagBits::eNone;
-    vk::FrontFace front = vk::FrontFace::eCounterClockwise;
+class ShaderSystem;
+class DescriptorSystem;
+
+enum class PipelineKind { Graphics, Compute, RayTracing };
+
+struct PushConstantRangeDesc {
+    vk::ShaderStageFlags stages{};
+    uint32_t offset = 0;
+    uint32_t size = 0;
 };
 
-struct PipelineDesc {
-    std::vector<ShaderStageRef> shaders;
-    GraphicsFixedFunc fixed{};
-    vk::Format colorFormat{};
-    std::optional<vk::Format> depthFormat{};
-    bool isCompute = false;
-};
-
-struct BindingInfo {
-    uint32_t set;
-    uint32_t binding;
-    VkDescriptorType type;
-    uint32_t count;
-    VkShaderStageFlags stageFlags;
-};
-
-struct PCRange {
-    uint32_t offset;
-    uint32_t size;
-    VkShaderStageFlags stageFlags;
-};
-
-struct BuiltProgram {
-    vk::PipelineLayout layout{};
-    vk::Pipeline pipeline{};
+struct PipelineLayoutEntry {
     std::vector<vk::DescriptorSetLayout> setLayouts;
-    std::vector<BindingInfo> bindings;
-    std::vector<PCRange> pushConstants;
-    bool isCompute = false;
+    std::vector<PushConstantRangeDesc> pushConstants;
 };
 
-class PipelineManager {
-public:
-    PipelineManager(vk::Device d, vk::PipelineCache c, ShaderManager& sm, DescriptorSetLayoutCache& dc)
-        : m_device(d), m_cache(c), m_shaders(sm), m_dsl(dc) {}
+// For dynamic rendering
+struct RenderTargetsDesc {
+    std::vector<vk::Format> colorFormats;
+    std::optional<vk::Format> depthFormats;
+};
 
-    const BuiltProgram& getOrCreate(const std::string& name, const PipelineDesc& desc);
-    void destroyAll();
+struct GraphicsStatesDesc {
+    vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList;
+    bool depthTest = true;
+    bool depthWrite = true;
+    vk::CompareOp depthCompare = vk::CompareOp::eLess;
+    vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack;
+    vk::FrontFace frontFace = vk::FrontFace::eCounterClockwise;
+    bool enableBlend = false;
+};
+
+struct ShaderStageDesc {
+    std::string path; // GLSL path
+    vk::ShaderStageFlags stage;
+    std::string entry = "main";
+};
+
+struct GraphicsPipelineDesc {
+    std::string name;
+    PipelineLayoutEntry layout;
+    RenderTargetsDesc rts;
+    GraphicsStatesDesc states;
+    // Currently binding0 tightly packed, TODO: can add this to YAML potentially?
+    std::vector<vk::Format> vertexAttribFormats;
+    uint32_t vertexStride = 0;
+    std::vector<ShaderStageDesc> shaders;
+};
+
+struct ComputePipelineDesc {
+    std::string name;
+    PipelineLayoutEntry layout;
+    ShaderStageDesc shader;
+};
+
+// TODO: Raytracing completion
+struct RayTracingPipelineDesc {
+    std::string name;
+    PipelineLayoutEntry layout;
+    ShaderStageDesc rgen; // raygen
+    std::vector<ShaderStageDesc> miss; // miss (one or more)
+    std::vector<ShaderStageDesc> hit; // anyhit and closesthit
+};
+
+struct PipelineProgram {
+    PipelineKind kind;
+    vk::UniquePipeline pipeline;
+    vk::UniquePipelineLayout layout;
+};
+
+class PipelineSystem {
+public:
+    void init(vk::Device device, vk::PhysicalDevice phys, ShaderSystem* shaderSys, DescriptorSystem* descSys);
+    void shutdown();
+
+    std::vector<std::string> loadPipelinesFromYAML(const std::string& yamlPath);
+
+    const PipelineProgram& get(const std::string& name) const;
 
 private:
-    vk::Device m_device;
-    vk::PipelineCache m_cache;
-    ShaderManager& m_shaders;
-    DescriptorSetLayoutCache& m_dsl;
+    // Builders
+    PipelineProgram buildGraphics(const GraphicsPipelineDesc& d);
+    PipelineProgram buildCompute(const ComputePipelineDesc& d);
+    PipelineProgram buildRayTracing(const RayTracingPipelineDesc& d);
 
-    std::unordered_map<std::string, BuiltProgram> m_pipelines;
+    vk::Device m_device{};
+    vk::PhysicalDevice m_phys{};
+    ShaderSystem* m_shaders = nullptr;
+    DescriptorSystem* m_desc = nullptr;
+    vk::UniquePipelineCache m_cache{};
+    std::unordered_map<std::string, PipelineProgram> m_programs;
 };
 
 }

@@ -11,24 +11,18 @@
 
 #include <iostream>
 #include <ostream>
-
-#define GLFW_INCLUDE_NONE
 #include <set>
 
-#include "shader_pipe.hpp"
+#define GLFW_INCLUDE_NONE
+#include "image_states.hpp"
 #include "GLFW/glfw3.h"
 
-#include "shader_system.hpp"
-#include "descriptor_system.hpp"
-#include "pipeline_system.hpp"
+#include "shader_pipe.hpp"
 #include "window.hpp"
 
 namespace blok {
 
-// per swapchain image signaling for present and image-in-flight
-static std::vector<vk::Semaphore> g_presentSignals;
-static std::vector<vk::Fence> g_imagesInFlight;
-static std::vector<vk::ImageLayout> g_swapImageLayouts; // TODO: can move these to the class no need to be static
+
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
     VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
@@ -103,12 +97,20 @@ void VulkanRenderer::init() {
     createCommandPoolAndBuffers();
     createSyncObjects();
 
-    createPipelineCache();
+    m_shaderSystem = std::make_unique<ShaderSystem>(); m_shaderSystem->init(m_device);
 
-    m_shaderManager = std::make_unique<ShaderManager>(m_device);
-    m_descriptorSetLayoutCache = std::make_unique<DescriptorSetLayoutCache>(m_device);
-    m_descriptorAllocator = std::make_unique<DescriptorAllocator>(m_device);
-    m_pipelineManager = std::make_unique<PipelineManager>(m_device, m_pipelineCache, *m_shaderManager, *m_descriptorSetLayoutCache);
+    DescriptorPoolSizes poolCfg{};
+    poolCfg.sizes = {
+        {vk::DescriptorType::eCombinedImageSampler, 512},
+        {vk::DescriptorType::eSampledImage, 512},
+        {vk::DescriptorType::eStorageImage, 512},
+        {vk::DescriptorType::eUniformBuffer, 512},
+        {vk::DescriptorType::eStorageBuffer, 512}
+    };
+    poolCfg.maxSets = 2048;
+    m_descriptorSystem = std::make_unique<DescriptorSystem>(); m_descriptorSystem->init(m_device, poolCfg);
+
+    m_pipelineSystem = std::make_unique<PipelineSystem>(); m_pipelineSystem->init(m_device, m_physicalDevice, m_shaderSystem.get(), m_descriptorSystem.get());
 
     createPerFrameUniforms();
 
@@ -127,10 +129,6 @@ void VulkanRenderer::beginFrame() {
 }
 
 void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
-
-}
-
-void VulkanRenderer::realDrawFrame(const Camera &cam, const VulkanScene& scene) {
     FrameResources& fr = m_frames[m_frameIndex];
 
     // acquire
@@ -140,18 +138,18 @@ void VulkanRenderer::realDrawFrame(const Camera &cam, const VulkanScene& scene) 
     if (acq == vk::Result::eSuboptimalKHR) { m_swapchainDirty = true; }
 
     // ensure swapchain image not in flight
-    if (imageIndex < g_imagesInFlight.size() && g_imagesInFlight[imageIndex]) {
-        (void)m_device.waitForFences(g_imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
+    if (imageIndex < m_imagesInFlight.size() && m_imagesInFlight[imageIndex]) {
+        (void)m_device.waitForFences(m_imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
     }
-    if (imageIndex >= g_imagesInFlight.size()) {
-        g_imagesInFlight.assign(m_swapImages.size(), VK_NULL_HANDLE);
+    if (imageIndex >= m_imagesInFlight.size()) {
+        m_imagesInFlight.assign(m_swapImages.size(), VK_NULL_HANDLE);
     }
-    g_imagesInFlight[imageIndex] = fr.inFlight;
+    m_imagesInFlight[imageIndex] = fr.inFlight;
 
     // record
     vk::CommandBufferBeginInfo bi{ vk::CommandBufferUsageFlagBits::eOneTimeSubmit };
     fr.cmd.begin(bi);
-    recordGraphicsCommands(imageIndex, cam, scene);
+    //recordGraphicsCommands(imageIndex, cam, scene);
     fr.cmd.end();
 
     // submit
@@ -159,7 +157,7 @@ void VulkanRenderer::realDrawFrame(const Camera &cam, const VulkanScene& scene) 
     waitSem.semaphore = fr.imageAvailable;
     waitSem.stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
 
-    vk::Semaphore presentSignal = g_presentSignals[imageIndex];
+    vk::Semaphore presentSignal = m_presentSignals[imageIndex];
 
     vk::SemaphoreSubmitInfo signalSem{};
     signalSem.semaphore = presentSignal;
@@ -219,7 +217,9 @@ void VulkanRenderer::shutdown() {
     if (m_uploadCmd) { m_device.freeCommandBuffers(m_uploadPool, 1, &m_uploadCmd); }
     if (m_uploadPool) { m_device.destroyCommandPool(m_uploadPool); }
 
-    if (m_pipelineCache) m_device.destroyPipelineCache(m_pipelineCache);
+    m_pipelineSystem->shutdown();
+    m_descriptorSystem->shutdown();
+    m_shaderSystem->shutdown();
 
     cleanupSwapChain();
 
@@ -459,13 +459,13 @@ void VulkanRenderer::createSwapChain() {
     }
 
     // Per image sync
-    for (auto s : g_presentSignals) if (s) m_device.destroySemaphore(s);
-    g_presentSignals.clear();
-    g_presentSignals.resize(m_swapImages.size());
-    for (auto &s : g_presentSignals) { s = m_device.createSemaphore({}); }
+    for (auto s : m_presentSignals) if (s) m_device.destroySemaphore(s);
+    m_presentSignals.clear();
+    m_presentSignals.resize(m_swapImages.size());
+    for (auto &s : m_presentSignals) { s = m_device.createSemaphore({}); }
 
-    g_imagesInFlight.assign(m_swapImages.size(), VK_NULL_HANDLE);
-    g_swapImageLayouts.assign(m_swapImages.size(), vk::ImageLayout::eUndefined);
+    m_imagesInFlight.assign(m_swapImages.size(), VK_NULL_HANDLE);
+    m_swapImageLayouts.assign(m_swapImages.size(), vk::ImageLayout::eUndefined);
 }
 
 void VulkanRenderer::createDepthResources() {
@@ -477,11 +477,6 @@ void VulkanRenderer::createDepthResources() {
     m_depth = createImage(m_swapExtent.width, m_swapExtent.height, m_depthFormat,
         vk::ImageUsageFlagBits::eDepthStencilAttachment | vk::ImageUsageFlagBits::eTransientAttachment,
         vk::ImageTiling::eOptimal, samples, 1, 1, VMA_MEMORY_USAGE_AUTO);
-}
-
-void VulkanRenderer::createPipelineCache() {
-    vk::PipelineCacheCreateInfo ci{};
-    m_pipelineCache = m_device.createPipelineCache(ci);
 }
 
 void VulkanRenderer::createCommandPoolAndBuffers() {
@@ -535,143 +530,6 @@ void VulkanRenderer::createPerFrameUniforms() {
     }
 }
 
-std::vector<vk::DescriptorSet> VulkanRenderer::prepareDescriptorSets(const BuiltProgram &program, FrameResources &fr, const PassResources& res) {
-    // Only allocate sets that have valid layouts
-    std::vector<vk::DescriptorSet> out;
-    out.reserve(program.setLayouts.size());
-
-    for (uint32_t set = 0; set < program.setLayouts.size(); ++set) {
-        if (program.setLayouts[set]) {
-            out.push_back(m_descriptorAllocator->allocate(program.setLayouts[set]));
-        } else {
-            out.push_back(vk::DescriptorSet{}); // null handle for empty sets
-        }
-    }
-
-    // Build write descriptors
-    std::vector<vk::WriteDescriptorSet> writes;
-    std::vector<vk::DescriptorBufferInfo> bufInfos;
-    std::vector<vk::DescriptorImageInfo>  imgInfos;
-    writes.reserve(res.items.size());
-    bufInfos.reserve(res.items.size());
-    imgInfos.reserve(res.items.size());
-
-    auto suballocUbo = [&](size_t bytes, size_t alignment = 256) {
-        fr.uboHead = (fr.uboHead + alignment - 1) & ~(alignment - 1);
-        if (fr.uboHead + bytes > fr.globalUBO.size)
-            bytes = std::max<size_t>(0, size_t(fr.globalUBO.size - fr.uboHead));
-        auto off = fr.uboHead;
-        fr.uboHead += bytes;
-        return vk::DescriptorBufferInfo{ fr.globalUBO.handle, off, bytes };
-    };
-
-    for (const auto& pr : res.items) {
-        // Skip if set index is out of bounds or set layout is null
-        if (pr.set >= out.size() || !out[pr.set]) continue;
-
-        auto dstSet = out[pr.set];
-
-        switch (pr.kind) {
-        case ResourceKind::Buffer: {
-            if (auto it = m_buffers.find(pr.name); it != m_buffers.end()) {
-                const auto& b = it->second;
-                bufInfos.push_back(vk::DescriptorBufferInfo{ b.handle, 0, b.size });
-            } else {
-                size_t bytes = pr.byteSize ? pr.byteSize : 256;
-                bufInfos.push_back(suballocUbo(bytes));
-                if (pr.initData)
-                    std::memcpy(static_cast<uint8_t*>(fr.globalUBO.mapped) + bufInfos.back().offset,
-                                pr.initData, bytes);
-            }
-
-            auto it = std::find_if(program.bindings.begin(), program.bindings.end(),
-                    [&](const auto& b){ return b.set==pr.set && b.binding==pr.binding; });
-            vk::DescriptorType dtype = (it != program.bindings.end())
-                ? static_cast<vk::DescriptorType>(it->type) : vk::DescriptorType::eUniformBuffer;
-
-            vk::WriteDescriptorSet w{};
-            w.dstSet = dstSet;
-            w.dstBinding = pr.binding;
-            w.descriptorType = dtype;
-            w.descriptorCount = 1;
-            w.pBufferInfo = &bufInfos.back();
-            writes.push_back(w);
-            break;
-        }
-        case ResourceKind::StorageImage: {
-            auto imgIt = m_images.find(pr.name);
-            if (imgIt == m_images.end()) continue;
-            const auto& im = imgIt->second;
-
-            imgInfos.push_back(vk::DescriptorImageInfo{
-                {}, im.view, vk::ImageLayout::eGeneral
-            });
-
-            vk::WriteDescriptorSet w{};
-            w.dstSet = dstSet;
-            w.dstBinding = pr.binding;
-            w.descriptorType = vk::DescriptorType::eStorageImage;
-            w.descriptorCount = 1;
-            w.pImageInfo = &imgInfos.back();
-            writes.push_back(w);
-            break;
-        }
-        case ResourceKind::SampledImage: {
-            auto imgIt = m_images.find(pr.name);
-            if (imgIt == m_images.end()) continue;
-            const auto& im = imgIt->second;
-
-            imgInfos.push_back(vk::DescriptorImageInfo{
-                {}, im.view, vk::ImageLayout::eShaderReadOnlyOptimal
-            });
-
-            vk::WriteDescriptorSet w{};
-            w.dstSet = dstSet;
-            w.dstBinding = pr.binding;
-            w.descriptorType = vk::DescriptorType::eSampledImage;
-            w.descriptorCount = 1;
-            w.pImageInfo = &imgInfos.back();
-            writes.push_back(w);
-            break;
-        }
-        case ResourceKind::CombinedImageSampler: {
-            auto imgIt = m_images.find(pr.name);
-            auto smpIt = m_samplers.find(pr.samplerName);
-            if (imgIt == m_images.end() || smpIt == m_samplers.end()) continue;
-            const auto& im = imgIt->second;
-            const auto& sp = smpIt->second;
-
-            imgInfos.push_back(vk::DescriptorImageInfo{
-                sp.handle, im.view, vk::ImageLayout::eShaderReadOnlyOptimal
-            });
-
-            vk::WriteDescriptorSet w{};
-            w.dstSet = dstSet;
-            w.dstBinding = pr.binding;
-            w.descriptorType = vk::DescriptorType::eCombinedImageSampler;
-            w.descriptorCount = 1;
-            w.pImageInfo = &imgInfos.back();
-            writes.push_back(w);
-            break;
-        }
-        }
-    }
-
-    if (!writes.empty())
-        m_device.updateDescriptorSets(static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
-
-    return out;
-}
-
-void VulkanRenderer::pushProgramConstants(const BuiltProgram &program, vk::CommandBuffer cmd, std::span<const std::byte> data) {
-    if (program.pushConstants.empty() || data.empty()) return;
-    const auto& pc = program.pushConstants.front();
-    const uint32_t n = std::min<uint32_t>(pc.size, static_cast<uint32_t>(data.size()));
-    cmd.pushConstants(program.layout,
-        static_cast<vk::ShaderStageFlags>(pc.stageFlags),
-        pc.offset, n, data.data());
-}
-
 Buffer VulkanRenderer::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage, bool mapped) {
     Buffer out{};
     out.size = size;
@@ -697,20 +555,20 @@ Buffer VulkanRenderer::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags us
     //out.alignment = ainfo.requiredAlignment; // borken line. top is potential fix.
     if (mapped || (allocFlags & VMA_ALLOCATION_CREATE_MAPPED_BIT)) {
         out.mapped = ainfo.pMappedData;
-        if (!out.mapped) vmaMapMemory(m_allocator, alloc, &out.mapped);
+        //if (!out.mapped) vmaMapMemory(m_allocator, alloc, &out.mapped);
     }
     return out;
 }
 
 void VulkanRenderer::uploadToBuffer(const void *src, vk::DeviceSize size, Buffer &dst, vk::DeviceSize dstOffset) {
     if (dst.mapped) {
-        std::memcpy(static_cast<char*>(dst.mapped) + dstOffset, src, static_cast<size_t>(size));
+        //std::memcpy(static_cast<char*>(dst.mapped) + dstOffset, src, static_cast<size_t>(size));
         vmaFlushAllocation(m_allocator, dst.alloc, dstOffset, size);
         return;
     }
 
     Buffer staging = createBuffer(size, vk::BufferUsageFlagBits::eTransferSrc, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, true);
-    std::memcpy(staging.mapped, src, static_cast<size_t>(size));
+    //std::memcpy(staging.mapped, src, static_cast<size_t>(size));
     vmaFlushAllocation(m_allocator, staging.alloc, 0, size);
 
     copyBuffer(staging, dst, size);
@@ -1057,18 +915,40 @@ void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &c
 
     auto beginIfNeeded = [&]{
         if (renderingActive) return;
+        ImageTransitions tr(fr.cmd);
+        // Ensure layouts for color and depth
+        Image swapImg{};
+        swapImg.handle = m_swapImages[imageIndex];
+        swapImg.view   = m_swapViews[imageIndex];
+        swapImg.format = m_colorFormat;
+        swapImg.layers = 1;
+        swapImg.mipLevels = 1;
+        swapImg.currentLayout = m_swapImageLayouts[imageIndex];
+        tr.ensure(swapImg, Role::ColorAttachment);
+        m_swapImageLayouts[imageIndex] = swapImg.currentLayout;
+        tr.ensure(m_depth, Role::DepthAttachment);
         beginRendering(fr.cmd, m_swapViews[imageIndex], m_depth.view, m_swapExtent, clear);
         renderingActive = true;
     };
     auto endIfNeeded = [&]{
         if (!renderingActive) return;
         endRendering(fr.cmd);
+        ImageTransitions tr(fr.cmd);
+        Image swapImg{};
+        swapImg.handle = m_swapImages[imageIndex];
+        swapImg.view   = m_swapViews[imageIndex];
+        swapImg.format = m_colorFormat;
+        swapImg.layers = 1;
+        swapImg.mipLevels = 1;
+        swapImg.currentLayout = m_swapImageLayouts[imageIndex];
+        tr.ensure(swapImg, Role::Present);
+        m_swapImageLayouts[imageIndex] = swapImg.currentLayout;
         renderingActive = false;
     };
 
     for (const auto& pass : scene.passes)
     {
-        const auto& prog = m_pipelineManager->getOrCreate(pass.pipelineName, pass.desc);
+        const auto& prog = m_pipelineSystem->get(pass.pipelineName);
         const bool isComp = pass.isCompute;
 
         // Compute must NOT be inside a rendering instance
@@ -1077,21 +957,10 @@ void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &c
         // Bind pipeline
         const auto bindPoint = isComp ? vk::PipelineBindPoint::eCompute
                                       : vk::PipelineBindPoint::eGraphics;
-        fr.cmd.bindPipeline(bindPoint, prog.pipeline);
+        fr.cmd.bindPipeline(bindPoint, prog.pipeline.get());
 
-        // Descriptor sets from pass resources + reflection
-        auto sets = prepareDescriptorSets(prog, fr, pass.resources);
-        if (!sets.empty()) {
-            fr.cmd.bindDescriptorSets(bindPoint, prog.layout,
-                                      /*firstSet*/0,
-                                      static_cast<uint32_t>(sets.size()), sets.data(),
-                                      /*dynOffsetCount*/0, /*pDynOffsets*/nullptr);
-        }
-
-        // Push constants (if provided by pass & required by shader)
-        if (!pass.pushConstantBytes.empty())
-            pushProgramConstants(prog, fr.cmd,
-                                      std::span<const std::byte>(pass.pushConstantBytes));
+                // Push constants (if provided by pass & required by shader)
+        /* TODO: push constants via PipelineSystem when exposed */
 
         if (isComp) {
             fr.cmd.dispatch(pass.groupsX, pass.groupsY, pass.groupsZ);
@@ -1127,10 +996,10 @@ void VulkanRenderer::cleanupSwapChain() {
     m_swapchain = vk::SwapchainKHR{};
     m_swapImages.clear();
 
-    for (auto s : g_presentSignals) if (s) m_device.destroySemaphore(s);
-    g_presentSignals.clear();
-    g_imagesInFlight.clear();
-    g_swapImageLayouts.clear();
+    for (auto s : m_presentSignals) if (s) m_device.destroySemaphore(s);
+    m_presentSignals.clear();
+    m_imagesInFlight.clear();
+    m_swapImageLayouts.clear();
 }
 
 void VulkanRenderer::recreateSwapChain() {
@@ -1160,6 +1029,8 @@ std::vector<char const *> VulkanRenderer::getRequiredDeviceExtensions() {
         VK_KHR_SWAPCHAIN_EXTENSION_NAME, /* Graphics */
         VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, /* Dynamic Rendering (isnt this in core now?) */
         VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, /* TODO: no clue, figure out what specific this one is needed for */
+        VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME,
+        VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
         VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME /* Raytracing Pipeline */
     };
     return out;

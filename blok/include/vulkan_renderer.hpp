@@ -20,24 +20,23 @@
 
 
 namespace blok {
-struct BuiltProgram;
 class Window;
-class ShaderManager;
-class DescriptorSetLayoutCache;
-class DescriptorAllocator;
 
 struct Buffer {
     vk::Buffer handle{};
     VmaAllocation alloc{};
-    vk::DeviceSize size{};
-    vk::DeviceSize alignment{};
+    VmaAllocationInfo allocInfo{};
+    vk::DeviceSize size = 0;
+    vk::DeviceSize alignment = 0;
     vk::BufferUsageFlags usage{};
-    void* mapped = nullptr;
+    bool mapped = false;
+    void* mappedPtr = nullptr;
 };
 
 struct Image {
     vk::Image handle{};
     VmaAllocation alloc{};
+    VmaAllocationInfo allocInfo{};
     vk::ImageView view{};
     vk::Format format{};
     vk::Extent3D extent{};
@@ -64,9 +63,7 @@ struct PassResource {
     uint32_t binding;
     ResourceKind kind;
     std::string name;
-    std::string samplerName; // for CombinedImageSampler
-    size_t byteSize = 0;
-    const void* initData = nullptr;
+    vk::ImageLayout layout = vk::ImageLayout::eUndefined;
 };
 
 struct PassResources {
@@ -75,7 +72,6 @@ struct PassResources {
 
 struct ScenePass {
     std::string pipelineName;
-    PipelineDesc desc;
     bool isCompute = false;
     uint32_t groupsX=0,groupsY=0,groupsZ=0; // for compute
     uint32_t vertexCount=0; // for graphics
@@ -100,13 +96,6 @@ struct FrameResources {
     vk::DeviceSize uboHead = 0;
 };
 
-struct QueueFamilyIndices {
-    std::optional<uint32_t> graphics;
-    std::optional<uint32_t> present;
-    std::optional<uint32_t> compute;
-    bool complete() const { return graphics && present && compute; }
-};
-
 class VulkanRenderer final : public Renderer {
 public:
     explicit VulkanRenderer(Window* window);
@@ -116,12 +105,12 @@ public:
 
     void beginFrame() override;
     void drawFrame(const Camera &cam, const Scene &scene) override;
-    void realDrawFrame(const Camera &cam, const VulkanScene& scene);
     void endFrame() override;
 
     [[nodiscard]] vk::Format getColorFormat() const { return m_colorFormat; }
 
     void shutdown() override;
+
 private: // functions
     // Initialization
     void createInstance();
@@ -138,21 +127,12 @@ private: // functions
     void createSwapChain();
     void createDepthResources();
 
-    // Pipelines
-    void createPipelineCache();
-
     // Commands and Sync
     void createCommandPoolAndBuffers();
     void createSyncObjects();
 
-    // Descriptor Sets
-    std::vector<vk::DescriptorSet> prepareDescriptorSets(const BuiltProgram& program, FrameResources& fr, const PassResources& res);
-
     // Per frame UBOs
     void createPerFrameUniforms();
-
-    // Push Constants
-    void pushProgramConstants(const BuiltProgram& program, vk::CommandBuffer cmd, std::span<const std::byte> data);
 
     // Upload
     Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO, bool mapped = false);
@@ -181,6 +161,7 @@ private: // functions
 
     std::vector<const char*> getRequiredExtensions();
     std::vector<const char*> getRequiredDeviceExtensions();
+
 private: // resources
     std::shared_ptr<Window> m_window = nullptr;
 
@@ -189,15 +170,18 @@ private: // resources
     vk::SurfaceKHR m_surface{};
     vk::PhysicalDevice m_physicalDevice{};
     vk::Device m_device{};
-
-    // vma
-    VmaAllocator m_allocator{};
-
-    // Queues
-    QueueFamilyIndices m_qfi{};
+    struct QueueFamilyIndices {
+        std::optional<uint32_t> graphics;
+        std::optional<uint32_t> present;
+        std::optional<uint32_t> compute;
+        bool complete() const { return graphics && present && compute; }
+    } m_qfi;
     vk::Queue m_graphicsQueue{};
     vk::Queue m_presentQueue{};
     vk::Queue m_computeQueue{};
+
+    // vma
+    VmaAllocator m_allocator = nullptr;
 
     // SwapChain
     vk::SwapchainKHR m_swapchain{};
@@ -209,22 +193,19 @@ private: // resources
     vk::ColorSpaceKHR m_colorSpace{vk::ColorSpaceKHR::eSrgbNonlinear};
     vk::PresentModeKHR m_presentMode{vk::PresentModeKHR::eMailbox};
 
+    std::vector<vk::Semaphore> m_presentSignals;
+    std::vector<vk::Fence> m_imagesInFlight;
+    std::vector<vk::ImageLayout> m_swapImageLayouts;
+
     // Depth attachment
     Image m_depth{};
 
-    // Pipeline cache
-    vk::PipelineCache m_pipelineCache{};
+    // Systems
+    std::unique_ptr<ShaderSystem> m_shaderSystem;
+    std::unique_ptr<DescriptorSystem> m_descriptorSystem;
+    std::unique_ptr<PipelineSystem> m_pipelineSystem;
 
-    // Graphics Pipeline
-    vk::VertexInputBindingDescription m_vertexBinding{};
-    std::vector<vk::VertexInputAttributeDescription> m_vertexAttrs{};
-
-    // Resources
-    std::unique_ptr<ShaderManager> m_shaderManager;
-    std::unique_ptr<DescriptorSetLayoutCache> m_descriptorSetLayoutCache;
-    std::unique_ptr<DescriptorAllocator> m_descriptorAllocator;
-    std::unique_ptr<PipelineManager> m_pipelineManager;
-
+    // Named resources
     std::unordered_map<std::string, Image>   m_images;
     std::unordered_map<std::string, Buffer>  m_buffers;
     std::unordered_map<std::string, Sampler> m_samplers;
@@ -234,7 +215,7 @@ private: // resources
     uint32_t m_frameIndex = 0;
     std::array<FrameResources, MAX_FRAMES_IN_FLIGHT> m_frames{};
 
-    // Transient
+    // Transient upload
     vk::CommandPool m_uploadPool{};
     vk::CommandBuffer m_uploadCmd{};
     vk::Fence m_uploadFence{};

@@ -14,59 +14,42 @@
 
 namespace blok {
 
-struct BindingKey {
-    uint32_t binding;
-    VkDescriptorType type;
-    uint32_t count;
-    VkShaderStageFlags stages;
-    bool operator==(const BindingKey& o) const noexcept {
-        return binding == o.binding && type == o.type && count == o.count && stages == o.stages;
-    }
+struct DSLBindingDesc {
+    uint32_t binding = 0;
+    vk::DescriptorType type{};
+    vk::ShaderStageFlagBits stages{};
+    uint32_t count = 1; // array length
 };
 
-struct SetLayoutKey {
-    std::vector<BindingKey> bindings;
-    bool operator==(const SetLayoutKey& o) const noexcept { return bindings == o.bindings; }
+struct DescriptorSetLayoutDesc {
+    std::string name; // ID referenced in YAML
+    std::vector<DSLBindingDesc> bindings;
 };
 
-struct SetLayoutKeyHash {
-    size_t operator()(const SetLayoutKey& k) const noexcept {
-        size_t h = 0;
-        for (auto& b : k.bindings)
-            h ^= (b.binding << 1) ^ static_cast<size_t>(b.type) ^ (b.count << 3) ^ static_cast<size_t>(b.stages);
-        return h;
-    }
+struct DescriptorPoolSizes {
+    // Just doing a large pre allocate. Someone have a better idea? Let me know.
+    std::vector<vk::DescriptorPoolSize> sizes;
+    uint32_t maxSets = 1024;
 };
 
-class DescriptorSetLayoutCache {
+struct DescriptorSetLayouts {
+    std::vector<vk::UniqueDescriptorSetLayout> layouts; // in set-index order
+};
+
+class DescriptorSystem {
 public:
-    explicit DescriptorSetLayoutCache(vk::Device d) : m_device(d) {}
-    ~DescriptorSetLayoutCache() { destroyAll(); }
+    void init(vk::Device device, const DescriptorPoolSizes& poolCfg);
+    void shutdown();
 
-    vk::DescriptorSetLayout get(const SetLayoutKey& key);
-    void destroyAll();
+    DescriptorSetLayouts createLayouts(const std::vector<DescriptorSetLayoutDesc>& descs);
+
+    std::vector<vk::DescriptorSet> allocateSets(const std::vector<vk::DescriptorSetLayout>& layouts, uint32_t count=1);
+
+    vk::DescriptorPool pool() const { return m_pool.get(); }
 
 private:
-    vk::Device m_device{};
-    std::unordered_map<SetLayoutKey, vk::DescriptorSetLayout, SetLayoutKeyHash> m_cache;
-};
-
-class DescriptorAllocator {
-public:
-    explicit DescriptorAllocator(vk::Device d) : m_device(d) {}
-    ~DescriptorAllocator() { reset(); }
-
-    vk::DescriptorSet allocate(vk::DescriptorSetLayout layout);
-    void reset();
-
-private:
-    vk::Device m_device{};
-    std::vector<vk::DescriptorPool> m_usedPools;
-    std::vector<vk::DescriptorPool> m_freePools;
-    vk::DescriptorPool currentPool{};
-
-    vk::DescriptorPool getPool();
-    vk::DescriptorPool createPool(uint32_t count = 128);
+    vk::Device m_device;
+    vk::UniqueDescriptorPool m_pool;
 };
 
 }
