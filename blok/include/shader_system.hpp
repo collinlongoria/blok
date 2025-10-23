@@ -16,42 +16,34 @@
 
 namespace blok {
 
-struct StageKey {
-    std::string path;
-    shaderpipe::ShaderStage stage;
-    shaderpipe::VKVersion target;
-    bool operator==(const StageKey& other) const noexcept {
-        return path == other.path && stage == other.stage && target == other.target;
+struct ShaderKey {
+    std::string path; // GLSL path
+    vk::ShaderStageFlagBits stage;
+    bool operator==(const ShaderKey& o) const noexcept { return stage==o.stage && path==o.path; }
+};
+
+struct ShaderKeyHash {
+    size_t operator()(const ShaderKey& k) const noexcept {
+        // cached by (path, stage)
+        return std::hash<std::string>{}(k.path) ^ (static_cast<size_t>(k.stage) << 1);
     }
 };
 
-struct StageKeyHash {
-    size_t operator()(const StageKey& k) const noexcept {
-        return std::hash<std::string>{}(k.path) ^ (static_cast<size_t>(k.stage) << 1) ^ (static_cast<size_t>(k.target) <<2);
-    }
+struct ShaderModuleEntry {
+    std::vector<uint32_t> spirv;
+    vk::UniqueShaderModule module;
 };
 
-struct CompiledStage {
-    vk::ShaderModule module{};
-    shaderpipe::ShaderReflection reflection{};
-};
-
-struct ShaderStageRef {
-    StageKey key;
-    const char* entry = "main";
-};
-
-class ShaderManager {
+class ShaderSystem {
 public:
-    explicit ShaderManager(vk::Device device) : m_device(device) {}
-    ~ShaderManager() { destroyAll(); }
+    void init(vk::Device device);
+    void shutdown();
 
-    CompiledStage get(const StageKey& key);
-    void destroyAll();
+    const ShaderModuleEntry& loadModule(const std::string& glslPath, vk::ShaderStageFlagBits stage);
 
 private:
     vk::Device m_device{};
-    std::unordered_map<StageKey, CompiledStage, StageKeyHash> m_cache;
+    std::unordered_map<ShaderKey, ShaderModuleEntry, ShaderKeyHash> m_cache{};
 };
 
 }

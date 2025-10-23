@@ -11,76 +11,36 @@
 
 using namespace blok;
 
-vk::DescriptorSetLayout DescriptorSetLayoutCache::get(const SetLayoutKey &key) {
-    if (auto it = m_cache.find(key); it != m_cache.end()) return it->second;
-
-    std::vector<vk::DescriptorSetLayoutBinding> bindings;
-    bindings.reserve(key.bindings.size());
-    for (auto& b : key.bindings)
-        bindings.push_back({
-            b.binding,
-            static_cast<vk::DescriptorType>(b.type),
-            b.count,
-            static_cast<vk::ShaderStageFlags>(b.stages)});
-
-    vk::DescriptorSetLayoutCreateInfo info{};
-    info.bindingCount = static_cast<uint32_t>(bindings.size());
-    info.pBindings = bindings.data();
-
-    auto layout = m_device.createDescriptorSetLayout(info);
-    m_cache.emplace(key, layout);
-    return layout;
+void DescriptorSystem::init(vk::Device device, const DescriptorPoolSizes &poolCfg) {
+    m_device = device;
+    vk::DescriptorPoolCreateInfo pci{};
+    pci.setMaxSets(poolCfg.maxSets).setPoolSizes(poolCfg.sizes);
+    m_pool = m_device.createDescriptorPoolUnique(pci);
 }
 
-void DescriptorSetLayoutCache::destroyAll() {
-    for (auto& [_, l] : m_cache)
-        m_device.destroyDescriptorSetLayout(l);
-    m_cache.clear();
+void DescriptorSystem::shutdown() {
+    m_pool.reset();
 }
 
-vk::DescriptorSet DescriptorAllocator::allocate(vk::DescriptorSetLayout layout) {
-    if (!currentPool) currentPool = getPool();
+DescriptorSetLayouts DescriptorSystem::createLayouts(const std::vector<DescriptorSetLayoutDesc> &descs) {
+    DescriptorSetLayouts out{};
+    out.layouts.reserve(descs.size());
+    for (const auto& d : descs) {
+        std::vector<vk::DescriptorSetLayoutBinding> bs;
+        bs.reserve(d.bindings.size());
+        for (const auto& b : d.bindings) {
+            bs.push_back({b.binding, b.type, b.count, b.stages});
+        }
+        vk::DescriptorSetLayoutCreateInfo ci{}; ci.setBindings(bs);
+        out.layouts.push_back(m_device.createDescriptorSetLayoutUnique(ci));
+    }
+    return out;
+}
 
-    vk::DescriptorSetAllocateInfo ai{currentPool, 1, &layout};
+std::vector<vk::DescriptorSet> DescriptorSystem::allocateSets(const std::vector<vk::DescriptorSetLayout> &layouts, uint32_t count) {
+    std::vector<vk::DescriptorSetLayout> ls; ls.reserve(layouts.size() * count);
+    for (uint32_t i = 0; i < count; ++i) for (auto l: layouts) ls.push_back(l);
+    vk::DescriptorSetAllocateInfo ai{}; ai.setDescriptorPool(m_pool.get()).setSetLayouts(ls);
     auto sets = m_device.allocateDescriptorSets(ai);
-    if (sets.empty()) {
-        currentPool = getPool();
-        sets = m_device.allocateDescriptorSets(ai);
-    }
-    return sets.front();
-}
-
-void DescriptorAllocator::reset() {
-    for (auto& pool : m_usedPools) m_device.destroyDescriptorPool(pool);
-    for (auto& pool : m_freePools) m_device.destroyDescriptorPool(pool);
-    m_usedPools.clear();
-    m_freePools.clear();
-    currentPool = nullptr;
-}
-
-vk::DescriptorPool DescriptorAllocator::getPool() {
-    if (!m_freePools.empty()) {
-        auto p = m_freePools.back();
-        m_freePools.pop_back();
-        m_usedPools.push_back(p);
-        return p;
-    }
-    auto p = createPool(128);
-    m_usedPools.push_back(p);
-    return p;
-}
-
-vk::DescriptorPool DescriptorAllocator::createPool(uint32_t count) {
-    std::vector<vk::DescriptorPoolSize> sizes = {
-        {vk::DescriptorType::eUniformBuffer, count * 4},
-        {vk::DescriptorType::eCombinedImageSampler, count * 4},
-        {vk::DescriptorType::eStorageImage, count * 2},
-        {vk::DescriptorType::eStorageBuffer, count * 2}
-    };
-    vk::DescriptorPoolCreateInfo info{};
-    info.maxSets = count;
-    info.poolSizeCount = static_cast<uint32_t>(sizes.size());
-    info.pPoolSizes = sizes.data();
-    info.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
-    return m_device.createDescriptorPool(info);
+    return sets;
 }

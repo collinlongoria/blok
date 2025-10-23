@@ -29,35 +29,16 @@ target_link_libraries(blok PRIVATE ${CUDAToolkit_LIBRARIES})
 
 target_compile_options(blok PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
 
-# ---- WebGPU (dawn) ---
-#target_link_libraries(blok PRIVATE glfw3webgpu)
+# ---- Assimp ----
+target_link_libraries(blok PRIVATE assimp)
+target_include_directories(blok PRIVATE ${CMAKE_SOURCE_DIR}/external/assimp/include)
 
-#add_custom_command(TARGET blok POST_BUILD
-#        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-#        $<TARGET_RUNTIME_DLLS:blok> $<TARGET_FILE_DIR:blok>
- #       COMMAND_EXPAND_LISTS
-#)
+# ---- yaml-cpp ----
+target_link_libraries(blok PRIVATE yaml-cpp)
+target_include_directories(blok PRIVATE ${CMAKE_SOURCE_DIR}/external/yaml-cpp/include)
 
-#if (EXISTS "${TINT_EXE}")
-#    add_custom_command(TARGET blok POST_BUILD
-#            COMMAND ${CMAKE_COMMAND} -E copy_if_different
-#            "${TINT_EXE}" $<TARGET_FILE_DIR:blok>)
-#endif()
-
-
-#file(GLOB DIRECTX_DLLS "${CMAKE_SOURCE_DIR}/external/directx/*.dll")
-
-#if(WIN32)
-    # Copy them to the build directory
-#    foreach(dll ${DIRECTX_DLLS})
- #       add_custom_command(
- #               TARGET ${PROJECT_NAME} POST_BUILD
- #               COMMAND ${CMAKE_COMMAND} -E copy_if_different
-   #             ${dll}
-    #            $<TARGET_FILE_DIR:${PROJECT_NAME}>
-  #      )
- #   endforeach()
-#endif()
+# ---- stb (image, etc.) ----
+target_include_directories(blok PRIVATE ${CMAKE_SOURCE_DIR}/external/stb)
 
 # ---- GLM ----
 add_library(glm INTERFACE)
