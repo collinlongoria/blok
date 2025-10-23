@@ -32,7 +32,7 @@ Window::Window(uint32_t width, uint32_t height, const std::string& name, Graphic
         s_initialized = true;
     }
 
-    if (backend == GraphicsApi::OpenGL || backend == GraphicsApi::CUDA) {
+    if (backend == GraphicsApi::OpenGL) {
         glfwWindowHint(GLFW_CLIENT_API, GLFW_OPENGL_API);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
         glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
