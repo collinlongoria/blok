@@ -28,8 +28,7 @@ namespace blok {
 // per swapchain image signaling for present and image-in-flight
 static std::vector<vk::Semaphore> g_presentSignals;
 static std::vector<vk::Fence> g_imagesInFlight;
-static std::vector<vk::ImageLayout> g_swapImageLayouts;
-static float timer = 0.0f;
+static std::vector<vk::ImageLayout> g_swapImageLayouts; // TODO: can move these to the class no need to be static
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
     VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
@@ -104,10 +103,12 @@ void VulkanRenderer::init() {
     createCommandPoolAndBuffers();
     createSyncObjects();
 
+    createPipelineCache();
+
     m_shaderManager = std::make_unique<ShaderManager>(m_device);
     m_descriptorSetLayoutCache = std::make_unique<DescriptorSetLayoutCache>(m_device);
     m_descriptorAllocator = std::make_unique<DescriptorAllocator>(m_device);
-    m_pipelineManager = std::make_unique<PipelineManager>(m_device, m_device.createPipelineCache({}), *m_shaderManager, *m_descriptorSetLayoutCache);
+    m_pipelineManager = std::make_unique<PipelineManager>(m_device, m_pipelineCache, *m_shaderManager, *m_descriptorSetLayoutCache);
 
     createPerFrameUniforms();
 
@@ -126,6 +127,10 @@ void VulkanRenderer::beginFrame() {
 }
 
 void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
+
+}
+
+void VulkanRenderer::realDrawFrame(const Camera &cam, const VulkanScene& scene) {
     FrameResources& fr = m_frames[m_frameIndex];
 
     // acquire
@@ -146,7 +151,7 @@ void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
     // record
     vk::CommandBufferBeginInfo bi{ vk::CommandBufferUsageFlagBits::eOneTimeSubmit };
     fr.cmd.begin(bi);
-    recordGraphicsCommands(imageIndex, {}, {}); // currently just clears
+    recordGraphicsCommands(imageIndex, cam, scene);
     fr.cmd.end();
 
     // submit
@@ -213,6 +218,8 @@ void VulkanRenderer::shutdown() {
     if (m_uploadFence) { m_device.destroyFence(m_uploadFence); }
     if (m_uploadCmd) { m_device.freeCommandBuffers(m_uploadPool, 1, &m_uploadCmd); }
     if (m_uploadPool) { m_device.destroyCommandPool(m_uploadPool); }
+
+    if (m_pipelineCache) m_device.destroyPipelineCache(m_pipelineCache);
 
     cleanupSwapChain();
 
@@ -528,51 +535,141 @@ void VulkanRenderer::createPerFrameUniforms() {
     }
 }
 
-std::vector<vk::DescriptorSet> VulkanRenderer::prepareDescriptorSets(const BuiltProgram &program, FrameResources &fr) {
-    std::vector<vk::DescriptorSet> out(program.setLayouts.size(), {});
+std::vector<vk::DescriptorSet> VulkanRenderer::prepareDescriptorSets(const BuiltProgram &program, FrameResources &fr, const PassResources& res) {
+    // Only allocate sets that have valid layouts
+    std::vector<vk::DescriptorSet> out;
+    out.reserve(program.setLayouts.size());
 
-    // allocate one set per layout
-    for (uint32_t set = 0; set < program.setLayouts.size(); ++set)
-        out[set] = m_descriptorAllocator->allocate(program.setLayouts[set]);
+    for (uint32_t set = 0; set < program.setLayouts.size(); ++set) {
+        if (program.setLayouts[set]) {
+            out.push_back(m_descriptorAllocator->allocate(program.setLayouts[set]));
+        } else {
+            out.push_back(vk::DescriptorSet{}); // null handle for empty sets
+        }
+    }
 
-    // accumulate writes
+    // Build write descriptors
     std::vector<vk::WriteDescriptorSet> writes;
-    writes.reserve(program.bindings.size());
+    std::vector<vk::DescriptorBufferInfo> bufInfos;
+    std::vector<vk::DescriptorImageInfo>  imgInfos;
+    writes.reserve(res.items.size());
+    bufInfos.reserve(res.items.size());
+    imgInfos.reserve(res.items.size());
 
-    // temp holders for buffer/image infos
-    std::vector<vk::DescriptorBufferInfo> bufferInfos;
-    std::vector<vk::DescriptorImageInfo> imageInfos;
-    bufferInfos.reserve(program.bindings.size());
-    imageInfos.reserve(program.bindings.size());
+    auto suballocUbo = [&](size_t bytes, size_t alignment = 256) {
+        fr.uboHead = (fr.uboHead + alignment - 1) & ~(alignment - 1);
+        if (fr.uboHead + bytes > fr.globalUBO.size)
+            bytes = std::max<size_t>(0, size_t(fr.globalUBO.size - fr.uboHead));
+        auto off = fr.uboHead;
+        fr.uboHead += bytes;
+        return vk::DescriptorBufferInfo{ fr.globalUBO.handle, off, bytes };
+    };
 
-    for (auto& b : program.bindings) {
-        auto dstSet = out.at(b.set);
+    for (const auto& pr : res.items) {
+        // Skip if set index is out of bounds or set layout is null
+        if (pr.set >= out.size() || !out[pr.set]) continue;
 
-        switch (static_cast<vk::DescriptorType>(b.type)) {
-        case vk::DescriptorType::eUniformBuffer: {
-            constexpr size_t defaultSize = 256;
-            auto info = suballocUbo(fr, defaultSize);
-            bufferInfos.push_back(info);
+        auto dstSet = out[pr.set];
+
+        switch (pr.kind) {
+        case ResourceKind::Buffer: {
+            if (auto it = m_buffers.find(pr.name); it != m_buffers.end()) {
+                const auto& b = it->second;
+                bufInfos.push_back(vk::DescriptorBufferInfo{ b.handle, 0, b.size });
+            } else {
+                size_t bytes = pr.byteSize ? pr.byteSize : 256;
+                bufInfos.push_back(suballocUbo(bytes));
+                if (pr.initData)
+                    std::memcpy(static_cast<uint8_t*>(fr.globalUBO.mapped) + bufInfos.back().offset,
+                                pr.initData, bytes);
+            }
+
+            auto it = std::find_if(program.bindings.begin(), program.bindings.end(),
+                    [&](const auto& b){ return b.set==pr.set && b.binding==pr.binding; });
+            vk::DescriptorType dtype = (it != program.bindings.end())
+                ? static_cast<vk::DescriptorType>(it->type) : vk::DescriptorType::eUniformBuffer;
 
             vk::WriteDescriptorSet w{};
             w.dstSet = dstSet;
-            w.dstBinding = b.binding;
-            w.descriptorType = vk::DescriptorType::eUniformBuffer;
+            w.dstBinding = pr.binding;
+            w.descriptorType = dtype;
             w.descriptorCount = 1;
-            w.pBufferInfo = &bufferInfos.back();
+            w.pBufferInfo = &bufInfos.back();
             writes.push_back(w);
             break;
         }
-        case vk::DescriptorType::eStorageBuffer: {
+        case ResourceKind::StorageImage: {
+            auto imgIt = m_images.find(pr.name);
+            if (imgIt == m_images.end()) continue;
+            const auto& im = imgIt->second;
+
+            imgInfos.push_back(vk::DescriptorImageInfo{
+                {}, im.view, vk::ImageLayout::eGeneral
+            });
+
+            vk::WriteDescriptorSet w{};
+            w.dstSet = dstSet;
+            w.dstBinding = pr.binding;
+            w.descriptorType = vk::DescriptorType::eStorageImage;
+            w.descriptorCount = 1;
+            w.pImageInfo = &imgInfos.back();
+            writes.push_back(w);
             break;
         }
-        case vk::DescriptorType::eStorageImage: {
-            vk::DescriptorImageInfo ii{};
-            ii.imageLayout = vk::ImageLayout::eGeneral;
-           // ii.imageView = m_ray
+        case ResourceKind::SampledImage: {
+            auto imgIt = m_images.find(pr.name);
+            if (imgIt == m_images.end()) continue;
+            const auto& im = imgIt->second;
+
+            imgInfos.push_back(vk::DescriptorImageInfo{
+                {}, im.view, vk::ImageLayout::eShaderReadOnlyOptimal
+            });
+
+            vk::WriteDescriptorSet w{};
+            w.dstSet = dstSet;
+            w.dstBinding = pr.binding;
+            w.descriptorType = vk::DescriptorType::eSampledImage;
+            w.descriptorCount = 1;
+            w.pImageInfo = &imgInfos.back();
+            writes.push_back(w);
+            break;
+        }
+        case ResourceKind::CombinedImageSampler: {
+            auto imgIt = m_images.find(pr.name);
+            auto smpIt = m_samplers.find(pr.samplerName);
+            if (imgIt == m_images.end() || smpIt == m_samplers.end()) continue;
+            const auto& im = imgIt->second;
+            const auto& sp = smpIt->second;
+
+            imgInfos.push_back(vk::DescriptorImageInfo{
+                sp.handle, im.view, vk::ImageLayout::eShaderReadOnlyOptimal
+            });
+
+            vk::WriteDescriptorSet w{};
+            w.dstSet = dstSet;
+            w.dstBinding = pr.binding;
+            w.descriptorType = vk::DescriptorType::eCombinedImageSampler;
+            w.descriptorCount = 1;
+            w.pImageInfo = &imgInfos.back();
+            writes.push_back(w);
+            break;
         }
         }
     }
+
+    if (!writes.empty())
+        m_device.updateDescriptorSets(static_cast<uint32_t>(writes.size()), writes.data(), 0, nullptr);
+
+    return out;
+}
+
+void VulkanRenderer::pushProgramConstants(const BuiltProgram &program, vk::CommandBuffer cmd, std::span<const std::byte> data) {
+    if (program.pushConstants.empty() || data.empty()) return;
+    const auto& pc = program.pushConstants.front();
+    const uint32_t n = std::min<uint32_t>(pc.size, static_cast<uint32_t>(data.size()));
+    cmd.pushConstants(program.layout,
+        static_cast<vk::ShaderStageFlags>(pc.stageFlags),
+        pc.offset, n, data.data());
 }
 
 Buffer VulkanRenderer::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage, bool mapped) {
@@ -951,8 +1048,67 @@ vk::SampleCountFlagBits VulkanRenderer::getMaxUsableSampleCount() const {
     return vk::SampleCountFlagBits::e1;
 }
 
-void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &cam, const Scene &scene) {
+void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &cam, const VulkanScene &scene) {
+    auto& fr = m_frames[m_frameIndex];
+    fr.uboHead = 0; // reset per-frame UBO arena
 
+    const auto clear = std::array<float,4>{0.05f, 0.08f, 0.10f, 1.0f };
+    bool renderingActive = false;
+
+    auto beginIfNeeded = [&]{
+        if (renderingActive) return;
+        beginRendering(fr.cmd, m_swapViews[imageIndex], m_depth.view, m_swapExtent, clear);
+        renderingActive = true;
+    };
+    auto endIfNeeded = [&]{
+        if (!renderingActive) return;
+        endRendering(fr.cmd);
+        renderingActive = false;
+    };
+
+    for (const auto& pass : scene.passes)
+    {
+        const auto& prog = m_pipelineManager->getOrCreate(pass.pipelineName, pass.desc);
+        const bool isComp = pass.isCompute;
+
+        // Compute must NOT be inside a rendering instance
+        if (isComp) endIfNeeded(); else beginIfNeeded();
+
+        // Bind pipeline
+        const auto bindPoint = isComp ? vk::PipelineBindPoint::eCompute
+                                      : vk::PipelineBindPoint::eGraphics;
+        fr.cmd.bindPipeline(bindPoint, prog.pipeline);
+
+        // Descriptor sets from pass resources + reflection
+        auto sets = prepareDescriptorSets(prog, fr, pass.resources);
+        if (!sets.empty()) {
+            fr.cmd.bindDescriptorSets(bindPoint, prog.layout,
+                                      /*firstSet*/0,
+                                      static_cast<uint32_t>(sets.size()), sets.data(),
+                                      /*dynOffsetCount*/0, /*pDynOffsets*/nullptr);
+        }
+
+        // Push constants (if provided by pass & required by shader)
+        if (!pass.pushConstantBytes.empty())
+            pushProgramConstants(prog, fr.cmd,
+                                      std::span<const std::byte>(pass.pushConstantBytes));
+
+        if (isComp) {
+            fr.cmd.dispatch(pass.groupsX, pass.groupsY, pass.groupsZ);
+        } else {
+            // dynamic viewport/scissor every graphics pass
+            const vk::Viewport vp{ 0.f, 0.f,
+                                   float(m_swapExtent.width), float(m_swapExtent.height),
+                                   0.f, 1.f };
+            const vk::Rect2D   sc{ {0,0}, m_swapExtent };
+            fr.cmd.setViewport(0, 1, &vp);
+            fr.cmd.setScissor (0, 1, &sc);
+
+            fr.cmd.draw(pass.vertexCount, 1, 0, 0);
+        }
+    }
+
+    endIfNeeded(); // close rendering if last pass was graphics
 }
 
 void VulkanRenderer::cleanupSwapChain() {
@@ -1001,9 +1157,10 @@ std::vector<char const *> VulkanRenderer::getRequiredExtensions() {
 
 std::vector<char const *> VulkanRenderer::getRequiredDeviceExtensions() {
     std::vector<const char*> out = {
-        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
-        VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME,
-        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME, /* Graphics */
+        VK_KHR_DYNAMIC_RENDERING_EXTENSION_NAME, /* Dynamic Rendering (isnt this in core now?) */
+        VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME, /* TODO: no clue, figure out what specific this one is needed for */
+        VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME /* Raytracing Pipeline */
     };
     return out;
 }

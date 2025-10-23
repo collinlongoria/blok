@@ -138,6 +138,14 @@ const BuiltProgram &PipelineManager::getOrCreate(const std::string &name, const 
         rci.pColorAttachmentFormats = &desc.colorFormat;
         if (desc.depthFormat) rci.depthAttachmentFormat = *desc.depthFormat;
 
+        vk::PipelineMultisampleStateCreateInfo ms{};
+        ms.sampleShadingEnable = VK_FALSE;
+        ms.rasterizationSamples = vk::SampleCountFlagBits::e1;
+        ms.minSampleShading = 1.0f;
+        ms.pSampleMask = nullptr;
+        ms.alphaToCoverageEnable = VK_FALSE;
+        ms.alphaToOneEnable = VK_FALSE;
+
         vk::GraphicsPipelineCreateInfo gp{};
         gp.pNext = &rci;
         gp.stageCount = static_cast<uint32_t>(stages.size());
@@ -148,6 +156,7 @@ const BuiltProgram &PipelineManager::getOrCreate(const std::string &name, const 
         gp.pRasterizationState = &rs;
         gp.pDepthStencilState = &ds;
         gp.pColorBlendState = &cb;
+        gp.pMultisampleState = &ms;
         gp.pDynamicState = &dyn;
         gp.layout = program.layout;
 
