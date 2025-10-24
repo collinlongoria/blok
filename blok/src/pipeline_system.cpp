@@ -177,11 +177,17 @@ PipelineProgram PipelineSystem::buildGraphics(const GraphicsPipelineDesc &d) {
     return {PipelineKind::Graphics, std::move(pipe), std::move(layout)};
 }
 
-// TODO: implement this function
 PipelineProgram PipelineSystem::buildCompute(const ComputePipelineDesc &d) {
-    PipelineProgram program{};
+    std::vector<vk::PushConstantRange> pcr; for (auto& p : d.layout.pushConstants) pcr.push_back({p.stages, p.offset, p.size});
+    vk::PipelineLayoutCreateInfo lci{}; lci.setSetLayouts(d.layout.setLayouts).setPushConstantRanges(pcr);
 
-    return program;
+    auto layout = m_device.createPipelineLayoutUnique(lci);
+    const auto& sm = m_shaders->loadModule(d.shader.path, d.shader.stage);
+    vk::ComputePipelineCreateInfo ci{}; ci.setStage({{}, d.shader.stage, sm.module.get(), d.shader.entry.c_str()}).setLayout(layout.get());
+
+    auto pipe = m_device.createComputePipelineUnique(m_cache.get(), ci).value;
+    std::cout << "Compute pipeline created!" << std::endl;
+    return {PipelineKind::Compute, std::move(pipe), std::move(layout)};
 }
 
 // TODO: implement this function
