@@ -16,6 +16,7 @@
 #include "vulkan/vulkan.hpp"
 #include <vk_mem_alloc.h>
 
+#include "object.hpp"
 #include "pipeline_system.hpp"
 
 
@@ -23,69 +24,34 @@ namespace blok {
 class Window;
 
 struct Buffer {
-    vk::Buffer handle{};
-    VmaAllocation alloc{};
-    VmaAllocationInfo allocInfo{};
-    vk::DeviceSize size = 0;
-    vk::DeviceSize alignment = 0;
-    vk::BufferUsageFlags usage{};
-    bool mapped = false;
-    void* mappedPtr = nullptr;
+    vk::Buffer      handle{};
+    VmaAllocation   alloc{};
+    void*           mapped = nullptr;
+    vk::DeviceSize  size = 0;
 };
 
 struct Image {
-    vk::Image handle{};
-    VmaAllocation alloc{};
-    VmaAllocationInfo allocInfo{};
-    vk::ImageView view{};
-    vk::Format format{};
-    vk::Extent3D extent{};
-    vk::ImageLayout currentLayout{vk::ImageLayout::eUndefined};
-    uint32_t mipLevels = 1;
-    uint32_t layers = 1;
-    vk::SampleCountFlagBits sampled{vk::SampleCountFlagBits::e1};
+    vk::Image                   handle{};
+    VmaAllocation               alloc{};
+    vk::ImageView               view{};
+    vk::Format                  format{vk::Format::eUndefined};
+    uint32_t                    width = 0;
+    uint32_t                    height = 0;
+    uint32_t                    mipLevels = 1;
+    uint32_t                    layers = 1;
+    vk::SampleCountFlagBits     samples{vk::SampleCountFlagBits::e1};
+    vk::ImageLayout             currentLayout{vk::ImageLayout::eUndefined};
 };
 
 struct Sampler {
     vk::Sampler handle{};
 };
 
-// Scene stuff, may move.
-enum class ResourceKind {
-    Buffer,
-    StorageImage,
-    SampledImage,
-    CombinedImageSampler
-};
-
-struct PassResource {
-    uint32_t set;
-    uint32_t binding;
-    ResourceKind kind;
-    std::string name;
-    vk::ImageLayout layout = vk::ImageLayout::eUndefined;
-};
-
-struct PassResources {
-    std::vector<PassResource> items;
-};
-
-struct ScenePass {
-    std::string pipelineName;
-    bool isCompute = false;
-    uint32_t groupsX=0,groupsY=0,groupsZ=0; // for compute
-    uint32_t vertexCount=0; // for graphics
-    PassResources resources; // descriptors requested by the pass
-    std::vector<std::byte> pushConstantBytes;
-};
-
-struct VulkanScene { std::vector<ScenePass> passes; };
-
 struct FrameResources {
     // Sync
     vk::Semaphore imageAvailable{};
     vk::Semaphore renderFinished{};
-    vk::Fence inFlight{};
+    vk::Fence     inFlight{};
 
     // Commands
     vk::CommandPool cmdPool{};
@@ -108,6 +74,10 @@ public:
     void endFrame() override;
 
     [[nodiscard]] vk::Format getColorFormat() const { return m_colorFormat; }
+
+    // Objects, Meshes, Materials
+    MeshBuffers uploadMesh(const void* vertices, vk::DeviceSize bytes, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount);
+    void setRenderList(const std::vector<Object>* list);
 
     void shutdown() override;
 
@@ -140,9 +110,11 @@ private: // functions
     void copyBuffer(Buffer& src, Buffer& dst, vk::DeviceSize size);
 
     Image createImage(uint32_t w, uint32_t h, vk::Format fmt, vk::ImageUsageFlags usage, vk::ImageTiling tiling = vk::ImageTiling::eOptimal, vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1, uint32_t mipLevels = 1, uint32_t layers = 1, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO);
-    void transitionImage(Image& img, vk::ImageLayout newLayout, vk::PipelineStageFlags2 srcStage, vk::AccessFlags2 srcAccess, vk::PipelineStageFlags2 dstStage, vk::AccessFlags2 dstAccess, vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor, uint32_t baseMip = 0, uint32_t levelCount = VK_REMAINING_MIP_LEVELS, uint32_t baseLayer = 0, uint32_t layerCount = VK_REMAINING_ARRAY_LAYERS);
     void copyBufferToImage(Buffer& staging, Image& img, uint32_t w, uint32_t h, uint32_t baseLayer = 0, uint32_t layerCount = 1);
     void generateMipmaps(Image& img);
+
+    vk::Buffer uploadVertexBuffer(const void* data, vk::DeviceSize sizeBytes, uint32_t vertexCount);
+    vk::Buffer uploadIndexBuffer(const uint32_t* data, uint32_t indexCount);
 
     // Dynamic rendering helpers
     void beginRendering(vk::CommandBuffer cmd, vk::ImageView colorView, vk::ImageView depthView, vk::Extent2D extent, const std::array<float,4>& clearColor, float clearDepth = 1.0f, uint32_t clearStencil = 0);
@@ -153,7 +125,7 @@ private: // functions
     [[nodiscard]] vk::SampleCountFlagBits getMaxUsableSampleCount() const;
 
     // Recording
-    void recordGraphicsCommands(uint32_t imageIndex, const Camera& cam, const VulkanScene& scene);
+    void recordGraphicsCommands(uint32_t imageIndex, const Camera& cam, const Scene& scene);
 
     // Cleanup and Recreation
     void cleanupSwapChain();
@@ -209,6 +181,10 @@ private: // resources
     std::unordered_map<std::string, Image>   m_images;
     std::unordered_map<std::string, Buffer>  m_buffers;
     std::unordered_map<std::string, Sampler> m_samplers;
+    std::vector<Buffer> m_ownedBuffers;
+
+    // Objects
+    const std::vector<Object>* m_renderList = nullptr;
 
     // Per-frame
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
