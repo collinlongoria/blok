@@ -23,13 +23,15 @@
 /* These includes are here so I can test build */
 #include <chrono>
 
+#define VKR reinterpret_cast<VulkanRenderer*>(m_renderer.get())
+
 using namespace blok;
 static Camera g_camera;
 static Scene  g_scene;
-static VulkanScene temp_scene{};
 static float lastX = 400.0f;
 static float lastY = 300.0f;
 static bool firstMouse = true;
+static std::vector<Object> gScene;
 
 // ---------------- Input Callbacks ----------------
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
@@ -86,9 +88,24 @@ void App::init() {
         m_cudaTracer = std::make_unique<CudaTracer>(m_window->getWidth(), m_window->getHeight());
         m_cudaTracer->init();
         break;
-    case GraphicsApi::Vulkan:
+    case GraphicsApi::Vulkan: {
         m_renderer = std::make_unique<VulkanRenderer>(m_window.get());
         m_renderer->init();
+
+        struct Vtx { float x,y,z,u,v; };
+        const Vtx tri[3] = {
+            {-0.5f,-0.5f,0.f, 0.f,0.f},
+            { 0.5f,-0.5f,0.f, 1.f,0.f},
+            { 0.0f, 0.5f,0.f, 0.5f,1.f},
+        };
+
+        blok::Object obj{};
+        obj.mesh = VKR->uploadMesh(tri, sizeof(tri), 3, nullptr, 0);
+        obj.material.pipelineName = "hello_triangle";
+
+        gScene.push_back(obj);
+        VKR->setRenderList(&gScene);
+    }
         break;
     }
 }

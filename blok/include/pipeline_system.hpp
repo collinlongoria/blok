@@ -35,22 +35,22 @@ struct PipelineLayoutEntry {
 // For dynamic rendering
 struct RenderTargetsDesc {
     std::vector<vk::Format> colorFormats;
-    std::optional<vk::Format> depthFormats;
+    std::optional<vk::Format> depthFormat;
 };
 
 struct GraphicsStatesDesc {
     vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList;
     bool depthTest = true;
     bool depthWrite = true;
-    vk::CompareOp depthCompare = vk::CompareOp::eLess;
+    vk::CompareOp depthCompare = vk::CompareOp::eGreaterOrEqual;
     vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack;
-    vk::FrontFace frontFace = vk::FrontFace::eCounterClockwise;
+    vk::FrontFace frontFace = vk::FrontFace::eClockwise;
     bool enableBlend = false;
 };
 
 struct ShaderStageDesc {
     std::string path; // GLSL path
-    vk::ShaderStageFlags stage;
+    vk::ShaderStageFlagBits stage;
     std::string entry = "main";
 };
 

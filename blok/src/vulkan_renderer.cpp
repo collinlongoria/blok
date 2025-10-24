@@ -22,8 +22,6 @@
 
 namespace blok {
 
-
-
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
     VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
     void* pUserData) {
@@ -63,16 +61,6 @@ static vk::ImageAspectFlags aspectFromFormat(vk::Format fmt) {
     default:
         return vk::ImageAspectFlagBits::eColor;
     }
-}
-
-static vk::DescriptorBufferInfo suballocUbo(FrameResources& fr, size_t bytes, size_t alignment = 256) {
-    fr.uboHead = (fr.uboHead + alignment - 1) & ~(alignment - 1);
-    if (fr.uboHead + bytes > fr.globalUBO.size) {
-        bytes = std::min<size_t>(bytes, size_t(fr.globalUBO.size - fr.uboHead));
-    }
-    auto offset = fr.uboHead;
-    fr.uboHead += bytes;
-    return vk::DescriptorBufferInfo{ fr.globalUBO.handle, offset, bytes };
 }
 
 VulkanRenderer::VulkanRenderer(Window* window) {
@@ -115,78 +103,125 @@ void VulkanRenderer::init() {
     createPerFrameUniforms();
 
     std::cout << "Vulkan API initialized!"  << std::endl;
+
+    // Ensure hello_triangle is parsed and created from YAML
+    const std::string helloYaml = "assets/pipelines/hello_triangle.yaml"; // adjust path if needed
+    auto created = m_pipelineSystem->loadPipelinesFromYAML(helloYaml);
+    if (std::find(created.begin(), created.end(), std::string("hello_triangle")) == created.end()) {
+        throw std::runtime_error("failed to create 'hello_triangle' from " + helloYaml);
+    }
 }
 
 void VulkanRenderer::beginFrame() {
-    FrameResources& fr = m_frames[m_frameIndex];
-    // wait for previous work
-    if (fr.inFlight) {
-        (void)m_device.waitForFences(fr.inFlight, VK_TRUE, UINT64_MAX);
-        m_device.resetFences(fr.inFlight);
-    }
-    if (fr.cmdPool)
-        m_device.resetCommandPool(fr.cmdPool);
+    // Reset UBO allocator head for this frame
+    m_frames[m_frameIndex].uboHead = 0;
 }
 
 void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
-    FrameResources& fr = m_frames[m_frameIndex];
+    auto& fr = m_frames[m_frameIndex];
+
+    // wait and reset
+    if (m_device.waitForFences(1, &fr.inFlight, VK_TRUE, UINT64_MAX) != vk::Result::eSuccess)
+        throw std::runtime_error("waitForFences failed");
+    auto result = m_device.resetFences(1, &fr.inFlight);
 
     // acquire
     uint32_t imageIndex = 0;
-    vk::Result acq = m_device.acquireNextImageKHR(m_swapchain, UINT64_MAX, fr.imageAvailable, {}, &imageIndex);
-    if (acq == vk::Result::eErrorOutOfDateKHR) { m_swapchainDirty = true; return; }
-    if (acq == vk::Result::eSuboptimalKHR) { m_swapchainDirty = true; }
+    const auto acq = m_device.acquireNextImageKHR(m_swapchain, UINT64_MAX,
+                                                  fr.imageAvailable, nullptr, &imageIndex);
+    if (acq == vk::Result::eErrorOutOfDateKHR) { m_swapchainDirty = true; endFrame(); return; }
+    if (acq != vk::Result::eSuccess && acq != vk::Result::eSuboptimalKHR)
+        throw std::runtime_error("acquireNextImageKHR failed");
 
-    // ensure swapchain image not in flight
-    if (imageIndex < m_imagesInFlight.size() && m_imagesInFlight[imageIndex]) {
-        (void)m_device.waitForFences(m_imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
-    }
-    if (imageIndex >= m_imagesInFlight.size()) {
-        m_imagesInFlight.assign(m_swapImages.size(), VK_NULL_HANDLE);
+    if (m_imagesInFlight[imageIndex]) {
+        result = m_device.waitForFences(1, &m_imagesInFlight[imageIndex], VK_TRUE, UINT64_MAX);
     }
     m_imagesInFlight[imageIndex] = fr.inFlight;
 
     // record
-    vk::CommandBufferBeginInfo bi{ vk::CommandBufferUsageFlagBits::eOneTimeSubmit };
+    fr.cmd.reset({});
+    vk::CommandBufferBeginInfo bi{};
     fr.cmd.begin(bi);
-    //recordGraphicsCommands(imageIndex, cam, scene);
+
+    blok::ImageTransitions it{ fr.cmd };
+
+    Image sw{};
+    sw.handle        = m_swapImages[imageIndex];
+    sw.view          = m_swapViews[imageIndex];
+    sw.width         = m_swapExtent.width;
+    sw.height        = m_swapExtent.height;
+    sw.mipLevels     = 1;
+    sw.layers        = 1;
+    sw.format        = m_colorFormat;
+    sw.currentLayout = m_swapImageLayouts[imageIndex];
+
+    it.ensure(sw, blok::Role::ColorAttachment);
+    it.ensure(m_depth, blok::Role::DepthAttachment);
+
+    const std::array<float,4> clear{1.0f,0.0f,0.0f,1.0f};
+    beginRendering(fr.cmd, sw.view, m_depth.view, m_swapExtent, clear, 1.0f, 0);
+
+    // viewport/scissor
+    vk::Viewport vp{0.f, 0.f, float(m_swapExtent.width), float(m_swapExtent.height), 0.f, 1.f};
+    vk::Rect2D sc{{0,0}, m_swapExtent};
+    fr.cmd.setViewport(0, 1, &vp);
+    fr.cmd.setScissor(0, 1, &sc);
+
+    if (m_renderList) {
+        vk::Pipeline lastPipe{};
+        for (const auto& obj : *m_renderList) {
+            // bind pipeline by material name
+            const auto& prog = m_pipelineSystem->get(obj.material.pipelineName);
+            if (prog.pipeline.get() != lastPipe) {
+                fr.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, prog.pipeline.get());
+                lastPipe = prog.pipeline.get();
+            }
+
+            // bind vertex/index and draw
+            vk::DeviceSize off = 0;
+            if (obj.mesh.vertex) {
+                fr.cmd.bindVertexBuffers(0, 1, &obj.mesh.vertex, &off);
+                if (obj.mesh.index && obj.mesh.indexCount) {
+                    fr.cmd.bindIndexBuffer(obj.mesh.index, 0, vk::IndexType::eUint32);
+                    fr.cmd.drawIndexed(obj.mesh.indexCount, 1, 0, 0, 0);
+                } else {
+                    fr.cmd.draw(obj.mesh.vertexCount, 1, 0, 0);
+                }
+            }
+        }
+    }
+
+    endRendering(fr.cmd);
+
+    it.ensure(sw, blok::Role::Present);
+    m_swapImageLayouts[imageIndex] = sw.currentLayout;
+
     fr.cmd.end();
 
-    // submit
-    vk::SemaphoreSubmitInfo waitSem{};
-    waitSem.semaphore = fr.imageAvailable;
-    waitSem.stageMask = vk::PipelineStageFlagBits2::eColorAttachmentOutput;
+    // submit + present with per-image semaphores
+    vk::PipelineStageFlags waitStage = vk::PipelineStageFlagBits::eColorAttachmentOutput;
+    vk::SubmitInfo si{};
+    si.waitSemaphoreCount   = 1;
+    si.pWaitSemaphores      = &fr.imageAvailable;
+    si.pWaitDstStageMask    = &waitStage;
+    si.commandBufferCount   = 1;
+    si.pCommandBuffers      = &fr.cmd;
+    si.signalSemaphoreCount = 1;
+    si.pSignalSemaphores    = &m_presentSignals[imageIndex];
 
-    vk::Semaphore presentSignal = m_presentSignals[imageIndex];
+    result = m_graphicsQueue.submit(1, &si, fr.inFlight);
 
-    vk::SemaphoreSubmitInfo signalSem{};
-    signalSem.semaphore = presentSignal;
-    signalSem.stageMask = vk::PipelineStageFlagBits2::eNone;
-
-    vk::CommandBufferSubmitInfo cbsi{};
-    cbsi.commandBuffer = fr.cmd;
-
-    vk::SubmitInfo2 submit{};
-    submit.waitSemaphoreInfoCount = 1;
-    submit.pWaitSemaphoreInfos = &waitSem;
-    submit.commandBufferInfoCount = 1;
-    submit.pCommandBufferInfos = &cbsi;
-    submit.signalSemaphoreInfoCount = 1;
-    submit.pSignalSemaphoreInfos = &signalSem;
-
-    auto r = m_graphicsQueue.submit2(1, &submit, fr.inFlight);
-
-    // present
     vk::PresentInfoKHR pi{};
     pi.waitSemaphoreCount = 1;
-    pi.pWaitSemaphores = &presentSignal;
-    pi.swapchainCount = 1;
-    pi.pSwapchains = &m_swapchain;
-    pi.pImageIndices = &imageIndex;
-    vk::Result pres = m_presentQueue.presentKHR(pi);
-    if (pres == vk::Result::eErrorOutOfDateKHR || pres == vk::Result::eSuboptimalKHR) {
-        m_swapchainDirty = true;
-    }
+    pi.pWaitSemaphores    = &m_presentSignals[imageIndex];
+    vk::SwapchainKHR scH  = m_swapchain;
+    pi.swapchainCount     = 1;
+    pi.pSwapchains        = &scH;
+    pi.pImageIndices      = &imageIndex;
+
+    const auto pres = m_presentQueue.presentKHR(pi);
+    if (pres == vk::Result::eErrorOutOfDateKHR || pres == vk::Result::eSuboptimalKHR) m_swapchainDirty = true;
+    else if (pres != vk::Result::eSuccess) throw std::runtime_error("presentKHR failed");
 }
 
 void VulkanRenderer::endFrame() {
@@ -212,6 +247,12 @@ void VulkanRenderer::shutdown() {
         if (fr.renderFinished) { m_device.destroySemaphore(fr.renderFinished); }
         if (fr.inFlight) { m_device.destroyFence(fr.inFlight); }
     }
+
+    // owned buffers
+    for (auto& b : m_ownedBuffers) {
+        if (b.handle) vmaDestroyBuffer(m_allocator, b.handle, b.alloc);
+    }
+    m_ownedBuffers.clear();
 
     if (m_uploadFence) { m_device.destroyFence(m_uploadFence); }
     if (m_uploadCmd) { m_device.freeCommandBuffers(m_uploadPool, 1, &m_uploadCmd); }
@@ -497,7 +538,7 @@ void VulkanRenderer::createCommandPoolAndBuffers() {
 
     // Upload
     vk::CommandPoolCreateInfo upci{};
-    upci.flags = vk::CommandPoolCreateFlagBits::eTransient;
+    upci.flags = vk::CommandPoolCreateFlagBits::eTransient | vk::CommandPoolCreateFlagBits::eResetCommandBuffer;
     upci.queueFamilyIndex = *m_qfi.graphics;
     m_uploadPool = m_device.createCommandPool(upci);
 
@@ -533,304 +574,200 @@ void VulkanRenderer::createPerFrameUniforms() {
 Buffer VulkanRenderer::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage, bool mapped) {
     Buffer out{};
     out.size = size;
-    out.usage = usage;
 
-    vk::BufferCreateInfo bci{};
-    bci.size = size;
-    bci.usage = usage;
-    bci.sharingMode = vk::SharingMode::eExclusive;
+    VkBufferCreateInfo bci{};
+    bci.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bci.size = static_cast<VkDeviceSize>(size);
+    bci.usage = static_cast<VkBufferUsageFlags>(usage);
+    bci.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VmaAllocationCreateInfo aci{};
+    aci.flags = allocFlags | (mapped ? VMA_ALLOCATION_CREATE_MAPPED_BIT : 0);
     aci.usage = memUsage;
-    aci.flags = allocFlags;
 
-    VkBuffer buf = VK_NULL_HANDLE; VmaAllocation alloc = nullptr; VmaAllocationInfo ainfo{};
-    if (vmaCreateBuffer(m_allocator, reinterpret_cast<const VkBufferCreateInfo*>(&bci), &aci, &buf, &alloc, &ainfo) != VK_SUCCESS) {
-        throw std::runtime_error("Vulkan API failed to allocate buffer!");
-    }
-
-    out.handle = buf;
-    out.alloc = alloc;
-    out.alignment = ainfo.offset;
-    //out.alignment = ainfo.requiredAlignment; // borken line. top is potential fix.
-    if (mapped || (allocFlags & VMA_ALLOCATION_CREATE_MAPPED_BIT)) {
-        out.mapped = ainfo.pMappedData;
-        //if (!out.mapped) vmaMapMemory(m_allocator, alloc, &out.mapped);
-    }
+    VmaAllocationInfo ainfo{};
+    if (vmaCreateBuffer(m_allocator, &bci, &aci, reinterpret_cast<VkBuffer*>(&out.handle),
+                        &out.alloc, &ainfo) != VK_SUCCESS) {
+        throw std::runtime_error("Vulkan API: vmaCreateBuffer failed");
+                        }
+    if (mapped) out.mapped = ainfo.pMappedData;
     return out;
 }
 
 void VulkanRenderer::uploadToBuffer(const void *src, vk::DeviceSize size, Buffer &dst, vk::DeviceSize dstOffset) {
     if (dst.mapped) {
-        //std::memcpy(static_cast<char*>(dst.mapped) + dstOffset, src, static_cast<size_t>(size));
-        vmaFlushAllocation(m_allocator, dst.alloc, dstOffset, size);
+        std::memcpy(static_cast<char*>(dst.mapped) + dstOffset, src, static_cast<size_t>(size));
         return;
     }
-
-    Buffer staging = createBuffer(size, vk::BufferUsageFlagBits::eTransferSrc, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT, VMA_MEMORY_USAGE_AUTO_PREFER_HOST, true);
-    //std::memcpy(staging.mapped, src, static_cast<size_t>(size));
-    vmaFlushAllocation(m_allocator, staging.alloc, 0, size);
-
+    // Staging path
+    Buffer staging = createBuffer(size,
+                                  vk::BufferUsageFlagBits::eTransferSrc,
+                                  VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+                                  VMA_MEMORY_USAGE_AUTO_PREFER_HOST, true);
+    std::memcpy(staging.mapped, src, static_cast<size_t>(size));
     copyBuffer(staging, dst, size);
-
     vmaDestroyBuffer(m_allocator, staging.handle, staging.alloc);
 }
 
 void VulkanRenderer::copyBuffer(Buffer &src, Buffer &dst, vk::DeviceSize size) {
-    m_device.resetFences(m_uploadFence);
-    m_device.resetCommandPool(m_uploadPool);
+    // one-shot on m_uploadCmd
+    auto result = m_device.resetFences(1, &m_uploadFence);
+    m_uploadCmd.reset({});
 
-    vk::CommandBufferBeginInfo bi{vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
+    vk::CommandBufferBeginInfo bi{};
+    bi.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
     m_uploadCmd.begin(bi);
 
-    vk::BufferCopy cpy{};
-    cpy.size = size;
-    cpy.srcOffset = 0;
-    cpy.dstOffset = 0;
-    m_uploadCmd.copyBuffer(src.handle, dst.handle, 1, &cpy);
+    vk::BufferCopy copy{0, 0, size};
+    m_uploadCmd.copyBuffer(src.handle, dst.handle, 1, &copy);
 
     m_uploadCmd.end();
 
-    vk::CommandBufferSubmitInfo cbsi{};
-    cbsi.commandBuffer = m_uploadCmd;
-    vk::SubmitInfo2 si{};
-    si.commandBufferInfoCount = 1;
-    si.pCommandBufferInfos = &cbsi;
-    auto r = m_graphicsQueue.submit2(1, &si, m_uploadFence);
-    (void)m_device.waitForFences(m_uploadFence, VK_TRUE, UINT64_MAX);
+    vk::SubmitInfo si{};
+    si.commandBufferCount = 1; si.pCommandBuffers = &m_uploadCmd;
+    result = m_graphicsQueue.submit(1, &si, m_uploadFence);
+    result = m_device.waitForFences(1, &m_uploadFence, VK_TRUE, UINT64_MAX);
 }
 
 Image VulkanRenderer::createImage(uint32_t w, uint32_t h, vk::Format fmt, vk::ImageUsageFlags usage, vk::ImageTiling tiling, vk::SampleCountFlagBits samples, uint32_t mipLevels, uint32_t layers, VmaMemoryUsage memUsage) {
     Image out{};
-    out.format = fmt;
-    out.extent = vk::Extent3D{ w, h, 1 };
-    out.mipLevels = mipLevels;
-    out.layers = layers;
-    out.sampled = samples;
+    out.width = w; out.height = h; out.format = fmt; out.mipLevels = mipLevels; out.layers = layers; out.samples = samples;
 
-    vk::ImageCreateInfo ici{};
-    ici.imageType = vk::ImageType::e2D;
-    ici.extent = out.extent;
+    VkImageCreateInfo ici{};
+    ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ici.imageType = VK_IMAGE_TYPE_2D;
+    ici.extent = { w, h, 1 };
     ici.mipLevels = mipLevels;
     ici.arrayLayers = layers;
-    ici.format = fmt;
-    ici.tiling = tiling;
-    ici.initialLayout = vk::ImageLayout::eUndefined;
-    ici.usage = usage;
-    ici.samples = samples;
-    ici.sharingMode = vk::SharingMode::eExclusive;
+    ici.format = static_cast<VkFormat>(fmt);
+    ici.tiling = static_cast<VkImageTiling>(tiling);
+    ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    ici.usage = static_cast<VkImageUsageFlags>(usage);
+    ici.samples = static_cast<VkSampleCountFlagBits>(samples);
+    ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VmaAllocationCreateInfo aci{};
     aci.usage = memUsage;
 
-    VkImage img = VK_NULL_HANDLE; VmaAllocation alloc = nullptr; VmaAllocationInfo ainfo{};
-    if (vmaCreateImage(m_allocator, reinterpret_cast<const VkImageCreateInfo*>(&ici), &aci, &img, &alloc, &ainfo) != VK_SUCCESS) {
-        throw std::runtime_error("Vulkan API failed to create image!");
-    }
+    if (vmaCreateImage(m_allocator, &ici, &aci,
+                       reinterpret_cast<VkImage*>(&out.handle), &out.alloc, nullptr) != VK_SUCCESS) {
+        throw std::runtime_error("Vulkan API: vmaCreateImage failed");
+                       }
 
-    out.handle = img;
-    out.alloc = alloc;
-    out.currentLayout = vk::ImageLayout::eUndefined;
-
-    // default view
     vk::ImageViewCreateInfo vci{};
     vci.image = out.handle;
     vci.viewType = vk::ImageViewType::e2D;
     vci.format = fmt;
-    vci.subresourceRange.aspectMask = aspectFromFormat(fmt);
-    vci.subresourceRange.baseMipLevel = 0;
-    vci.subresourceRange.levelCount = mipLevels;
-    vci.subresourceRange.baseArrayLayer = 0;
-    vci.subresourceRange.layerCount = layers;
+    vci.subresourceRange = { aspectFromFormat(fmt), 0, mipLevels, 0, layers };
     out.view = m_device.createImageView(vci);
 
+    out.currentLayout = vk::ImageLayout::eUndefined;
     return out;
 }
 
-void VulkanRenderer::transitionImage(Image &img, vk::ImageLayout newLayout, vk::PipelineStageFlags2 srcStage, vk::AccessFlags2 srcAccess, vk::PipelineStageFlags2 dstStage, vk::AccessFlags2 dstAccess, vk::ImageAspectFlags aspect, uint32_t baseMip, uint32_t levelCount, uint32_t baseLayer, uint32_t layerCount) {
-    m_device.resetFences(m_uploadFence);
-    m_device.resetCommandPool(m_uploadPool);
+void VulkanRenderer::copyBufferToImage(Buffer &staging, Image &img, uint32_t w, uint32_t h, uint32_t baseLayer, uint32_t layerCount) {
+    auto& fr = m_frames[m_frameIndex];
 
-    vk::CommandBufferBeginInfo bi{vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
-    m_uploadCmd.begin(bi);
+    vk::BufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.imageSubresource.aspectMask = aspectFromFormat(img.format);
+    region.imageSubresource.mipLevel = 0;
+    region.imageSubresource.baseArrayLayer = baseLayer;
+    region.imageSubresource.layerCount = layerCount;
+    region.imageExtent = vk::Extent3D{ w, h, 1 };
 
-    if (levelCount == VK_REMAINING_MIP_LEVELS) levelCount = img.mipLevels - baseMip;
-    if (layerCount == VK_REMAINING_ARRAY_LAYERS) layerCount = img.layers - baseLayer;
-
-    vk::ImageMemoryBarrier2 b{};
-    b.srcStageMask = srcStage;
-    b.srcAccessMask = srcAccess;
-    b.dstStageMask = dstStage;
-    b.dstAccessMask = dstAccess;
-    b.oldLayout = img.currentLayout;
-    b.newLayout = newLayout;
-    b.image = img.handle;
-    b.subresourceRange.aspectMask = aspect;
-    b.subresourceRange.baseMipLevel = baseMip;
-    b.subresourceRange.levelCount = levelCount;
-    b.subresourceRange.baseArrayLayer = baseLayer;
-    b.subresourceRange.layerCount = layerCount;
-
-    vk::DependencyInfo dep{};
-    dep.imageMemoryBarrierCount = 1;
-    dep.pImageMemoryBarriers = &b;
-    m_uploadCmd.pipelineBarrier2(dep);
-
-    m_uploadCmd.end();
-
-    vk::CommandBufferSubmitInfo cbsi{};
-    cbsi.commandBuffer = m_uploadCmd;
-
-    vk::SubmitInfo2 si{};
-    si.commandBufferInfoCount = 1;
-    si.pCommandBufferInfos = &cbsi;
-    auto r = m_graphicsQueue.submit2(1, &si, m_uploadFence);
-    (void)m_device.waitForFences(m_uploadFence, VK_TRUE, UINT64_MAX);
-
-    img.currentLayout = newLayout;
+    fr.cmd.copyBufferToImage(staging.handle, img.handle, vk::ImageLayout::eTransferDstOptimal, 1, &region);
 }
 
-void VulkanRenderer::copyBufferToImage(Buffer &staging, Image &img, uint32_t w, uint32_t h, uint32_t baseLayer, uint32_t layerCount) {
-    m_device.resetFences(m_uploadFence);
-    m_device.resetCommandPool(m_uploadPool);
+vk::Buffer VulkanRenderer::uploadVertexBuffer(const void *data, vk::DeviceSize sizeBytes, uint32_t vertexCount) {
+    Buffer dst = createBuffer(sizeBytes,
+        vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        0, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, false);
+    uploadToBuffer(data, sizeBytes, dst, 0);
+    m_ownedBuffers.push_back(dst);
+    return dst.handle;
+}
 
-    vk::CommandBufferBeginInfo bi{vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
-    m_uploadCmd.begin(bi);
+vk::Buffer VulkanRenderer::uploadIndexBuffer(const uint32_t *data, uint32_t indexCount) {
+    const vk::DeviceSize sizeBytes = sizeof(uint32_t) * indexCount;
+    Buffer dst = createBuffer(sizeBytes,
+        vk::BufferUsageFlagBits::eIndexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        0, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, false);
+    uploadToBuffer(data, sizeBytes, dst, 0);
+    m_ownedBuffers.push_back(dst);
+    return dst.handle;
+}
 
-    vk::BufferImageCopy copy{};
-    copy.imageSubresource.aspectMask = aspectFromFormat(img.format);
-    copy.imageSubresource.mipLevel = 0;
-    copy.imageSubresource.baseArrayLayer = baseLayer;
-    copy.imageSubresource.layerCount = layerCount;
-    copy.imageExtent = vk::Extent3D{ w, h, 1 };
+MeshBuffers VulkanRenderer::uploadMesh(const void *vertices, vk::DeviceSize bytes, uint32_t vertexCount, const uint32_t *indices, uint32_t indexCount) {
+    MeshBuffers out{};
+    out.vertex = uploadVertexBuffer(vertices, bytes, vertexCount);
+    out.vertexCount = vertexCount;
+    if (indices && indexCount) {
+        out.index = uploadIndexBuffer(indices, indexCount);
+        out.indexCount = indexCount;
+    }
+    return out;
+}
 
-    m_uploadCmd.copyBufferToImage(staging.handle, img.handle, vk::ImageLayout::eTransferDstOptimal, 1, &copy);
-
-    m_uploadCmd.end();
-    vk::CommandBufferSubmitInfo cbsi{};
-    cbsi.commandBuffer = m_uploadCmd;
-
-    vk::SubmitInfo2 si{};
-    si.commandBufferInfoCount = 1;
-    si.pCommandBufferInfos = &cbsi;
-    auto r = m_graphicsQueue.submit2(1, &si, m_uploadFence);
-    (void)m_device.waitForFences(m_uploadFence, VK_TRUE, UINT64_MAX);
+void VulkanRenderer::setRenderList(const std::vector<Object> *list) {
+    m_renderList = list;
 }
 
 void VulkanRenderer::generateMipmaps(Image &img) {
-    // verify linear blit support
-    auto props = m_physicalDevice.getFormatProperties(img.format);
-    if (!(props.optimalTilingFeatures & vk::FormatFeatureFlagBits::eSampledImageFilterLinear)) {
-        return; // no mips generated
-    }
-
-    m_device.resetFences(m_uploadFence);
-    m_device.resetCommandPool(m_uploadPool);
-
-    vk::CommandBufferBeginInfo bi{vk::CommandBufferUsageFlagBits::eOneTimeSubmit};
-    m_uploadCmd.begin(bi);
-
-    vk::ImageMemoryBarrier2 barrier{};
-    barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-    barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
-    barrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-    barrier.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
-    barrier.image = img.handle;
-    barrier.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = img.layers;
-    barrier.subresourceRange.levelCount = 1;
-
-    int32_t mipW = static_cast<int32_t>(img.extent.width);
-    int32_t mipH = static_cast<int32_t>(img.extent.height);
+    if (img.mipLevels <= 1) return;
+    auto& fr = m_frames[m_frameIndex];
 
     for (uint32_t i = 1; i < img.mipLevels; ++i) {
-        // transition (i-1) to TRANSFER_SRC_OPTIMAL
-        barrier.oldLayout = (i == 1) ? vk::ImageLayout::eTransferDstOptimal : vk::ImageLayout::eShaderReadOnlyOptimal;
-        barrier.newLayout = vk::ImageLayout::eTransferSrcOptimal;
-        barrier.subresourceRange.baseMipLevel = i - 1;
+        // transition src mip i-1 to transfer src
         {
-            vk::DependencyInfo dep{};
-            dep.imageMemoryBarrierCount = 1;
-            dep.pImageMemoryBarriers = &barrier;
-            m_uploadCmd.pipelineBarrier2(dep);
+            vk::ImageMemoryBarrier2 b{};
+            b.oldLayout = (i==1) ? vk::ImageLayout::eTransferDstOptimal : vk::ImageLayout::eTransferSrcOptimal;
+            b.newLayout = vk::ImageLayout::eTransferSrcOptimal;
+            b.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+            b.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+            b.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+            b.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
+            b.image = img.handle;
+            b.subresourceRange = { aspectFromFormat(img.format), i-1, 1, 0, img.layers };
+            vk::DependencyInfo dep{}; dep.setImageMemoryBarriers(b);
+            fr.cmd.pipelineBarrier2(dep);
+        }
+        // transition dst mip i to transfer dst
+        {
+            vk::ImageMemoryBarrier2 b{};
+            b.oldLayout = vk::ImageLayout::eUndefined;
+            b.newLayout = vk::ImageLayout::eTransferDstOptimal;
+            b.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+            b.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+            b.srcAccessMask = {};
+            b.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+            b.image = img.handle;
+            b.subresourceRange = { aspectFromFormat(img.format), i, 1, 0, img.layers };
+            vk::DependencyInfo dep{}; dep.setImageMemoryBarriers(b);
+            fr.cmd.pipelineBarrier2(dep);
         }
 
-        // blit from (i-1) -> (i)
+        // blit
         vk::ImageBlit2 blit{};
-        blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
-        blit.srcSubresource.mipLevel = i - 1;
-        blit.srcSubresource.baseArrayLayer = 0;
-        blit.srcSubresource.layerCount = img.layers;
-        blit.srcOffsets[0] = vk::Offset3D{0,0,0};
-        blit.srcOffsets[1] = vk::Offset3D{mipW,mipH,1};
+        blit.srcSubresource = { aspectFromFormat(img.format), i-1, 0, img.layers };
+        blit.srcOffsets[0] = vk::Offset3D{ 0, 0, 0 };
+        blit.srcOffsets[1] = vk::Offset3D{ static_cast<int32_t>(std::max(1u, img.width  >> (i-1))),
+                                static_cast<int32_t>(std::max(1u, img.height >> (i-1))), 1 };
+        blit.dstSubresource = { aspectFromFormat(img.format), i, 0, img.layers };
+        blit.dstOffsets[0] = vk::Offset3D{ 0, 0, 0 };
+        blit.dstOffsets[1] = vk::Offset3D{ static_cast<int32_t>(std::max(1u, img.width  >> i)),
+                                static_cast<int32_t>(std::max(1u, img.height >> i)), 1 };
 
-        int32_t nextW = std::max(1, mipW / 2);
-        int32_t nextH = std::max(1, mipH / 2);
-
-        blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
-        blit.dstSubresource.mipLevel = i;
-        blit.dstSubresource.baseArrayLayer = 0;
-        blit.dstSubresource.layerCount = img.layers;
-        blit.dstOffsets[0] = vk::Offset3D{ 0,0,0 };
-        blit.dstOffsets[1] = vk::Offset3D{nextW,nextH,1};
-
-        vk::BlitImageInfo2 bi2{};
-        bi2.srcImage = img.handle;
-        bi2.srcImageLayout = vk::ImageLayout::eTransferSrcOptimal;
-        bi2.dstImage = img.handle;
-        bi2.dstImageLayout = vk::ImageLayout::eTransferDstOptimal;
-        bi2.regionCount = 1;
-        bi2.pRegions = { &blit };
-        bi2.filter = vk::Filter::eLinear;
-        m_uploadCmd.blitImage2(bi2);
-
-        // Transition (i-1) to SHADER_READ_ONLY
-        barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-        barrier.srcAccessMask = vk::AccessFlagBits2::eTransferRead;
-        barrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
-        barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
-        barrier.oldLayout = vk::ImageLayout::eTransferSrcOptimal;
-        barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-        {
-            vk::DependencyInfo dep{};
-            dep.imageMemoryBarrierCount = 1;
-            dep.pImageMemoryBarriers = &barrier;
-            m_uploadCmd.pipelineBarrier2(dep);
-        }
-
-        mipW = nextW;
-        mipH = nextH;
+        vk::BlitImageInfo2 bi{};
+        bi.srcImage = img.handle; bi.srcImageLayout = vk::ImageLayout::eTransferSrcOptimal;
+        bi.dstImage = img.handle; bi.dstImageLayout = vk::ImageLayout::eTransferDstOptimal;
+        bi.regionCount = 1; bi.pRegions = &blit;
+        bi.filter = vk::Filter::eLinear;
+        fr.cmd.blitImage2(bi);
     }
-
-    // transition last level to sahder read
-    barrier.subresourceRange.baseMipLevel = img.mipLevels - 1;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-    barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
-    barrier.dstStageMask = vk::PipelineStageFlagBits2::eFragmentShader;
-    barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
-    barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
-    barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
-    {
-        vk::DependencyInfo dep{};
-        dep.imageMemoryBarrierCount = 1;
-        dep.pImageMemoryBarriers = &barrier;
-        m_uploadCmd.pipelineBarrier2(dep);
-    }
-
-    m_uploadCmd.end();
-
-    vk::CommandBufferSubmitInfo cbsi{};
-    cbsi.commandBuffer = m_uploadCmd;
-
-    vk::SubmitInfo2 si{};
-    si.commandBufferInfoCount = 1;
-    si.pCommandBufferInfos = &cbsi;
-    auto r = m_graphicsQueue.submit2(1, &si, m_uploadFence);
-    (void)m_device.waitForFences(m_uploadFence, VK_TRUE, UINT64_MAX);
-
-    img.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    // final transition whole image to shader read
+    //transitionImage(img, vk::ImageLayout::eShaderReadOnlyOptimal,
+                    //{}, {}, {}, {}, aspectFromFormat(img.format), 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS);
 }
 
 void VulkanRenderer::beginRendering(vk::CommandBuffer cmd, vk::ImageView colorView, vk::ImageView depthView, vk::Extent2D extent, const std::array<float, 4> &clearColor, float clearDepth, uint32_t clearStencil) {
@@ -906,78 +843,8 @@ vk::SampleCountFlagBits VulkanRenderer::getMaxUsableSampleCount() const {
     return vk::SampleCountFlagBits::e1;
 }
 
-void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &cam, const VulkanScene &scene) {
-    auto& fr = m_frames[m_frameIndex];
-    fr.uboHead = 0; // reset per-frame UBO arena
-
-    const auto clear = std::array<float,4>{0.05f, 0.08f, 0.10f, 1.0f };
-    bool renderingActive = false;
-
-    auto beginIfNeeded = [&]{
-        if (renderingActive) return;
-        ImageTransitions tr(fr.cmd);
-        // Ensure layouts for color and depth
-        Image swapImg{};
-        swapImg.handle = m_swapImages[imageIndex];
-        swapImg.view   = m_swapViews[imageIndex];
-        swapImg.format = m_colorFormat;
-        swapImg.layers = 1;
-        swapImg.mipLevels = 1;
-        swapImg.currentLayout = m_swapImageLayouts[imageIndex];
-        tr.ensure(swapImg, Role::ColorAttachment);
-        m_swapImageLayouts[imageIndex] = swapImg.currentLayout;
-        tr.ensure(m_depth, Role::DepthAttachment);
-        beginRendering(fr.cmd, m_swapViews[imageIndex], m_depth.view, m_swapExtent, clear);
-        renderingActive = true;
-    };
-    auto endIfNeeded = [&]{
-        if (!renderingActive) return;
-        endRendering(fr.cmd);
-        ImageTransitions tr(fr.cmd);
-        Image swapImg{};
-        swapImg.handle = m_swapImages[imageIndex];
-        swapImg.view   = m_swapViews[imageIndex];
-        swapImg.format = m_colorFormat;
-        swapImg.layers = 1;
-        swapImg.mipLevels = 1;
-        swapImg.currentLayout = m_swapImageLayouts[imageIndex];
-        tr.ensure(swapImg, Role::Present);
-        m_swapImageLayouts[imageIndex] = swapImg.currentLayout;
-        renderingActive = false;
-    };
-
-    for (const auto& pass : scene.passes)
-    {
-        const auto& prog = m_pipelineSystem->get(pass.pipelineName);
-        const bool isComp = pass.isCompute;
-
-        // Compute must NOT be inside a rendering instance
-        if (isComp) endIfNeeded(); else beginIfNeeded();
-
-        // Bind pipeline
-        const auto bindPoint = isComp ? vk::PipelineBindPoint::eCompute
-                                      : vk::PipelineBindPoint::eGraphics;
-        fr.cmd.bindPipeline(bindPoint, prog.pipeline.get());
-
-                // Push constants (if provided by pass & required by shader)
-        /* TODO: push constants via PipelineSystem when exposed */
-
-        if (isComp) {
-            fr.cmd.dispatch(pass.groupsX, pass.groupsY, pass.groupsZ);
-        } else {
-            // dynamic viewport/scissor every graphics pass
-            const vk::Viewport vp{ 0.f, 0.f,
-                                   float(m_swapExtent.width), float(m_swapExtent.height),
-                                   0.f, 1.f };
-            const vk::Rect2D   sc{ {0,0}, m_swapExtent };
-            fr.cmd.setViewport(0, 1, &vp);
-            fr.cmd.setScissor (0, 1, &sc);
-
-            fr.cmd.draw(pass.vertexCount, 1, 0, 0);
-        }
-    }
-
-    endIfNeeded(); // close rendering if last pass was graphics
+void VulkanRenderer::recordGraphicsCommands(uint32_t imageIndex, const Camera &cam, const Scene &scene) {
+    // TODO
 }
 
 void VulkanRenderer::cleanupSwapChain() {
