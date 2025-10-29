@@ -9,6 +9,8 @@
 #include "camera.hpp"
 #include <gtc/matrix_transform.hpp>
 
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+
 using namespace blok;
 
 glm::vec3 Camera::forward() const {
@@ -42,4 +44,15 @@ void Camera::processMouse(float dx, float dy) {
 
     if (pitch > 89.0f)  pitch = 89.0f;
     if (pitch < -89.0f) pitch = -89.0f;
+}
+
+Matrix4 Camera::view() const {
+    const Vector3 f = forward();
+    return glm::lookAt(position, position + f, up());
+}
+
+Matrix4 Camera::projection(float aspect, float zNear, float zFar) const {
+    Matrix4 p = glm::perspective(glm::radians(fov), aspect, zNear, zFar);
+    p[1][1] *= -1.0f;
+    return p;
 }

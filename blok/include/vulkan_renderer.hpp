@@ -16,12 +16,28 @@
 #include "vulkan/vulkan.hpp"
 #include <vk_mem_alloc.h>
 
+#include "math.hpp"
 #include "object.hpp"
 #include "pipeline_system.hpp"
 
 
 namespace blok {
 class Window;
+
+/*
+ * These are the canonical structs for per-object and per-frame data. Update as needed
+ */
+struct FrameUBO {
+    Matrix4 view;
+    Matrix4 proj;
+    float time = 0.0f;
+
+    glm::vec3 __pad{0,0,0}; // std140 pad
+};
+
+struct ObjectUBO {
+    glm::mat4 model;
+};
 
 struct Buffer {
     vk::Buffer      handle{};
@@ -60,6 +76,8 @@ struct FrameResources {
     // Uniforms
     Buffer globalUBO{};
     vk::DeviceSize uboHead = 0;
+    vk::DescriptorSet frameSet{};
+    vk::DescriptorSet computeFrameSet{};
 };
 
 class VulkanRenderer final : public Renderer {
@@ -134,6 +152,11 @@ private: // functions
     std::vector<const char*> getRequiredExtensions();
     std::vector<const char*> getRequiredDeviceExtensions();
 
+    // Small helper
+    inline vk::DeviceSize alignUp(vk::DeviceSize v, vk::DeviceSize a) {
+        return (v + (a - 1)) & ~(a - 1);
+    }
+
 private: // resources
     std::shared_ptr<Window> m_window = nullptr;
 
@@ -174,8 +197,10 @@ private: // resources
 
     // Systems
     std::unique_ptr<ShaderSystem> m_shaderSystem;
-
     std::unique_ptr<PipelineSystem> m_pipelineSystem;
+
+    // Descriptor Stuff
+    DescriptorAllocatorGrowable m_descAlloc;
 
     // Named resources
     std::unordered_map<std::string, Image>   m_images;

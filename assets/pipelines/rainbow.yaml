@@ -1,0 +1,22 @@
+- kind: compute
+  name: rainbow
+  layout:
+    sets:
+      - set: 0
+        bindings:
+          - binding: 0
+            type: uniform_buffer
+            stages: [compute]
+      - set: 1
+        bindings:
+          - binding: 0
+            type: storage_buffer
+            stages: [compute]
+    push_constants:
+      - stages: [compute]
+        offset: 0
+        size: 4
+  shader:
+    path: "assets/shaders/rainbow.comp.glsl"
+    stage: compute
+    entry: "main"
