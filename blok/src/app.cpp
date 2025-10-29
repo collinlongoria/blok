@@ -92,11 +92,11 @@ void App::init() {
         m_renderer = std::make_unique<VulkanRenderer>(m_window.get());
         m_renderer->init();
 
-        struct Vtx { float x,y,z,u,v; };
+        struct Vtx { float x,y,z,r,g,b; };
         const Vtx tri[3] = {
-            {-0.5f,-0.5f,0.f, 0.f,0.f},
-            { 0.5f,-0.5f,0.f, 1.f,0.f},
-            { 0.0f, 0.5f,0.f, 0.5f,1.f},
+            {-0.5f,-0.5f,0.f, 0.f,0.f,1.0f},
+            { 0.5f,-0.5f,0.f, 1.f,0.f,0.0f},
+            { 0.0f, 0.5f,0.f, 0.0f,1.f,0.0f},
         };
 
         blok::Object obj{};

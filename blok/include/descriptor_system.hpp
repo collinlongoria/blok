@@ -9,47 +9,45 @@
 #ifndef BLOK_DESCRIPTOR_SYSTEM_HPP
 #define BLOK_DESCRIPTOR_SYSTEM_HPP
 
+#include <deque>
 #include <unordered_map>
 #include <vulkan/vulkan.hpp>
 
 namespace blok {
 
-struct DSLBindingDesc {
-    uint32_t binding = 0;
-    vk::DescriptorType type{};
-    vk::ShaderStageFlagBits stages{};
-    uint32_t count = 1; // array length
+struct DescriptorWriter {
+    std::deque<vk::DescriptorImageInfo> imageInfos;
+    std::deque<vk::DescriptorBufferInfo> bufferInfos;
+    std::vector<vk::WriteDescriptorSet> writes;
+
+    void write_image(int binding, vk::ImageView image, vk::Sampler sampler, vk::ImageLayout layout, vk::DescriptorType type);
+    void write_buffer(int binding, vk::Buffer buffer, size_t size, size_t offset, vk::DescriptorType type);
+
+    void clear();
+    void updateSet(vk::Device device, vk::DescriptorSet set);
 };
 
-struct DescriptorSetLayoutDesc {
-    std::string name; // ID referenced in YAML
-    std::vector<DSLBindingDesc> bindings;
-};
-
-struct DescriptorPoolSizes {
-    // Just doing a large pre allocate. Someone have a better idea? Let me know.
-    std::vector<vk::DescriptorPoolSize> sizes;
-    uint32_t maxSets = 1024;
-};
-
-struct DescriptorSetLayouts {
-    std::vector<vk::UniqueDescriptorSetLayout> layouts; // in set-index order
-};
-
-class DescriptorSystem {
+struct DescriptorAllocatorGrowable {
 public:
-    void init(vk::Device device, const DescriptorPoolSizes& poolCfg);
-    void shutdown();
+    struct PoolSizeRatio {
+        vk::DescriptorType type;
+        float ratio;
+    };
 
-    DescriptorSetLayouts createLayouts(const std::vector<DescriptorSetLayoutDesc>& descs);
+    void init(vk::Device device, uint32_t maxSets, std::span<PoolSizeRatio> poolRatios);
+    void clearPools(vk::Device device);
+    void destroyPools(vk::Device device);
 
-    std::vector<vk::DescriptorSet> allocateSets(const std::vector<vk::DescriptorSetLayout>& layouts, uint32_t count=1);
-
-    vk::DescriptorPool pool() const { return m_pool.get(); }
+    vk::DescriptorSet allocate(vk::Device device, vk::DescriptorSetLayout layout, void* pNext = nullptr);
 
 private:
-    vk::Device m_device;
-    vk::UniqueDescriptorPool m_pool;
+    vk::DescriptorPool getPool(vk::Device device);
+    vk::DescriptorPool createPool(vk::Device device, uint32_t setCount, std::span<PoolSizeRatio> poolRatios);
+
+    std::vector<PoolSizeRatio> m_ratios;
+    std::vector<vk::DescriptorPool> m_fullPools;
+    std::vector<vk::DescriptorPool> m_readyPools;
+    uint32_t setsPerPool;
 };
 
 }

@@ -17,7 +17,6 @@
 namespace blok {
 
 class ShaderSystem;
-class DescriptorSystem;
 
 enum class PipelineKind { Graphics, Compute, RayTracing };
 
@@ -88,7 +87,7 @@ struct PipelineProgram {
 
 class PipelineSystem {
 public:
-    void init(vk::Device device, vk::PhysicalDevice phys, ShaderSystem* shaderSys, DescriptorSystem* descSys);
+    void init(vk::Device device, vk::PhysicalDevice phys, ShaderSystem* shaderSys);
     void shutdown();
 
     std::vector<std::string> loadPipelinesFromYAML(const std::string& yamlPath);
@@ -104,7 +103,6 @@ private:
     vk::Device m_device{};
     vk::PhysicalDevice m_phys{};
     ShaderSystem* m_shaders = nullptr;
-    DescriptorSystem* m_desc = nullptr;
     vk::UniquePipelineCache m_cache{};
     std::unordered_map<std::string, PipelineProgram> m_programs;
 };

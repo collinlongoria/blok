@@ -174,7 +174,7 @@ private: // resources
 
     // Systems
     std::unique_ptr<ShaderSystem> m_shaderSystem;
-    std::unique_ptr<DescriptorSystem> m_descriptorSystem;
+
     std::unique_ptr<PipelineSystem> m_pipelineSystem;
 
     // Named resources
