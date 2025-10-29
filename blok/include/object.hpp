@@ -21,7 +21,7 @@ namespace blok {
 
 struct Material {
     std::string pipelineName;
-    std::vector<vk::DescriptorSet> sets;
+    std::vector<vk::DescriptorSet> sets; // TODO: unused currently
 };
 
 struct MeshBuffers {
@@ -32,6 +32,8 @@ struct MeshBuffers {
 struct Object {
     MeshBuffers mesh;
     Material material;
+
+    Transform model;
 };
 
 }

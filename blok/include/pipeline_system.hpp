@@ -43,7 +43,7 @@ struct GraphicsStatesDesc {
     bool depthWrite = true;
     vk::CompareOp depthCompare = vk::CompareOp::eGreaterOrEqual;
     vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack;
-    vk::FrontFace frontFace = vk::FrontFace::eClockwise;
+    vk::FrontFace frontFace = vk::FrontFace::eCounterClockwise;
     bool enableBlend = false;
 };
 
@@ -83,6 +83,7 @@ struct PipelineProgram {
     PipelineKind kind;
     vk::UniquePipeline pipeline;
     vk::UniquePipelineLayout layout;
+    std::vector<vk::DescriptorSetLayout> setLayouts;
 };
 
 class PipelineSystem {

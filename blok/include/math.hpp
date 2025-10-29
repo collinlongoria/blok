@@ -47,6 +47,7 @@ public:
     Rotation getRotation()
     {
         Rotation rot = glm::degrees(glm::eulerAngles(rotation));
+        return rot;
     }
 
     //Rotate using a quaternion.
@@ -64,7 +65,7 @@ public:
     }
 
     //Get transform matrix from translation, rotation, and scale
-    Matrix4 getTransformMatrix()
+    [[nodiscard]] Matrix4 getTransformMatrix() const
     {
         Matrix4 transform = glm::translate(Matrix4(1.0f), translation) * glm::mat4_cast(rotation) * glm::scale(Matrix4(1.0f), scale);
 

@@ -93,18 +93,43 @@ void App::init() {
         m_renderer->init();
 
         struct Vtx { float x,y,z,r,g,b; };
-        const Vtx tri[3] = {
-            {-0.5f,-0.5f,0.f, 0.f,0.f,1.0f},
-            { 0.5f,-0.5f,0.f, 1.f,0.f,0.0f},
-            { 0.0f, 0.5f,0.f, 0.0f,1.f,0.0f},
+
+        const Vtx cubeVerts[] = {
+            {-0.5f,-0.5f,-0.5f, 1,0,0},
+            { 0.5f,-0.5f,-0.5f, 0,1,0},
+            { 0.5f, 0.5f,-0.5f, 0,0,1},
+            {-0.5f, 0.5f,-0.5f, 1,1,0},
+            {-0.5f,-0.5f, 0.5f, 1,0,1},
+            { 0.5f,-0.5f, 0.5f, 0,1,1},
+            { 0.5f, 0.5f, 0.5f, 1,1,1},
+            {-0.5f, 0.5f, 0.5f, 0,0,0},
         };
 
-        blok::Object obj{};
-        obj.mesh = VKR->uploadMesh(tri, sizeof(tri), 3, nullptr, 0);
+        const uint32_t cubeIdx[] = {
+            // back
+            0,3,2,  2,1,0,
+            // front
+            4,5,6,  6,7,4,
+            // left
+            0,4,7,  7,3,0,
+            // right
+            1,2,6,  6,5,1,
+            // bottom
+            0,1,5,  5,4,0,
+            // top
+            3,7,6,  6,2,3
+        };
+
+        Object obj{};
+        obj.mesh = VKR->uploadMesh(cubeVerts, sizeof(cubeVerts),
+                                   std::size(cubeVerts), cubeIdx, std::size(cubeIdx));
         obj.material.pipelineName = "hello_triangle";
 
         gScene.push_back(obj);
         VKR->setRenderList(&gScene);
+
+        glfwSetCursorPosCallback(gw, mouse_callback);
+        glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
         break;
     }

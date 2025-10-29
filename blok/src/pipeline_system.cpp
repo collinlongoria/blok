@@ -31,12 +31,41 @@ static vk::ShaderStageFlagBits toStage(const std::string& s) {
     return vk::ShaderStageFlagBits::eAll; // TODO: No clue what this actually is. Fix this later to include all cases.
 }
 
+static vk::DescriptorType toDescType(const std::string& s) {
+    if (s == "sampler") return vk::DescriptorType::eSampler;
+    if (s == "combined_image_sampler") return vk::DescriptorType::eCombinedImageSampler;
+    if (s == "sampled_image") return vk::DescriptorType::eSampledImage;
+    if (s == "storage_image") return vk::DescriptorType::eStorageImage;
+    if (s == "uniform_texel_buffer") return vk::DescriptorType::eUniformTexelBuffer;
+    if (s == "storage_texel_buffer") return vk::DescriptorType::eStorageTexelBuffer;
+    if (s == "uniform_buffer") return vk::DescriptorType::eUniformBuffer;
+    if (s == "storage_buffer") return vk::DescriptorType::eStorageBuffer;
+    if (s == "uniform_buffer_dynamic") return vk::DescriptorType::eUniformBufferDynamic;
+    if (s == "storage_buffer_dynamic") return vk::DescriptorType::eStorageBufferDynamic;
+    if (s == "input_attachment") return vk::DescriptorType::eInputAttachment;
+
+    return vk::DescriptorType::eSampler; // TODO: This one should maybe also not be this
+}
+
+static vk::ShaderStageFlags stagesFromNode(const YAML::Node& node) {
+    vk::ShaderStageFlags flags{};
+    for (auto s : node) flags |= toStage(s.as<std::string>());
+    return flags;
+}
+
 void PipelineSystem::init(vk::Device device, vk::PhysicalDevice phys, ShaderSystem *shaderSys) {
     m_device = device; m_phys = phys; m_shaders = shaderSys;
     vk::PipelineCacheCreateInfo ci{}; m_cache = m_device.createPipelineCacheUnique(ci);
 }
 
 void PipelineSystem::shutdown() {
+    for (auto& [name, prog] : m_programs) {
+        for (auto layout : prog.setLayouts) {
+            if (layout)
+                m_device.destroyDescriptorSetLayout(layout);
+        }
+    }
+
     m_programs.clear();
     m_cache.reset();
 }
@@ -68,7 +97,35 @@ std::vector<std::string> PipelineSystem::loadPipelinesFromYAML(const std::string
                     pr.stages = stages; d.layout.pushConstants.push_back(pr);
                 }
             }
-            // descriptor sets: names were turned into actual vk::DescriptorSetLayout elsewhere?
+            // layout: descriptor sets
+            if (auto sets = n["layout"]["sets"]) {
+                // collect all sets
+                std::map<int, std::vector<vk::DescriptorSetLayoutBinding>> bySet;
+
+                for (auto s : sets) {
+                    int setIdx = s["set"].as<int>();
+                    std::vector<vk::DescriptorSetLayoutBinding> bindings;
+                    if (auto bs = s["bindings"]) {
+                        for (auto b : bs) {
+                            vk::DescriptorSetLayoutBinding l{};
+                            l.binding = b["binding"].as<uint32_t>();
+                            l.descriptorType = toDescType(b["type"].as<std::string>());
+                            l.descriptorCount = 1;
+                            l.stageFlags = stagesFromNode(b["stages"]);
+                            bindings.push_back(l);
+                        }
+                    }
+                    bySet[setIdx] = std::move(bindings);
+                }
+
+                d.layout.setLayouts.clear();
+                for (auto& [setIdx, bindings] : bySet) {
+                    vk::DescriptorSetLayoutCreateInfo lci{};
+                    lci.setBindings(bindings);
+                    auto layout = m_device.createDescriptorSetLayout(lci);
+                    d.layout.setLayouts.push_back(layout);
+                }
+            }
             // vertex
             d.vertexStride = n["vertex"]["stride"].as<uint32_t>();
             for (auto a: n["vertex"]["attrib_formats"]) d.vertexAttribFormats.push_back(static_cast<vk::Format>(a.as<uint32_t>()));
@@ -83,7 +140,59 @@ std::vector<std::string> PipelineSystem::loadPipelinesFromYAML(const std::string
             m_programs.emplace(d.name, buildGraphics(d));
             created.push_back(d.name);
         }
-        else if (kind == "compute") {}
+        else if (kind == "compute") {
+            ComputePipelineDesc d{};
+            d.name = n["name"].as<std::string>();
+
+            // layout: push constants
+            if (auto pc = n["layout"]["push_constants"]) {
+                for (auto p : pc) {
+                    PushConstantRangeDesc pr{};
+                    pr.offset = p["offset"].as<uint32_t>();
+                    pr.size = p["size"].as<uint32_t>();
+                    vk::ShaderStageFlags stages{};
+                    for (auto s : p["stages"]) stages |= toStage(s.as<std::string>());
+                    pr.stages = stages;
+                    d.layout.pushConstants.push_back(pr);
+                }
+            }
+
+            // layout: descriptor sets
+            if (auto sets = n["layout"]["sets"]) {
+                // collect all sets
+                std::map<int, std::vector<vk::DescriptorSetLayoutBinding>> bySet;
+
+                for (auto s : sets) {
+                    int setIdx = s["set"].as<int>();
+                    std::vector<vk::DescriptorSetLayoutBinding> bindings;
+                    if (auto bs = s["bindings"]) {
+                        for (auto b : bs) {
+                            vk::DescriptorSetLayoutBinding l{};
+                            l.binding = b["binding"].as<uint32_t>();
+                            l.descriptorType = toDescType(b["type"].as<std::string>());
+                            l.descriptorCount = 1;
+                            l.stageFlags = stagesFromNode(b["stages"]);
+                            bindings.push_back(l);
+                        }
+                    }
+                    bySet[setIdx] = std::move(bindings);
+                }
+
+                d.layout.setLayouts.clear();
+                for (auto& [setIdx, bindings] : bySet) {
+                    vk::DescriptorSetLayoutCreateInfo lci{};
+                    lci.setBindings(bindings);
+                    auto layout = m_device.createDescriptorSetLayout(lci);
+                    d.layout.setLayouts.push_back(layout);
+                }
+            }
+
+            // shader
+            const auto& s = n["shader"];
+            d.shader = { s["path"].as<std::string>(), toStage(s["stage"].as<std::string>()), s["entry"].as<std::string>("main")};
+            m_programs.emplace(d.name, buildCompute(d));
+            created.push_back(d.name);
+        }
         else if (kind == "raytracing") {}
     }
     return created;
@@ -174,7 +283,7 @@ PipelineProgram PipelineSystem::buildGraphics(const GraphicsPipelineDesc &d) {
 
     auto pipe = m_device.createGraphicsPipelineUnique(m_cache.get(), gci).value;
     std::cout << "Graphics pipeline created!" << std::endl;
-    return {PipelineKind::Graphics, std::move(pipe), std::move(layout)};
+    return {PipelineKind::Graphics, std::move(pipe), std::move(layout), d.layout.setLayouts};
 }
 
 PipelineProgram PipelineSystem::buildCompute(const ComputePipelineDesc &d) {
@@ -187,7 +296,7 @@ PipelineProgram PipelineSystem::buildCompute(const ComputePipelineDesc &d) {
 
     auto pipe = m_device.createComputePipelineUnique(m_cache.get(), ci).value;
     std::cout << "Compute pipeline created!" << std::endl;
-    return {PipelineKind::Compute, std::move(pipe), std::move(layout)};
+    return {PipelineKind::Compute, std::move(pipe), std::move(layout), d.layout.setLayouts};
 }
 
 // TODO: implement this function

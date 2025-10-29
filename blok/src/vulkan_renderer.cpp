@@ -94,10 +94,49 @@ void VulkanRenderer::init() {
     std::cout << "Vulkan API initialized!"  << std::endl;
 
     // Ensure hello_triangle is parsed and created from YAML
-    const std::string helloYaml = "assets/pipelines/hello_triangle.yaml"; // adjust path if needed
+    const std::string helloYaml = "assets/pipelines/hello_triangle.yaml";
     auto created = m_pipelineSystem->loadPipelinesFromYAML(helloYaml);
     if (std::find(created.begin(), created.end(), std::string("hello_triangle")) == created.end()) {
         throw std::runtime_error("failed to create 'hello_triangle' from " + helloYaml);
+    }
+
+    const std::string rainbowYAML = "assets/pipelines/rainbow.yaml";
+    created = m_pipelineSystem->loadPipelinesFromYAML(rainbowYAML);
+    if (std::find(created.begin(), created.end(), std::string("rainbow")) == created.end()) {
+        throw std::runtime_error("failed to create 'rainbow' from " + rainbowYAML);
+    }
+
+    DescriptorAllocatorGrowable::PoolSizeRatio ratios[] = {
+        { vk::DescriptorType::eUniformBuffer, 4.0f},
+        {vk::DescriptorType::eUniformBufferDynamic, 1.0f},
+        {vk::DescriptorType::eCombinedImageSampler, 4.0f},
+        {vk::DescriptorType::eStorageBuffer, 2.0f}
+    };
+    m_descAlloc.init(m_device, 512, std::span{ratios, std::size(ratios)});
+
+    const auto& prog = m_pipelineSystem->get("hello_triangle");
+    if (!prog.setLayouts.empty()) {
+        for (auto& fr : m_frames) {
+            fr.frameSet = m_descAlloc.allocate(m_device, prog.setLayouts[0]);
+
+            DescriptorWriter w;
+            w.write_buffer(0, fr.globalUBO.handle, sizeof(FrameUBO), 0, vk::DescriptorType::eUniformBuffer);
+            w.updateSet(m_device, fr.frameSet);
+            w.clear();
+        }
+    }
+
+    const auto& cprog = m_pipelineSystem->get("rainbow");
+    if (!cprog.setLayouts.empty()) {
+        for (auto& fr : m_frames) {
+            fr.computeFrameSet = m_descAlloc.allocate(m_device, cprog.setLayouts[0]);
+
+            DescriptorWriter w;
+            w.write_buffer(0, fr.globalUBO.handle, sizeof(FrameUBO), 0,
+                           vk::DescriptorType::eUniformBuffer);
+            w.updateSet(m_device, fr.computeFrameSet);
+            w.clear();
+        }
     }
 }
 
@@ -108,6 +147,18 @@ void VulkanRenderer::beginFrame() {
 
 void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
     auto& fr = m_frames[m_frameIndex];
+
+    const float aspect = static_cast<float>(m_swapExtent.width) / static_cast<float>(m_swapExtent.height);
+    // write frame UBO (offset 0)
+    const vk::DeviceSize minAlign = m_physicalDevice.getProperties().limits.minUniformBufferOffsetAlignment;
+    float nearPlane = 0.1f;
+    float farPlane = 1000.0f;
+    static float t = 0.0f;
+    t += 0.00167f;
+    FrameUBO fubo{ cam.view(), cam.projection(aspect, nearPlane, farPlane), t, {} };
+    uploadToBuffer(&fubo, sizeof(FrameUBO), fr.globalUBO, 0);
+    fr.uboHead = alignUp(sizeof(FrameUBO), minAlign);
+
 
     // wait and reset
     if (m_device.waitForFences(1, &fr.inFlight, VK_TRUE, UINT64_MAX) != vk::Result::eSuccess)
@@ -147,7 +198,57 @@ void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
     it.ensure(sw, blok::Role::ColorAttachment);
     it.ensure(m_depth, blok::Role::DepthAttachment);
 
-    const std::array<float,4> clear{1.0f,0.0f,0.0f,1.0f};
+       // Compute
+    const auto& cprog = m_pipelineSystem->get("rainbow");
+
+    fr.cmd.bindPipeline(vk::PipelineBindPoint::eCompute, cprog.pipeline.get());
+
+    fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cprog.layout.get(),
+                              /*firstSet*/0, /*count*/1, &fr.computeFrameSet, 0, nullptr);
+
+
+    if (m_renderList) {
+        for (const auto& obj : *m_renderList) {
+            if (!obj.mesh.vertex || obj.mesh.vertexCount == 0) continue;
+
+            // Allocate per-object set 1 for the vertex storage buffer
+            vk::DescriptorSet objSet = m_descAlloc.allocate(m_device, cprog.setLayouts[1]);
+            DescriptorWriter w;
+            const vk::DeviceSize bytes = obj.mesh.vertexCount * 24; // 6 floats * 4 bytes
+            w.write_buffer(/*binding*/0, static_cast<vk::Buffer>(obj.mesh.vertex),
+                           bytes, /*offset*/0, vk::DescriptorType::eStorageBuffer);
+            w.updateSet(m_device, objSet);
+            w.clear();
+
+            // Bind set 1
+            fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cprog.layout.get(),
+                                      /*firstSet*/1, /*count*/1, &objSet, 0, nullptr);
+
+            // Push vertexCount
+            uint32_t vcount = obj.mesh.vertexCount;
+            fr.cmd.pushConstants<uint32_t>(cprog.layout.get(), vk::ShaderStageFlagBits::eCompute, 0, vcount);
+
+            // Dispatch: groups of 64
+            uint32_t groups = (vcount + 63) / 64;
+            fr.cmd.dispatch(groups, 1, 1);
+
+            // Barrier: make compute writes visible to vertex input (graphics)
+            vk::BufferMemoryBarrier2 b{};
+            b.srcStageMask  = vk::PipelineStageFlagBits2::eComputeShader;
+            b.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
+            b.dstStageMask  = vk::PipelineStageFlagBits2::eVertexInput;
+            b.dstAccessMask = vk::AccessFlagBits2::eVertexAttributeRead;
+            b.buffer        = static_cast<vk::Buffer>(obj.mesh.vertex);
+            b.offset        = 0;
+            b.size          = VK_WHOLE_SIZE;
+
+            vk::DependencyInfo dep{}; dep.setBufferMemoryBarriers(b);
+            fr.cmd.pipelineBarrier2(dep);
+        }
+    }
+    // End Compute
+
+    const std::array<float,4> clear{0.0f,0.0f,0.0f,1.0f};
     beginRendering(fr.cmd, sw.view, m_depth.view, m_swapExtent, clear, 1.0f, 0);
 
     // viewport/scissor
@@ -164,6 +265,33 @@ void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
             if (prog.pipeline.get() != lastPipe) {
                 fr.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, prog.pipeline.get());
                 lastPipe = prog.pipeline.get();
+
+                // bind set 0 once per pipeline switch
+                if (!prog.setLayouts.empty()) {
+                    fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, prog.layout.get(), 0, 1, &fr.frameSet, 0, nullptr);
+                }
+            }
+
+            // write object UBO into frame buffer
+            ObjectUBO oubo{ obj.model.getTransformMatrix() };
+            const vk::DeviceSize minAlign = m_physicalDevice.getProperties().limits.minUniformBufferOffsetAlignment;
+            vk::DeviceSize objOffset = fr.uboHead;
+            uploadToBuffer(&oubo, sizeof(ObjectUBO), fr.globalUBO, objOffset);
+            fr.uboHead = alignUp(fr.uboHead + sizeof(ObjectUBO), minAlign);
+
+            // allocate and update set 1 for this object
+            // TODO: consider material set 1 and per object set 2
+            vk::DescriptorSet objSet{};
+            if (prog.setLayouts.size() >= 2) {
+                objSet = m_descAlloc.allocate(m_device, prog.setLayouts[1]);
+                DescriptorWriter w;
+                w.write_buffer(0, fr.globalUBO.handle, sizeof(ObjectUBO), objOffset, vk::DescriptorType::eUniformBuffer);
+                w.updateSet(m_device, objSet);
+                w.clear();
+
+                // bind sets
+                const vk::DescriptorSet sets[] = { fr.frameSet, objSet };
+                fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, prog.layout.get(), 1, 1, &objSet, 0, nullptr);
             }
 
             // bind vertex/index and draw
@@ -246,6 +374,8 @@ void VulkanRenderer::shutdown() {
     if (m_uploadFence) { m_device.destroyFence(m_uploadFence); }
     if (m_uploadCmd) { m_device.freeCommandBuffers(m_uploadPool, 1, &m_uploadCmd); }
     if (m_uploadPool) { m_device.destroyCommandPool(m_uploadPool); }
+
+    m_descAlloc.destroyPools(m_device);
 
     m_pipelineSystem->shutdown();
 
@@ -670,7 +800,7 @@ void VulkanRenderer::copyBufferToImage(Buffer &staging, Image &img, uint32_t w, 
 
 vk::Buffer VulkanRenderer::uploadVertexBuffer(const void *data, vk::DeviceSize sizeBytes, uint32_t vertexCount) {
     Buffer dst = createBuffer(sizeBytes,
-        vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        vk::BufferUsageFlagBits::eVertexBuffer | vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eStorageBuffer,
         0, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE, false);
     uploadToBuffer(data, sizeBytes, dst, 0);
     m_ownedBuffers.push_back(dst);
