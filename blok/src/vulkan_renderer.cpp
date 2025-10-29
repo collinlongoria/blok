@@ -87,18 +87,7 @@ void VulkanRenderer::init() {
 
     m_shaderSystem = std::make_unique<ShaderSystem>(); m_shaderSystem->init(m_device);
 
-    DescriptorPoolSizes poolCfg{};
-    poolCfg.sizes = {
-        {vk::DescriptorType::eCombinedImageSampler, 512},
-        {vk::DescriptorType::eSampledImage, 512},
-        {vk::DescriptorType::eStorageImage, 512},
-        {vk::DescriptorType::eUniformBuffer, 512},
-        {vk::DescriptorType::eStorageBuffer, 512}
-    };
-    poolCfg.maxSets = 2048;
-    m_descriptorSystem = std::make_unique<DescriptorSystem>(); m_descriptorSystem->init(m_device, poolCfg);
-
-    m_pipelineSystem = std::make_unique<PipelineSystem>(); m_pipelineSystem->init(m_device, m_physicalDevice, m_shaderSystem.get(), m_descriptorSystem.get());
+    m_pipelineSystem = std::make_unique<PipelineSystem>(); m_pipelineSystem->init(m_device, m_physicalDevice, m_shaderSystem.get());
 
     createPerFrameUniforms();
 
@@ -259,7 +248,7 @@ void VulkanRenderer::shutdown() {
     if (m_uploadPool) { m_device.destroyCommandPool(m_uploadPool); }
 
     m_pipelineSystem->shutdown();
-    m_descriptorSystem->shutdown();
+
     m_shaderSystem->shutdown();
 
     cleanupSwapChain();

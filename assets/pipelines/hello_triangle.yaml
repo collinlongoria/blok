@@ -6,8 +6,8 @@
   layout:
     push_constants: []
   vertex:
-    stride: 20
-    attrib_formats: [109, 103]
+    stride: 24
+    attrib_formats: [106, 106]
   shaders:
     - { path: "assets/shaders/tri.vert.glsl", stage: "vertex", entry: "main" }
     - { path: "assets/shaders/tri.frag.glsl", stage: "fragment", entry: "main" }

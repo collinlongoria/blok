@@ -31,8 +31,8 @@ static vk::ShaderStageFlagBits toStage(const std::string& s) {
     return vk::ShaderStageFlagBits::eAll; // TODO: No clue what this actually is. Fix this later to include all cases.
 }
 
-void PipelineSystem::init(vk::Device device, vk::PhysicalDevice phys, ShaderSystem *shaderSys, DescriptorSystem *descSys) {
-    m_device = device; m_phys = phys; m_shaders = shaderSys; m_desc = descSys;
+void PipelineSystem::init(vk::Device device, vk::PhysicalDevice phys, ShaderSystem *shaderSys) {
+    m_device = device; m_phys = phys; m_shaders = shaderSys;
     vk::PipelineCacheCreateInfo ci{}; m_cache = m_device.createPipelineCacheUnique(ci);
 }
 
