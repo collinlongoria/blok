@@ -121,15 +121,24 @@ void App::init() {
         };
 
         Object obj{};
-        obj.mesh = VKR->uploadMesh(cubeVerts, sizeof(cubeVerts),
-                                   std::size(cubeVerts), cubeIdx, std::size(cubeIdx));
-        obj.material.pipelineName = "hello_triangle";
+        // create object from mesh
+        VKR->initObjectFromMesh(obj,
+                                     "mesh_flat",           // must match a pipeline in your PipelineSystem
+                                     "assets/models/teapot/teapot.obj"); // OBJ path
+
+        // configure transform / material as needed
+        obj.model.translation = {0.0f, 0.0f, 0.0f};
+        obj.pipelineName = "mesh_flat";
+        VKR->buildMaterialSetForObject(obj, "assets/models/teapot/default.png");
 
         gScene.push_back(obj);
+
+        //gScene.clear();
+        //gScene.push_back(obj2);
         VKR->setRenderList(&gScene);
 
         glfwSetCursorPosCallback(gw, mouse_callback);
-        glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        //glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
         break;
     }

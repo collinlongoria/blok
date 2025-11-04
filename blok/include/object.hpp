@@ -19,9 +19,24 @@
 
 namespace blok {
 
+// Standard Vertex format
+struct Vertex {
+    Vector3 pos;
+    Vector3 nrm;
+    Vector2 uv;
+};
+
 struct Material {
-    std::string pipelineName;
-    std::vector<vk::DescriptorSet> sets; // TODO: unused currently
+    // Material data
+    Vector3 diffuse;
+    Vector3 specular;
+    Vector3 emission;
+    float shininess;
+    int textureId;
+
+    // baked descriptor set (set = 2)
+    // TODO: change to scene=0, material=1, object=2
+    vk::DescriptorSet materialSet{};
 };
 
 struct MeshBuffers {
@@ -30,6 +45,8 @@ struct MeshBuffers {
 };
 
 struct Object {
+    std::string pipelineName;
+
     MeshBuffers mesh;
     Material material;
 

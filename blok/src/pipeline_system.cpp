@@ -47,6 +47,25 @@ static vk::DescriptorType toDescType(const std::string& s) {
     return vk::DescriptorType::eSampler; // TODO: This one should maybe also not be this
 }
 
+static vk::Format toFormat(const std::string& s) {
+    if (s == "RGBA8_Unorm") return vk::Format::eR8G8B8A8Unorm;
+    if (s == "BGRA8_Unorm") return vk::Format::eB8G8R8A8Unorm;
+    if (s == "RGBA8_Srgb") return vk::Format::eR8G8B8A8Srgb;
+    if (s == "RGBA16_Sfloat") return vk::Format::eR16G16B16A16Sfloat;
+    if (s == "R32_Sfloat") return vk::Format::eR32Sfloat;
+    if (s == "RGBA32_Sfloat") return vk::Format::eR32G32B32A32Sfloat;
+    if (s == "D32_Sfloat") return vk::Format::eD32Sfloat;
+    if (s == "D24_Unorm_S8_Uint") return vk::Format::eD24UnormS8Uint;
+    if (s == "D32_Sfloat_S8_Uint") return vk::Format::eD32SfloatS8Uint;
+    if (s == "RGB32_Sfloat") return vk::Format::eR32G32B32Sfloat;
+    if (s == "RG32_Sfloat") return vk::Format::eR32G32Sfloat;
+    if (s == "R32_Sfloat") return vk::Format::eR32Sfloat;
+    if (s == "RGB8_Unorm") return vk::Format::eR8G8B8Unorm;
+    if (s == "RG8_Unorm") return vk::Format::eR8G8Unorm;
+
+    return vk::Format::eUndefined;
+}
+
 static vk::ShaderStageFlags stagesFromNode(const YAML::Node& node) {
     vk::ShaderStageFlags flags{};
     for (auto s : node) flags |= toStage(s.as<std::string>());
@@ -85,8 +104,8 @@ std::vector<std::string> PipelineSystem::loadPipelinesFromYAML(const std::string
         if (kind == "graphics") {
             GraphicsPipelineDesc d{}; d.name = n["name"].as<std::string>();
             // formats
-            for (auto f: n["rts"]["colors"]) d.rts.colorFormats.push_back(static_cast<vk::Format>(f.as<int>()));
-            if (n["rts"]["depth"]) d.rts.depthFormat = static_cast<vk::Format>(n["rts"]["depth"].as<int>());
+            for (auto f: n["rts"]["colors"]) d.rts.colorFormats.push_back(toFormat(f.as<std::string>()));
+            if (n["rts"]["depth"]) d.rts.depthFormat = toFormat(n["rts"]["depth"].as<std::string>());
             // layout: push constants
             if (auto pc = n["layout"]["push_constants"]) {
                 for (auto p: pc) {
@@ -128,7 +147,7 @@ std::vector<std::string> PipelineSystem::loadPipelinesFromYAML(const std::string
             }
             // vertex
             d.vertexStride = n["vertex"]["stride"].as<uint32_t>();
-            for (auto a: n["vertex"]["attrib_formats"]) d.vertexAttribFormats.push_back(static_cast<vk::Format>(a.as<uint32_t>()));
+            for (auto a: n["vertex"]["attrib_formats"]) d.vertexAttribFormats.push_back(toFormat(a.as<std::string>()));
             // shaders
             for (auto s: n["shaders"]) d.shaders.push_back({s["path"].as<std::string>(), toStage(s["stage"].as<std::string>()), s["entry"].as<std::string>("main")});
             // states
