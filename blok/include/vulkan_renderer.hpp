@@ -80,6 +80,17 @@ struct FrameResources {
     vk::DescriptorSet computeFrameSet{};
 };
 
+// Obj file metadata
+struct ModelData {
+    std::vector<Vertex> vertices;
+    std::vector<uint32_t> indices;
+    std::vector<Material> materials;
+    std::vector<int32_t> matIdx;
+    std::vector<std::string> textures;
+
+    bool readAssimpFile(const std::string& path, const Matrix4& M);
+};
+
 class VulkanRenderer final : public Renderer {
 public:
     explicit VulkanRenderer(Window* window);
@@ -96,6 +107,13 @@ public:
     // Objects, Meshes, Materials
     MeshBuffers uploadMesh(const void* vertices, vk::DeviceSize bytes, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount);
     void setRenderList(const std::vector<Object>* list);
+
+    Image loadTexture2D(const std::string& path, bool generateMips = true);
+    MeshBuffers loadMeshOBJ(const std::string& path);
+    void initObjectFromMesh(Object& obj, const std::string& pipelineName, const std::string& meshPath);
+
+    // Descriptor Materials
+    void buildMaterialSetForObject(Object& obj, const std::string& texturePath);
 
     void shutdown() override;
 
@@ -128,8 +146,8 @@ private: // functions
     void copyBuffer(Buffer& src, Buffer& dst, vk::DeviceSize size);
 
     Image createImage(uint32_t w, uint32_t h, vk::Format fmt, vk::ImageUsageFlags usage, vk::ImageTiling tiling = vk::ImageTiling::eOptimal, vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1, uint32_t mipLevels = 1, uint32_t layers = 1, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO);
-    void copyBufferToImage(Buffer& staging, Image& img, uint32_t w, uint32_t h, uint32_t baseLayer = 0, uint32_t layerCount = 1);
-    void generateMipmaps(Image& img);
+    void copyBufferToImage(vk::CommandBuffer cmd, Buffer& staging, Image& img, uint32_t w, uint32_t h, uint32_t baseLayer = 0, uint32_t layerCount = 1);
+    void generateMipmaps(vk::CommandBuffer cmd, Image& img);
 
     vk::Buffer uploadVertexBuffer(const void* data, vk::DeviceSize sizeBytes, uint32_t vertexCount);
     vk::Buffer uploadIndexBuffer(const uint32_t* data, uint32_t indexCount);
@@ -206,6 +224,7 @@ private: // resources
     std::unordered_map<std::string, Image>   m_images;
     std::unordered_map<std::string, Buffer>  m_buffers;
     std::unordered_map<std::string, Sampler> m_samplers;
+    std::unordered_map<std::string, MeshBuffers> m_meshes;
     std::vector<Buffer> m_ownedBuffers;
 
     // Objects

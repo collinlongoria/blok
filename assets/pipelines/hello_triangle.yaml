@@ -1,8 +1,8 @@
 - kind: graphics
   name: hello_triangle
   rts:
-    colors: [44]
-    depth: 126
+    colors: ["BGRA8_Unorm"]
+    depth: "D32_Sfloat"
   layout:
     sets:
       - set: 0
@@ -18,7 +18,7 @@
     push_constants: []
   vertex:
     stride: 24
-    attrib_formats: [106, 106]
+    attrib_formats: ["RGB32_Sfloat", "RGB32_Sfloat"]
   shaders:
     - { path: "assets/shaders/tri.vert.glsl", stage: "vertex", entry: "main" }
     - { path: "assets/shaders/tri.frag.glsl", stage: "fragment", entry: "main" }
