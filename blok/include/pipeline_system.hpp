@@ -41,8 +41,8 @@ struct GraphicsStatesDesc {
     vk::PrimitiveTopology topology = vk::PrimitiveTopology::eTriangleList;
     bool depthTest = true;
     bool depthWrite = true;
-    vk::CompareOp depthCompare = vk::CompareOp::eGreaterOrEqual;
-    vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack;
+    vk::CompareOp depthCompare = vk::CompareOp::eLessOrEqual;
+    vk::CullModeFlags cullMode = vk::CullModeFlagBits::eNone;
     vk::FrontFace frontFace = vk::FrontFace::eCounterClockwise;
     bool enableBlend = false;
 };

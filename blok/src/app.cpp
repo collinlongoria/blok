@@ -122,19 +122,16 @@ void App::init() {
 
         Object obj{};
         // create object from mesh
-        VKR->initObjectFromMesh(obj,
-                                     "mesh_flat",           // must match a pipeline in your PipelineSystem
-                                     "assets/models/teapot/teapot.obj"); // OBJ path
+        VKR->initObjectFromMesh(obj, "mesh_flat", "assets/models/teapot/teapot.obj");
 
         // configure transform / material as needed
-        obj.model.translation = {0.0f, 0.0f, 0.0f};
+        obj.model.translation = {0.0f, 0.0f, -100.0f};
+        obj.model.scale = {0.1f, 0.1f, 0.1f};
         obj.pipelineName = "mesh_flat";
         VKR->buildMaterialSetForObject(obj, "assets/models/teapot/default.png");
 
         gScene.push_back(obj);
 
-        //gScene.clear();
-        //gScene.push_back(obj2);
         VKR->setRenderList(&gScene);
 
         glfwSetCursorPosCallback(gw, mouse_callback);
