@@ -160,6 +160,18 @@ void VulkanRenderer::init() {
             w.clear();
         }
     }
+
+    vk::SamplerCreateInfo sci{};
+    sci.magFilter = vk::Filter::eLinear;
+    sci.minFilter = vk::Filter::eLinear;
+    sci.mipmapMode = vk::SamplerMipmapMode::eLinear;
+    sci.addressModeU = sci.addressModeV = sci.addressModeW =
+        vk::SamplerAddressMode::eRepeat;
+    sci.maxLod = VK_LOD_CLAMP_NONE;
+
+    Sampler s{};
+    s.handle = m_device.createSampler(sci);
+    m_samplers["default"] = s;
 }
 
 void VulkanRenderer::beginFrame() {
@@ -221,51 +233,53 @@ void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
     it.ensure(m_depth, blok::Role::DepthAttachment);
 
        // Compute
-    const auto& cprog = m_pipelineSystem->get("rainbow");
+    if (false) {
+        const auto& cprog = m_pipelineSystem->get("rainbow");
 
-    fr.cmd.bindPipeline(vk::PipelineBindPoint::eCompute, cprog.pipeline.get());
+        fr.cmd.bindPipeline(vk::PipelineBindPoint::eCompute, cprog.pipeline.get());
 
-    fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cprog.layout.get(),
-                              /*firstSet*/0, /*count*/1, &fr.computeFrameSet, 0, nullptr);
+        fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cprog.layout.get(),
+                                  /*firstSet*/0, /*count*/1, &fr.computeFrameSet, 0, nullptr);
 
 
-    if (m_renderList) {
-        for (const auto& obj : *m_renderList) {
-            if (!obj.mesh.vertex || obj.mesh.vertexCount == 0) continue;
+        if (m_renderList) {
+            for (const auto& obj : *m_renderList) {
+                if (!obj.mesh.vertex || obj.mesh.vertexCount == 0) continue;
 
-            // Allocate per-object set 1 for the vertex storage buffer
-            vk::DescriptorSet objSet = m_descAlloc.allocate(m_device, cprog.setLayouts[1]);
-            DescriptorWriter w;
-            const vk::DeviceSize bytes = obj.mesh.vertexCount * 24; // 6 floats * 4 bytes
-            w.write_buffer(/*binding*/0, static_cast<vk::Buffer>(obj.mesh.vertex),
-                           bytes, /*offset*/0, vk::DescriptorType::eStorageBuffer);
-            w.updateSet(m_device, objSet);
-            w.clear();
+                // Allocate per-object set 1 for the vertex storage buffer
+                vk::DescriptorSet objSet = m_descAlloc.allocate(m_device, cprog.setLayouts[1]);
+                DescriptorWriter w;
+                const vk::DeviceSize bytes = obj.mesh.vertexCount * 24; // 6 floats * 4 bytes
+                w.write_buffer(/*binding*/0, static_cast<vk::Buffer>(obj.mesh.vertex),
+                               bytes, /*offset*/0, vk::DescriptorType::eStorageBuffer);
+                w.updateSet(m_device, objSet);
+                w.clear();
 
-            // Bind set 1
-            fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cprog.layout.get(),
-                                      /*firstSet*/1, /*count*/1, &objSet, 0, nullptr);
+                // Bind set 1
+                fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cprog.layout.get(),
+                                          /*firstSet*/1, /*count*/1, &objSet, 0, nullptr);
 
-            // Push vertexCount
-            uint32_t vcount = obj.mesh.vertexCount;
-            fr.cmd.pushConstants<uint32_t>(cprog.layout.get(), vk::ShaderStageFlagBits::eCompute, 0, vcount);
+                // Push vertexCount
+                uint32_t vcount = obj.mesh.vertexCount;
+                fr.cmd.pushConstants<uint32_t>(cprog.layout.get(), vk::ShaderStageFlagBits::eCompute, 0, vcount);
 
-            // Dispatch: groups of 64
-            uint32_t groups = (vcount + 63) / 64;
-            fr.cmd.dispatch(groups, 1, 1);
+                // Dispatch: groups of 64
+                uint32_t groups = (vcount + 63) / 64;
+                fr.cmd.dispatch(groups, 1, 1);
 
-            // Barrier: make compute writes visible to vertex input (graphics)
-            vk::BufferMemoryBarrier2 b{};
-            b.srcStageMask  = vk::PipelineStageFlagBits2::eComputeShader;
-            b.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
-            b.dstStageMask  = vk::PipelineStageFlagBits2::eVertexInput;
-            b.dstAccessMask = vk::AccessFlagBits2::eVertexAttributeRead;
-            b.buffer        = static_cast<vk::Buffer>(obj.mesh.vertex);
-            b.offset        = 0;
-            b.size          = VK_WHOLE_SIZE;
+                // Barrier: make compute writes visible to vertex input (graphics)
+                vk::BufferMemoryBarrier2 b{};
+                b.srcStageMask  = vk::PipelineStageFlagBits2::eComputeShader;
+                b.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
+                b.dstStageMask  = vk::PipelineStageFlagBits2::eVertexInput;
+                b.dstAccessMask = vk::AccessFlagBits2::eVertexAttributeRead;
+                b.buffer        = static_cast<vk::Buffer>(obj.mesh.vertex);
+                b.offset        = 0;
+                b.size          = VK_WHOLE_SIZE;
 
-            vk::DependencyInfo dep{}; dep.setBufferMemoryBarriers(b);
-            fr.cmd.pipelineBarrier2(dep);
+                vk::DependencyInfo dep{}; dep.setBufferMemoryBarriers(b);
+                fr.cmd.pipelineBarrier2(dep);
+            }
         }
     }
     // End Compute
@@ -477,29 +491,23 @@ void VulkanRenderer::buildMaterialSetForObject(Object& obj,
     if (auto it = m_images.find(texturePath); it != m_images.end()) {
         img = it->second;
     } else {
-        img = loadTexture2D(texturePath, /*generateMips*/true);
-        // loadTexture2D already stores it in m_images[texturePath]
+        img = loadTexture2D(texturePath, true);
     }
 
     // Get sampler (created once, reused)
     vk::Sampler sampler = m_samplers.at("default").handle;
 
     // Allocate set 2 using the layout that came from YAML
-    vk::DescriptorSet matSet =
-        m_descAlloc.allocate(m_device, prog.setLayouts[2]);
+    vk::DescriptorSet matSet = m_descAlloc.allocate(m_device, prog.setLayouts[2]);
 
     // For this pipeline, set 2 / binding 0 is a combined_image_sampler
     DescriptorWriter w;
-    w.write_image(0,
-                  img.view,
-                  sampler,
-                  vk::ImageLayout::eShaderReadOnlyOptimal,
-                  vk::DescriptorType::eCombinedImageSampler);
+    w.write_image(0, img.view, sampler, vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
     w.updateSet(m_device, matSet);
     w.clear();
 
     obj.material.materialSet = matSet;
-    // Optionally track that this material uses texture index X
+    // TODO: Optionally track that this material uses texture index X
     // obj.material.textureId = something;
 }
 
@@ -618,6 +626,7 @@ MeshBuffers VulkanRenderer::loadMeshOBJ(const std::string &path) {
 
     // store in cache
     m_meshes.emplace(path, mesh);
+    std::cout << "Mesh Loaded!" << std::endl;
     return mesh;
 }
 
