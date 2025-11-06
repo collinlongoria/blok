@@ -11,8 +11,13 @@
 #include "backends/imgui_impl_glfw.h"
 //#include "backends/imgui_impl_opengl3.h"
 
+#define GLFW_INCLUDE_NONE
+#include <GLFW/glfw3.h>
+
+//#include "window.hpp"
 #include "camera.hpp"
 #include <iostream>
+
 
 using namespace blok;
 
@@ -65,12 +70,12 @@ void addWindow()
 	ImGui::End();
 }
 
-UI::UI(GLFWwindow* window) :
+UI::UI(const std::shared_ptr<Window>& window) :
 	m_window(window),
 	m_camera(nullptr),
 	m_mouseSetting(DEFAULT)
 {
-	glfwSetWindowUserPointer(window, this);
+	glfwSetWindowUserPointer(window->getGLFWwindow(), this);
 }
 
 blok::UI::~UI()
@@ -106,15 +111,15 @@ void UI::swapMouseBehaviour(MouseBehaviour behaviour)
 	{
 	case (UI::MouseBehaviour::CAMERA_CONTROL):
 	{
-		glfwSetCursorPosCallback(m_window, mouseCameraCallback);
-		glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+		glfwSetCursorPosCallback(m_window->getGLFWwindow(), mouseCameraCallback);
+		glfwSetInputMode(m_window->getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 		break;
 	}
 	case (UI::MouseBehaviour::DEFAULT):
 	default:
 	{
-		glfwSetCursorPosCallback(m_window, ImGui_ImplGlfw_CursorPosCallback);
-		glfwSetInputMode(m_window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+		glfwSetCursorPosCallback(m_window->getGLFWwindow(), ImGui_ImplGlfw_CursorPosCallback);
+		glfwSetInputMode(m_window->getGLFWwindow(), GLFW_CURSOR, GLFW_CURSOR_NORMAL);
 		break;
 	}
 	}
@@ -128,10 +133,10 @@ void UI::handleCameraControls(Camera* cam)
 	if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem | ImGuiHoveredFlags_RootAndChildWindows))
 	{
 		GLFWcursor* handCursor = glfwCreateStandardCursor(GLFW_CROSSHAIR_CURSOR);
-		glfwSetCursor(m_window, handCursor);
+		glfwSetCursor(m_window->getGLFWwindow(), handCursor);
 
 
-		if (glfwGetMouseButton(m_window, GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS && m_camera != nullptr)
+		if (glfwGetMouseButton(m_window->getGLFWwindow(), GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS && m_camera != nullptr)
 		{
 			if (m_mouseData.firstMouse == true)
 			{
@@ -150,7 +155,7 @@ void UI::handleCameraControls(Camera* cam)
 	}
 	else
 	{
-		glfwSetCursor(m_window, nullptr);
+		glfwSetCursor(m_window->getGLFWwindow(), nullptr);
 		
 		if (m_mouseData.firstMouse == false)
 		{
@@ -158,4 +163,23 @@ void UI::handleCameraControls(Camera* cam)
 			m_mouseData.firstMouse = true;
 		}
 	}
+}
+
+void blok::UI::renderToNewWindow(unsigned int texture, std::string windowName)
+{
+	ImGui::Begin(windowName.c_str());
+
+	ImGui::Image((ImTextureID)(intptr_t)texture, ImVec2((float)m_window->getWidth(), (float)m_window->getHeight()));
+
+	ImGui::End();
+}
+
+void blok::UI::renderToWindow(unsigned int texture)
+{
+	ImGui::Image((ImTextureID)(intptr_t)texture, ImVec2((float)m_window->getWidth(), (float)m_window->getHeight()));
+}
+
+void blok::UI::displayData()
+{
+	ImGui::ShowDemoWindow();
 }

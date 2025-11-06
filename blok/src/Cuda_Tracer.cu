@@ -314,6 +314,10 @@ void CudaTracer::drawFrame(Camera& cam, const Scene& scene) {
     std::vector<PlaneCUDA> planes;
     for (auto& p : scene.planes) planes.push_back(toDevice(p));
 
+    ///
+    //spheres[1].color = 
+    ///
+
     SphereCUDA* dSpheres = nullptr;
     PlaneCUDA* dPlanes   = nullptr;
     if (!spheres.empty())

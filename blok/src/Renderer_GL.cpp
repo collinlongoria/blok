@@ -27,9 +27,6 @@
 
 using namespace blok;
 
-//remove static
-static UI* m_UI;
-
 static GLuint compileShader(GLenum type, const char* src) {
     GLuint s = glCreateShader(type);
     glShaderSource(s, 1, &src, nullptr);
@@ -60,12 +57,17 @@ static GLuint linkProgram(GLuint vs, GLuint fs) {
 }
 
 RendererGL::RendererGL(std::shared_ptr<Window> window)
-    : m_window(std::move(window)) {}
+    : m_window(std::move(window)), m_ui(nullptr) {}
 
 RendererGL::~RendererGL() { if (active) { shutdown(); } }
 
 void RendererGL::setTexture(unsigned int tex, unsigned int w, unsigned int h) {
     m_tex = tex; m_texW = static_cast<int>(w); m_texH = static_cast<int>(h);
+}
+
+void blok::RendererGL::setUI(UI* ui)
+{
+    m_ui = ui;
 }
 
 void RendererGL::beginFrame() {
@@ -114,7 +116,6 @@ void RendererGL::init() {
     ImGui::StyleColorsDark();
     ImGui_ImplGlfw_InitForOpenGL(m_window->getGLFWwindow(), true);
     ImGui_ImplOpenGL3_Init("#version 330");
-    m_UI = new UI(m_window->getGLFWwindow());
 
     glViewport(0, 0, m_window->getWidth(), m_window->getHeight());
     glClearColor(0.1f, 0.1f, 0.25f, 1.0f);
@@ -172,15 +173,13 @@ void RendererGL::drawFrame(Camera& cam, const Scene& /*scene*/) {
     }
     */
 
-    if (m_tex != 0) {
+    if (m_tex != 0 && m_ui != nullptr) {
         ImGui::Begin("CUDA Output");
         ImGui::Text("Displaying raytraced texture:");
-        ImGui::Image((ImTextureID)(intptr_t)m_tex, ImVec2((float)m_texW, (float)m_texH));
-
-        m_UI->handleCameraControls(&cam);
+        m_ui->renderToWindow(m_tex);
+        m_ui->handleCameraControls(&cam);
 
         ImGui::End();
-
     }
     else
     {
@@ -200,7 +199,6 @@ void RendererGL::shutdown() {
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
     ImGui::DestroyContext();
-    delete m_UI;
 
     destroyFullScreenQuad();
     if (m_prog) { glDeleteProgram(m_prog); m_prog = 0; }

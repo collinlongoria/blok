@@ -21,6 +21,7 @@ namespace blok {
 
 class Window;
 class Camera;
+class UI;
 struct Scene;
 
 class RendererGL : public Renderer {
@@ -35,11 +36,14 @@ public:
     // external (e.g. CUDA) provides texture to display
     void setTexture(unsigned int tex, unsigned int w, unsigned int h);
 
+    void setUI(UI* ui);
+
     void beginFrame() override;
     void endFrame() override;
 
 private:
     std::shared_ptr<Window> m_window;
+    UI* m_ui;
 
     unsigned int m_tex = 0;
     int m_texW = 0, m_texH = 0;

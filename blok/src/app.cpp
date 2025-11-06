@@ -7,6 +7,7 @@
 
 #include "app.hpp"
 #include "window.hpp"
+#include "ui.hpp"
 
 #include "Renderer_GL.hpp"
 #include "vulkan_renderer.hpp"
@@ -28,11 +29,13 @@
 using namespace blok;
 static Camera g_camera;
 static Scene  g_scene;
+static UI* g_ui;
+
 /* This was all moved to ui.cpp
 static float lastX = 400.0f;
 static float lastY = 300.0f;
 static bool firstMouse = true;
-static std::vector<Object> gScene;
+*/static std::vector<Object> gScene;/*
 
 // ---------------- Input Callbacks ----------------
 void mouse_pcallback(GLFWwindow* window, double xpos, double ypos) {
@@ -57,7 +60,7 @@ App::App(GraphicsApi backend)
     : m_backend(backend) {}
 
 App::~App() {
-    shutdown();
+    // none beef
 }
 
 void App::run() {
@@ -74,6 +77,9 @@ void App::init() {
     m_window = std::make_shared<Window>(800, 600, "blok", m_backend);
 
     GLFWwindow* gw = m_window->getGLFWwindow();
+
+    g_ui = new UI(m_window);
+
     if (m_backend == GraphicsApi::OpenGL) {
         glfwMakeContextCurrent(gw);
         if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
@@ -81,6 +87,7 @@ void App::init() {
         }
         m_renderer = std::make_unique<RendererGL>(m_window);
         m_renderer->init();
+        reinterpret_cast<RendererGL*>(m_renderer.get())->setUI(g_ui);
     }
 
     switch (m_backend) {
@@ -128,7 +135,7 @@ void App::init() {
         gScene.push_back(obj);
         VKR->setRenderList(&gScene);
 
-        glfwSetCursorPosCallback(gw, mouse_callback);
+        //glfwSetCursorPosCallback(gw, mouse_callback);
         glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
         break;
@@ -164,7 +171,8 @@ void App::update() {
 
             m_renderer->drawFrame(g_camera, g_scene);
 
-            //addWindow();
+            addWindow();
+            g_ui->displayData();
 
             m_renderer->endFrame();
             break;
@@ -180,6 +188,7 @@ void App::update() {
 void App::shutdown() {
     if (m_renderer) { /*m_renderer->shutdown();*/ m_renderer.reset(); }
     if (m_cudaTracer) { m_cudaTracer->~CudaTracer(); m_cudaTracer.reset(); }
+    if (g_ui != nullptr) { delete g_ui; }
 
     if (m_backend == GraphicsApi::Vulkan) {
         m_window.reset();

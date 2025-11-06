@@ -7,10 +7,9 @@
 #ifndef UI_HPP
 #define UI_HPP
 
-
-
-#define GLFW_INCLUDE_NONE
-#include <GLFW/glfw3.h>
+#include "window.hpp"
+#include <memory> 
+#include <string>
 
 void addWindow();
 
@@ -29,12 +28,16 @@ namespace blok {
             CAMERA_CONTROL
         };
 
-        UI(GLFWwindow* window);
+        UI(const std::shared_ptr<Window>& window);
 
         ~UI();
 
         /*Handles Camera movement through mouse controls*/
         void handleCameraControls(Camera* camera);
+
+        void renderToNewWindow(unsigned int texture, std::string windowName = "");
+        void renderToWindow(unsigned int texture);
+        void displayData();
         
     private:
 
@@ -46,7 +49,7 @@ namespace blok {
         } m_mouseData;
         
          MouseBehaviour m_mouseSetting;
-         GLFWwindow* m_window;
+         const std::shared_ptr<Window>& m_window;
          Camera* m_camera;
 
          
