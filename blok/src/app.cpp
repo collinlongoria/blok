@@ -23,6 +23,8 @@
 /* These includes are here so I can test build */
 #include <chrono>
 
+#include "imgui.h"
+
 #define VKR reinterpret_cast<VulkanRenderer*>(m_renderer.get())
 
 using namespace blok;
@@ -168,6 +170,7 @@ void App::update() {
 
         case GraphicsApi::Vulkan:
             m_renderer->beginFrame();
+            ImGui::ShowDemoWindow();
             m_renderer->drawFrame(g_camera, g_scene);
             m_renderer->endFrame();
             break;

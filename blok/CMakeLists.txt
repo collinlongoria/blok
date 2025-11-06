@@ -80,8 +80,11 @@ add_library(imgui STATIC
         ${CMAKE_SOURCE_DIR}/external/imgui/imgui_widgets.cpp
 
         ${CMAKE_SOURCE_DIR}/external/imgui/backends/imgui_impl_glfw.cpp
+        ${CMAKE_SOURCE_DIR}/external/imgui/backends/imgui_impl_vulkan.cpp
         ${CMAKE_SOURCE_DIR}/external/imgui/backends/imgui_impl_opengl3.cpp
 )
+target_include_directories(imgui PRIVATE ${Vulkan_INCLUDE_DIRS})
+target_link_libraries(imgui PRIVATE Vulkan::Vulkan)
 target_include_directories(imgui PRIVATE
         ${CMAKE_SOURCE_DIR}/external/imgui
         ${CMAKE_SOURCE_DIR}/external/imgui/backends
