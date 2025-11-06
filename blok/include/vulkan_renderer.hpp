@@ -19,7 +19,10 @@
 #include "math.hpp"
 #include "object.hpp"
 #include "pipeline_system.hpp"
+#include "GLFW/glfw3.h"
 
+void vulkanFramebufferCallback(GLFWwindow* window, int width, int height);
+extern bool resizeNeeded;
 
 namespace blok {
 class Window;
