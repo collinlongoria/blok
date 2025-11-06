@@ -34,6 +34,11 @@
 #include "window.hpp"
 #include "assimp/version.h"
 
+bool resizeNeeded = false;
+void vulkanFramebufferCallback(GLFWwindow* window, int width, int height) {
+    resizeNeeded = true;
+}
+
 namespace blok {
 
 void recurseModelNodes(ModelData* meshdata,
@@ -216,6 +221,7 @@ void VulkanRenderer::initGUI() {
 
     // init imgui
     ImGui_ImplVulkan_InitInfo init_info{};
+    init_info.ApiVersion = VK_API_VERSION_1_4;
     init_info.Instance       = static_cast<VkInstance>(m_instance);
     init_info.PhysicalDevice = static_cast<VkPhysicalDevice>(m_physicalDevice);
     init_info.Device         = static_cast<VkDevice>(m_device);
@@ -233,7 +239,7 @@ void VulkanRenderer::initGUI() {
     colorFormat = static_cast<VkFormat>(m_colorFormat);
 
     init_info.PipelineInfoMain.PipelineRenderingCreateInfo = {};
-    init_info.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
     init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
     init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFormat;
     init_info.PipelineInfoMain.PipelineRenderingCreateInfo.depthAttachmentFormat   = VK_FORMAT_UNDEFINED;
@@ -261,6 +267,14 @@ void VulkanRenderer::beginFrame() {
 }
 
 void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
+    // resize if needed
+    if (resizeNeeded) {
+        m_swapchainDirty = true;
+        resizeNeeded = false;
+        ImGui::EndFrame();
+        return;
+    }
+
     auto& fr = m_frames[m_frameIndex];
 
     const float aspect = static_cast<float>(m_swapExtent.width) / static_cast<float>(m_swapExtent.height);
@@ -284,7 +298,11 @@ void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
     uint32_t imageIndex = 0;
     const auto acq = m_device.acquireNextImageKHR(m_swapchain, UINT64_MAX,
                                                   fr.imageAvailable, nullptr, &imageIndex);
-    if (acq == vk::Result::eErrorOutOfDateKHR) { m_swapchainDirty = true; endFrame(); return; }
+    if (acq == vk::Result::eErrorOutOfDateKHR) {
+        m_swapchainDirty = true;
+        ImGui::EndFrame();
+        return;
+    }
     if (acq != vk::Result::eSuccess && acq != vk::Result::eSuboptimalKHR)
         throw std::runtime_error("acquireNextImageKHR failed");
 
@@ -441,8 +459,29 @@ void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
     endRendering(fr.cmd);
 
     // imgui
-    ImGui::Render();
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), fr.cmd);
+    {
+        vk::RenderingAttachmentInfo uiColor{};
+        uiColor.imageView   = sw.view;
+        uiColor.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+        uiColor.loadOp      = vk::AttachmentLoadOp::eLoad;   // keep scene
+        uiColor.storeOp     = vk::AttachmentStoreOp::eStore;
+        // clearValue ignored with eLoad
+
+        vk::RenderingInfo uiInfo{};
+        uiInfo.renderArea        = vk::Rect2D({0, 0}, m_swapExtent);
+        uiInfo.layerCount        = 1;
+        uiInfo.colorAttachmentCount = 1;
+        uiInfo.pColorAttachments = &uiColor;
+        uiInfo.pDepthAttachment  = nullptr;
+        uiInfo.pStencilAttachment= nullptr;
+
+        fr.cmd.beginRendering(uiInfo);
+
+        ImGui::Render();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), static_cast<VkCommandBuffer>(fr.cmd), VK_NULL_HANDLE);
+
+        fr.cmd.endRendering();
+    }
 
     it.ensure(sw, blok::Role::Present);
     m_swapImageLayouts[imageIndex] = sw.currentLayout;
@@ -471,8 +510,10 @@ void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
     pi.pImageIndices      = &imageIndex;
 
     const auto pres = m_presentQueue.presentKHR(pi);
-    if (pres == vk::Result::eErrorOutOfDateKHR || pres == vk::Result::eSuboptimalKHR) m_swapchainDirty = true;
-    else if (pres != vk::Result::eSuccess) throw std::runtime_error("presentKHR failed");
+    if (pres == vk::Result::eErrorOutOfDateKHR || pres == vk::Result::eSuboptimalKHR)
+        m_swapchainDirty = true;
+    else if (pres != vk::Result::eSuccess)
+        throw std::runtime_error("presentKHR failed");
 }
 
 void VulkanRenderer::endFrame() {
@@ -1032,12 +1073,14 @@ void VulkanRenderer::createSwapChain() {
     GLFWwindow* win = m_window ? m_window->getGLFWwindow() : nullptr;
     glfwGetFramebufferSize(win, reinterpret_cast<int*>(&fbw), reinterpret_cast<int*>(&fbh));
 
-    if (caps.currentExtent.width == 0 != std::numeric_limits<uint32_t>::max()) {
+    if (caps.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         m_swapExtent = caps.currentExtent;
     }
     else {
-        m_swapExtent = vk::Extent2D{ std::clamp(fbw, caps.minImageExtent.width, caps.maxImageExtent.width),
-            std::clamp(fbh, caps.minImageExtent.height, caps.maxImageExtent.height) };
+        m_swapExtent = vk::Extent2D{
+            std::clamp(fbw, caps.minImageExtent.width,  caps.maxImageExtent.width),
+            std::clamp(fbh, caps.minImageExtent.height, caps.maxImageExtent.height)
+        };
     }
 
     uint32_t imageCount = std::min(caps.maxImageCount ? caps.maxImageCount : UINT32_MAX,

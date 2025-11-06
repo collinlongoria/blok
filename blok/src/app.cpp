@@ -94,33 +94,8 @@ void App::init() {
         m_renderer = std::make_unique<VulkanRenderer>(m_window.get());
         m_renderer->init();
 
-        struct Vtx { float x,y,z,r,g,b; };
-
-        const Vtx cubeVerts[] = {
-            {-0.5f,-0.5f,-0.5f, 1,0,0},
-            { 0.5f,-0.5f,-0.5f, 0,1,0},
-            { 0.5f, 0.5f,-0.5f, 0,0,1},
-            {-0.5f, 0.5f,-0.5f, 1,1,0},
-            {-0.5f,-0.5f, 0.5f, 1,0,1},
-            { 0.5f,-0.5f, 0.5f, 0,1,1},
-            { 0.5f, 0.5f, 0.5f, 1,1,1},
-            {-0.5f, 0.5f, 0.5f, 0,0,0},
-        };
-
-        const uint32_t cubeIdx[] = {
-            // back
-            0,3,2,  2,1,0,
-            // front
-            4,5,6,  6,7,4,
-            // left
-            0,4,7,  7,3,0,
-            // right
-            1,2,6,  6,5,1,
-            // bottom
-            0,1,5,  5,4,0,
-            // top
-            3,7,6,  6,2,3
-        };
+        // resize callback
+        glfwSetFramebufferSizeCallback(m_window->getGLFWwindow(), vulkanFramebufferCallback);
 
         Object obj{};
         // create object from mesh
@@ -136,7 +111,7 @@ void App::init() {
 
         VKR->setRenderList(&gScene);
 
-        glfwSetCursorPosCallback(gw, mouse_callback);
+        //glfwSetCursorPosCallback(gw, mouse_callback);
         //glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
         break;
