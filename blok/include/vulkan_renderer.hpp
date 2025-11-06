@@ -140,6 +140,9 @@ private: // functions
     // Per frame UBOs
     void createPerFrameUniforms();
 
+    // GUI
+    void initGUI();
+
     // Upload
     Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO, bool mapped = false);
     void uploadToBuffer(const void* src, vk::DeviceSize size, Buffer& dst, vk::DeviceSize dstOffset = 0);
@@ -219,6 +222,7 @@ private: // resources
 
     // Descriptor Stuff
     DescriptorAllocatorGrowable m_descAlloc;
+    vk::DescriptorPool m_imguiDescriptorPool{}; // for imgui
 
     // Named resources
     std::unordered_map<std::string, Image>   m_images;
