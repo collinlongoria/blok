@@ -16,6 +16,7 @@ namespace blok {
 
 class Camera;
 struct Scene;
+struct VulkanScene;
 
 class Renderer {
 public:

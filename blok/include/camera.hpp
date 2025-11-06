@@ -10,18 +10,23 @@
 #define CAMERA_HPP
 #include <glm.hpp>
 
+#include "math.hpp"
+
 namespace blok {
 
 class Camera {
 public:
-    glm::vec3 position{0.0f, 0.0f, 3.0f};
+    Vector3 position{0.0f, 0.0f, 3.0f};
     float yaw   = -90.0f;
     float pitch = 0.0f;
     float fov   = 60.0f;
 
-    glm::vec3 forward() const;
-    glm::vec3 right() const;
-    glm::vec3 up() const;
+    [[nodiscard]] Vector3 forward() const;
+    [[nodiscard]] Vector3 right() const;
+    [[nodiscard]] Vector3 up() const;
+
+    [[nodiscard]] Matrix4 view() const;
+    [[nodiscard]] Matrix4 projection(float aspect, float zNear, float zFar) const;
 
     void processKeyboard(char key, float dt);
     void processMouse(float dx, float dy);

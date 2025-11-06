@@ -16,60 +16,58 @@
 #include "vulkan/vulkan.hpp"
 #include <vk_mem_alloc.h>
 
+#include "math.hpp"
+#include "object.hpp"
+#include "pipeline_system.hpp"
+
+
 namespace blok {
 class Window;
 
+/*
+ * These are the canonical structs for per-object and per-frame data. Update as needed
+ */
+struct FrameUBO {
+    Matrix4 view;
+    Matrix4 proj;
+    float time = 0.0f;
+
+    glm::vec3 __pad{0,0,0}; // std140 pad
+};
+
+struct ObjectUBO {
+    glm::mat4 model;
+};
+
 struct Buffer {
-    vk::Buffer handle{};
-    VmaAllocation alloc{};
-    vk::DeviceSize size{};
-    vk::DeviceSize alignment{};
-    vk::BufferUsageFlags usage{};
-    void* mapped = nullptr;
+    vk::Buffer      handle{};
+    VmaAllocation   alloc{};
+    void*           mapped = nullptr;
+    vk::DeviceSize  size = 0;
 };
 
 struct Image {
-    vk::Image handle{};
-    VmaAllocation alloc{};
-    vk::ImageView view{};
-    vk::Format format{};
-    vk::Extent3D extent{};
-    vk::ImageLayout currentLayout{vk::ImageLayout::eUndefined};
-    uint32_t mipLevels = 1;
-    uint32_t layers = 1;
-    vk::SampleCountFlagBits sampled{vk::SampleCountFlagBits::e1};
+    vk::Image                   handle{};
+    VmaAllocation               alloc{};
+    vk::ImageView               view{};
+    vk::Format                  format{vk::Format::eUndefined};
+    uint32_t                    width = 0;
+    uint32_t                    height = 0;
+    uint32_t                    mipLevels = 1;
+    uint32_t                    layers = 1;
+    vk::SampleCountFlagBits     samples{vk::SampleCountFlagBits::e1};
+    vk::ImageLayout             currentLayout{vk::ImageLayout::eUndefined};
 };
 
 struct Sampler {
     vk::Sampler handle{};
 };
 
-struct Shader {
-    vk::ShaderModule module{};
-    std::string entry{"main"};
-};
-
-struct Pipeline {
-    vk::Pipeline handle{};
-    vk::PipelineLayout layout{};
-};
-
-struct DescriptorLayouts {
-    vk::DescriptorSetLayout global{};
-    vk::DescriptorSetLayout material{};
-    vk::DescriptorSetLayout object{};
-    vk::DescriptorSetLayout compute{};
-};
-
-struct DescriptorPoolPack {
-    vk::DescriptorPool pool{};
-};
-
 struct FrameResources {
     // Sync
     vk::Semaphore imageAvailable{};
     vk::Semaphore renderFinished{};
-    vk::Fence inFlight{};
+    vk::Fence     inFlight{};
 
     // Commands
     vk::CommandPool cmdPool{};
@@ -77,26 +75,9 @@ struct FrameResources {
 
     // Uniforms
     Buffer globalUBO{};
-    Buffer objectUBO{};
-
-    // Descriptor sets
-    vk::DescriptorSet globalSet{};
-    vk::DescriptorSet objectSet{};
-    vk::DescriptorSet materialSet{};
-    vk::DescriptorSet computeSet{};
-};
-
-struct ComputePC {
-    int32_t width;
-    int32_t height;
-    float   tFrame;
-};
-
-struct QueueFamilyIndices {
-    std::optional<uint32_t> graphics;
-    std::optional<uint32_t> present;
-    std::optional<uint32_t> compute;
-    bool complete() const { return graphics && present && compute; }
+    vk::DeviceSize uboHead = 0;
+    vk::DescriptorSet frameSet{};
+    vk::DescriptorSet computeFrameSet{};
 };
 
 class VulkanRenderer final : public Renderer {
@@ -110,7 +91,14 @@ public:
     void drawFrame(Camera &cam, const Scene &scene) override;
     void endFrame() override;
 
+    [[nodiscard]] vk::Format getColorFormat() const { return m_colorFormat; }
+
+    // Objects, Meshes, Materials
+    MeshBuffers uploadMesh(const void* vertices, vk::DeviceSize bytes, uint32_t vertexCount, const uint32_t* indices, uint32_t indexCount);
+    void setRenderList(const std::vector<Object>* list);
+
     void shutdown() override;
+
 private: // functions
     // Initialization
     void createInstance();
@@ -127,17 +115,6 @@ private: // functions
     void createSwapChain();
     void createDepthResources();
 
-    // Pipelines
-    [[nodiscard]] Shader createShaderModule(const std::vector<uint32_t>& code) const;
-    void createGraphicsPipeline();
-    void createComputePipeline();
-    void createPipelineCache();
-
-    // Descriptors
-    void createDescriptorSetLayouts();
-    void createDescriptorPools();
-    void allocatePerFrameDescriptorSets();
-
     // Commands and Sync
     void createCommandPoolAndBuffers();
     void createSyncObjects();
@@ -151,9 +128,11 @@ private: // functions
     void copyBuffer(Buffer& src, Buffer& dst, vk::DeviceSize size);
 
     Image createImage(uint32_t w, uint32_t h, vk::Format fmt, vk::ImageUsageFlags usage, vk::ImageTiling tiling = vk::ImageTiling::eOptimal, vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1, uint32_t mipLevels = 1, uint32_t layers = 1, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO);
-    void transitionImage(Image& img, vk::ImageLayout newLayout, vk::PipelineStageFlags2 srcStage, vk::AccessFlags2 srcAccess, vk::PipelineStageFlags2 dstStage, vk::AccessFlags2 dstAccess, vk::ImageAspectFlags aspect = vk::ImageAspectFlagBits::eColor, uint32_t baseMip = 0, uint32_t levelCount = VK_REMAINING_MIP_LEVELS, uint32_t baseLayer = 0, uint32_t layerCount = VK_REMAINING_ARRAY_LAYERS);
     void copyBufferToImage(Buffer& staging, Image& img, uint32_t w, uint32_t h, uint32_t baseLayer = 0, uint32_t layerCount = 1);
     void generateMipmaps(Image& img);
+
+    vk::Buffer uploadVertexBuffer(const void* data, vk::DeviceSize sizeBytes, uint32_t vertexCount);
+    vk::Buffer uploadIndexBuffer(const uint32_t* data, uint32_t indexCount);
 
     // Dynamic rendering helpers
     void beginRendering(vk::CommandBuffer cmd, vk::ImageView colorView, vk::ImageView depthView, vk::Extent2D extent, const std::array<float,4>& clearColor, float clearDepth = 1.0f, uint32_t clearStencil = 0);
@@ -170,13 +149,14 @@ private: // functions
     void cleanupSwapChain();
     void recreateSwapChain();
 
-    // Current Render Pipeline
-    void createFullscreenQuadBuffers();
-    void createRayTarget();
-    void allocateMaterialAndComputeDescriptorSets();
-
     std::vector<const char*> getRequiredExtensions();
     std::vector<const char*> getRequiredDeviceExtensions();
+
+    // Small helper
+    inline vk::DeviceSize alignUp(vk::DeviceSize v, vk::DeviceSize a) {
+        return (v + (a - 1)) & ~(a - 1);
+    }
+
 private: // resources
     std::shared_ptr<Window> m_window = nullptr;
 
@@ -185,15 +165,18 @@ private: // resources
     vk::SurfaceKHR m_surface{};
     vk::PhysicalDevice m_physicalDevice{};
     vk::Device m_device{};
-
-    // vma
-    VmaAllocator m_allocator{};
-
-    // Queues
-    QueueFamilyIndices m_qfi{};
+    struct QueueFamilyIndices {
+        std::optional<uint32_t> graphics;
+        std::optional<uint32_t> present;
+        std::optional<uint32_t> compute;
+        bool complete() const { return graphics && present && compute; }
+    } m_qfi;
     vk::Queue m_graphicsQueue{};
     vk::Queue m_presentQueue{};
     vk::Queue m_computeQueue{};
+
+    // vma
+    VmaAllocator m_allocator = nullptr;
 
     // SwapChain
     vk::SwapchainKHR m_swapchain{};
@@ -205,43 +188,38 @@ private: // resources
     vk::ColorSpaceKHR m_colorSpace{vk::ColorSpaceKHR::eSrgbNonlinear};
     vk::PresentModeKHR m_presentMode{vk::PresentModeKHR::eMailbox};
 
+    std::vector<vk::Semaphore> m_presentSignals;
+    std::vector<vk::Fence> m_imagesInFlight;
+    std::vector<vk::ImageLayout> m_swapImageLayouts;
+
     // Depth attachment
     Image m_depth{};
 
-    // Pipeline cache
-    vk::PipelineCache m_pipelineCache{};
+    // Systems
+    std::unique_ptr<ShaderSystem> m_shaderSystem;
+    std::unique_ptr<PipelineSystem> m_pipelineSystem;
 
-    // Graphics Pipeline
-    Pipeline m_gfx{};
-    vk::VertexInputBindingDescription m_vertexBinding{};
-    std::vector<vk::VertexInputAttributeDescription> m_vertexAttrs{};
+    // Descriptor Stuff
+    DescriptorAllocatorGrowable m_descAlloc;
 
-    // Fullscreen geometry and output image
-    Buffer m_fsVBO{};
-    Buffer m_fsIBO{};
-    uint32_t m_fsIndexCount = 0;
-    Image m_rayImage{};
+    // Named resources
+    std::unordered_map<std::string, Image>   m_images;
+    std::unordered_map<std::string, Buffer>  m_buffers;
+    std::unordered_map<std::string, Sampler> m_samplers;
+    std::vector<Buffer> m_ownedBuffers;
 
-    // Descriptor layouts
-    DescriptorLayouts m_descLayouts{};
-    DescriptorPoolPack m_descPools{};
+    // Objects
+    const std::vector<Object>* m_renderList = nullptr;
 
     // Per-frame
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
     uint32_t m_frameIndex = 0;
     std::array<FrameResources, MAX_FRAMES_IN_FLIGHT> m_frames{};
 
-    // Transient
+    // Transient upload
     vk::CommandPool m_uploadPool{};
     vk::CommandBuffer m_uploadCmd{};
     vk::Fence m_uploadFence{};
-
-    // Samplers
-    Sampler m_defaultSampler{};
-
-    // Compute
-    Pipeline m_compute{};
-    vk::DescriptorSet m_computeSet{};
 
     // Flags
     bool m_swapchainDirty = false;

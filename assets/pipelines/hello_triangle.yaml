@@ -1,0 +1,28 @@
+- kind: graphics
+  name: hello_triangle
+  rts:
+    colors: [44]
+    depth: 126
+  layout:
+    sets:
+      - set: 0
+        bindings:
+          - binding: 0
+            type: uniform_buffer
+            stages: [vertex, fragment]
+      - set: 1
+        bindings:
+          - binding: 0
+            type: uniform_buffer
+            stages: [vertex]
+    push_constants: []
+  vertex:
+    stride: 24
+    attrib_formats: [106, 106]
+  shaders:
+    - { path: "assets/shaders/tri.vert.glsl", stage: "vertex", entry: "main" }
+    - { path: "assets/shaders/tri.frag.glsl", stage: "fragment", entry: "main" }
+  states:
+    depthTest: false
+    depthWrite: false
+    blend: false
