@@ -97,22 +97,23 @@ void App::init() {
         // resize callback
         glfwSetFramebufferSizeCallback(m_window->getGLFWwindow(), vulkanFramebufferCallback);
 
-        Object obj{};
-        // create object from mesh
-        VKR->initObjectFromMesh(obj, "mesh_flat", "assets/models/teapot/teapot.obj");
+        // single teapot
+        Object teapot{};
+        VKR->initObjectFromMesh(teapot, "mesh_flat", "assets/models/teapot/teapot.obj");
+        teapot.model.translation = {0,0,-100};
+        teapot.model.scale       = {0.1f,0.1f,0.1f};
+        gScene.push_back(teapot);
 
-        // configure transform / material as needed
-        obj.model.translation = {0.0f, 0.0f, -100.0f};
-        obj.model.scale = {0.1f, 0.1f, 0.1f};
-        obj.pipelineName = "mesh_flat";
-        VKR->buildMaterialSetForObject(obj, "assets/models/teapot/default.png");
-
-        gScene.push_back(obj);
+        // sponza
+        auto sponzaObjects = VKR->initObjectsFromMesh("mesh_flat", "assets/models/sponza/sponza.obj");
+       for (auto& o : sponzaObjects) {
+           gScene.push_back(o);
+       }
 
         VKR->setRenderList(&gScene);
 
-        //glfwSetCursorPosCallback(gw, mouse_callback);
-        //glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        glfwSetCursorPosCallback(gw, mouse_callback);
+        glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
         break;
     }

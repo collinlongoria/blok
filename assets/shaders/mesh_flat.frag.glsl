@@ -8,5 +8,10 @@ layout(set = 2, binding = 0) uniform sampler2D uAlbedo;
 
 void main()
 {
-    outColor = texture(uAlbedo, vUV);
+    vec4 texel = texture(uAlbedo, vUV);
+
+    //if (texel.a < 0.1)
+       // discard;
+
+    outColor = texel;
 }

@@ -30,7 +30,7 @@ glm::vec3 Camera::up() const {
 }
 
 void Camera::processKeyboard(char key, float dt) {
-    float speed = 10.0f * dt;
+    float speed = 40.0f * dt;
     if (key == 'W') position += forward() * speed;
     if (key == 'S') position -= forward() * speed;
     if (key == 'A') position -= right() * speed;

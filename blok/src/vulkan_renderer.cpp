@@ -281,7 +281,7 @@ void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
     // write frame UBO (offset 0)
     const vk::DeviceSize minAlign = m_physicalDevice.getProperties().limits.minUniformBufferOffsetAlignment;
     float nearPlane = 0.1f;
-    float farPlane = 1000.0f;
+    float farPlane = 10000.0f;
     static float t = 0.0f;
     t += 0.00167f;
     FrameUBO fubo{ cam.view(), cam.projection(aspect, nearPlane, farPlane), t, {} };
@@ -447,8 +447,16 @@ void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
             if (obj.mesh.vertex) {
                 fr.cmd.bindVertexBuffers(0, 1, &obj.mesh.vertex, &off);
                 if (obj.mesh.index && obj.mesh.indexCount) {
+                    // offset in bytes is 0, we use firstIndex in indices
                     fr.cmd.bindIndexBuffer(obj.mesh.index, 0, vk::IndexType::eUint32);
-                    fr.cmd.drawIndexed(obj.mesh.indexCount, 1, 0, 0, 0);
+
+                    fr.cmd.drawIndexed(
+                        obj.mesh.indexCount,                 // how many indices for *this* submesh
+                        1,
+                        static_cast<uint32_t>(obj.mesh.indexOffset), // firstIndex (in indices, not bytes)
+                        0,
+                        0
+                    );
                 } else {
                     fr.cmd.draw(obj.mesh.vertexCount, 1, 0, 0);
                 }
@@ -650,6 +658,8 @@ void VulkanRenderer::buildMaterialSetForObject(Object& obj,
 
 Image VulkanRenderer::loadTexture2D(const std::string &path, bool generateMips) {
     int w, h, ch;
+
+    stbi_set_flip_vertically_on_load(true);
     stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &ch, STBI_rgb_alpha);
     if (!pixels) {
         throw std::runtime_error("failed to load texture " + path);
@@ -767,11 +777,126 @@ MeshBuffers VulkanRenderer::loadMeshOBJ(const std::string &path) {
 }
 
 void VulkanRenderer::initObjectFromMesh(Object &obj, const std::string &pipelineName, const std::string &meshPath) {
-    MeshBuffers mesh = loadMeshOBJ(meshPath);
+    auto objs = initObjectsFromMesh(pipelineName, meshPath);
+    if (objs.empty()) {
+        throw std::runtime_error("initObject: mesh produced no objects");
+    }
 
-    obj.pipelineName = pipelineName;
-    obj.mesh         = mesh;
+    obj = std::move(objs[0]);
 }
+
+std::vector<Object> VulkanRenderer::initObjectsFromMesh(const std::string &pipelineName, const std::string &meshPath) {
+    // load model
+    ModelData model;
+    if (!model.readAssimpFile(meshPath, Matrix4(1.0f))) {
+        throw std::runtime_error("Failed to load OBJ: " + meshPath);
+    }
+
+    const uint32_t vcount = static_cast<uint32_t>(model.vertices.size());
+    const uint32_t icount = static_cast<uint32_t>(model.indices.size());
+    if (vcount == 0 || icount == 0) {
+        return {};
+    }
+
+    // creates one shared vertex + index buffer for entire model
+    const vk::DeviceSize vbytes = static_cast<vk::DeviceSize>(vcount) * sizeof(Vertex);
+
+    MeshBuffers mesh = uploadMesh( model.vertices.data(), vbytes, vcount, model.indices.data(), icount);
+
+    // partition by material index
+    const size_t triCount = model.indices.size() / 3;
+    const size_t materialCount = model.materials.size();
+
+    struct Subrange {
+        uint32_t firstIndex;
+        uint32_t indexCount;
+        int32_t materialIndex;
+    };
+    std::vector<Subrange> subranges;
+
+    int32_t currMat = -1;
+    uint32_t runStart = 0;
+    uint32_t runCount = 0;
+
+    auto flushRun = [&](int32_t mat) {
+        if (runCount == 0 || mat < 0) return;
+        subranges.push_back(Subrange{ runStart, runCount, mat });
+    };
+
+    for (uint32_t tri = 0; tri < triCount; ++tri) {
+        int32_t mat = (tri < model.matIdx.size()) ? model.matIdx[tri] : -1;
+
+        if (tri == 0) {
+            currMat = mat;
+            runStart = 0;
+            runCount = 3;
+            continue;
+        }
+
+        if (mat == currMat) {
+            runCount += 3;
+        }
+        else {
+            flushRun(currMat);
+            currMat = mat;
+            runStart = tri * 3;
+            runCount = 3;
+        }
+    }
+    flushRun(currMat);
+
+    if (subranges.empty()) {
+        subranges.push_back(Subrange{ 0u, icount, 0 });
+    }
+
+    // build objects
+    std::filesystem::path meshPathFs(meshPath);
+    std::filesystem::path baseDir = meshPathFs.parent_path();
+
+    std::vector<Object> result;
+    result.reserve(subranges.size());
+
+    for (const Subrange& sr : subranges) {
+        Object obj{};
+        obj.pipelineName = pipelineName;
+
+        // verts
+        obj.mesh.vertex = mesh.vertex;
+        obj.mesh.vertexOffset = mesh.vertexOffset;
+        obj.mesh.vertexCount = mesh.vertexCount;
+        obj.mesh.index = mesh.index;
+        obj.mesh.indexOffset = mesh.indexOffset;
+        //obj.mesh.indexCount = mesh.indexCount;
+
+        // material
+        if (sr.materialIndex >= 0 && static_cast<size_t>(sr.materialIndex) < model.materials.size()) {
+            const Material& srcMat = model.materials[sr.materialIndex];
+            obj.material.diffuse   = srcMat.diffuse;
+            obj.material.specular  = srcMat.specular;
+            obj.material.emission  = srcMat.emission;
+            obj.material.shininess = srcMat.shininess;
+            obj.material.textureId = srcMat.textureId;
+
+            if (srcMat.textureId >= 0 && static_cast<size_t>(srcMat.textureId) < model.textures.size()) {
+                std::string texPath = model.textures[srcMat.textureId];
+                buildMaterialSetForObject(obj, texPath);
+            }
+
+        }
+
+        obj.mesh.indexOffset = sr.firstIndex;
+        obj.mesh.indexCount = sr.indexCount;
+
+        // TODO: Consider removing this but ill use for now
+        obj.model.translation = {0.0f, 0.0f, 0.0f};
+        obj.model.scale = {1.0f, 1.0f, 1.0f};
+
+        result.push_back(std::move(obj));
+    }
+
+    return result;
+}
+
 
 void recurseModelNodes(ModelData* meshdata, const aiScene* aiscene, const aiNode* node, const aiMatrix4x4& parentTr, const int level) {
     // accumulate transformations while traversing hierarchy

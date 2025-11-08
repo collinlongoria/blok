@@ -271,7 +271,18 @@ PipelineProgram PipelineSystem::buildGraphics(const GraphicsPipelineDesc &d) {
 
     // color blend
     vk::PipelineColorBlendAttachmentState cba{}; cba.setColorWriteMask(vk::ColorComponentFlagBits::eR|vk::ColorComponentFlagBits::eG|vk::ColorComponentFlagBits::eB|vk::ColorComponentFlagBits::eA);
-    if (d.states.enableBlend) cba.setBlendEnable(true);
+    if (d.states.enableBlend) {
+        cba.setBlendEnable(VK_TRUE);
+
+        // Standard straight-alpha blending
+        cba.setSrcColorBlendFactor(vk::BlendFactor::eSrcAlpha);
+        cba.setDstColorBlendFactor(vk::BlendFactor::eOneMinusSrcAlpha);
+        cba.setColorBlendOp(vk::BlendOp::eAdd);
+
+        cba.setSrcAlphaBlendFactor(vk::BlendFactor::eOne);
+        cba.setDstAlphaBlendFactor(vk::BlendFactor::eOneMinusSrcAlpha);
+        cba.setAlphaBlendOp(vk::BlendOp::eAdd);
+    }
     vk::PipelineColorBlendStateCreateInfo cb{}; cb.setAttachments(cba);
 
     // viewport state

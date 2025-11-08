@@ -42,7 +42,7 @@ struct GraphicsStatesDesc {
     bool depthTest = true;
     bool depthWrite = true;
     vk::CompareOp depthCompare = vk::CompareOp::eLessOrEqual;
-    vk::CullModeFlags cullMode = vk::CullModeFlagBits::eNone;
+    vk::CullModeFlags cullMode = vk::CullModeFlagBits::eBack;
     vk::FrontFace frontFace = vk::FrontFace::eCounterClockwise;
     bool enableBlend = false;
 };

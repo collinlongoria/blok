@@ -113,6 +113,7 @@ public:
 
     Image loadTexture2D(const std::string& path, bool generateMips = true);
     MeshBuffers loadMeshOBJ(const std::string& path);
+    std::vector<Object> initObjectsFromMesh(const std::string& pipelineName, const std::string& meshPath);
     void initObjectFromMesh(Object& obj, const std::string& pipelineName, const std::string& meshPath);
 
     // Descriptor Materials

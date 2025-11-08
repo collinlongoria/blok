@@ -33,4 +33,4 @@
   states:
     depthTest: true
     depthWrite: true
-    blend: false
+    blend: true
