@@ -12,8 +12,6 @@
 #include <unordered_map>
 #include <vulkan/vulkan.hpp>
 
-#include "shader_pipe.hpp"
-
 namespace blok {
 
 struct ShaderKey {
@@ -42,6 +40,9 @@ public:
     const ShaderModuleEntry& loadModule(const std::string& glslPath, vk::ShaderStageFlagBits stage);
 
 private:
+    static std::string loadFile(const std::string& path);
+    std::vector<uint32_t> compileShader(const std::string& source, const vk::ShaderStageFlagBits stage);
+
     vk::Device m_device{};
     std::unordered_map<ShaderKey, ShaderModuleEntry, ShaderKeyHash> m_cache{};
 };

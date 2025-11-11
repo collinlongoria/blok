@@ -99,13 +99,13 @@ void App::init() {
 
         // single teapot
         Object teapot{};
-        VKR->initObjectFromMesh(teapot, "mesh_flat", "assets/models/teapot/teapot.obj");
+        VKR->initObjectFromMesh(teapot, "default", "assets/models/teapot/teapot.obj");
         teapot.model.translation = {0,0,-100};
         teapot.model.scale       = {0.1f,0.1f,0.1f};
         gScene.push_back(teapot);
 
         // sponza
-        auto sponzaObjects = VKR->initObjectsFromMesh("mesh_flat", "assets/models/sponza/sponza.obj");
+        auto sponzaObjects = VKR->initObjectsFromMesh("default", "assets/models/sponza/sponza.obj");
        for (auto& o : sponzaObjects) {
            gScene.push_back(o);
        }

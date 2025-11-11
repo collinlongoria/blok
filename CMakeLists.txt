@@ -29,12 +29,22 @@ endif()
 # Make CUDA use shared cudart to match /MD runtime
 set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
 
+# ---- Handy toggles for SPIR-V tools ----
+set(SPIRV_SKIP_EXECUTABLES ON CACHE BOOL "" FORCE)
+set(SPIRV_SKIP_TESTS ON CACHE BOOL "" FORCE)
+set(ENABLE_GLSLANG_BINARIES OFF CACHE BOOL "" FORCE)
+set(SPIRV_TOOLS_BUILD_CPP_EXAMPLES OFF CACHE BOOL "" FORCE)
+
 # ---- Subdirectories ----
 add_subdirectory(external/glfw) # builds glfw3
 add_subdirectory(external/assimp) # builds assimp
 add_subdirectory(external/yaml-cpp) # builds yaml-cpp
 add_subdirectory(external/VulkanMemoryAllocator) # builds vma
-add_subdirectory(external/shader-pipe)
+# the following 4 are related to SPIR-V and shader compilation
+add_subdirectory(external/SPIRV-Headers)
+add_subdirectory(external/SPIRV-Tools)
+add_subdirectory(external/SPIRV-Cross)
+add_subdirectory(external/glslang)
 add_subdirectory(blok)
 
 # ---- Project-wide properties ----

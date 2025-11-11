@@ -97,5 +97,16 @@ target_include_directories(blok PUBLIC
 target_compile_definitions(imgui PRIVATE IMGUI_IMPL_OPENGL_LOADER_GLAD)
 target_link_libraries(blok PRIVATE imgui)
 
-# ---- Shader Pipeline ----
-target_link_libraries(blok PRIVATE shaderpipe)
+# ---- glslang and SPIR-V tools ----
+target_include_directories(blok PRIVATE
+        ${CMAKE_SOURCE_DIR}/external/glslang
+        ${CMAKE_SOURCE_DIR}/external/SPIRV-Tools/include
+        ${CMAKE_SOURCE_DIR}/external/SPIRV-Cross
+)
+target_link_libraries(blok PRIVATE
+        glslang
+        SPIRV
+        SPIRV-Tools-opt
+        spirv-cross-core
+        spirv-cross-glsl
+)

@@ -30,7 +30,6 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_vulkan.h"
 
-#include "shader_pipe.hpp"
 #include "window.hpp"
 #include "assimp/version.h"
 
@@ -118,17 +117,10 @@ void VulkanRenderer::init() {
 
     std::cout << "Vulkan API initialized!"  << std::endl;
 
-    // Ensure hello_triangle is parsed and created from YAML
-    const std::string helloYaml = "assets/pipelines/hello_triangle.yaml";
-    auto created = m_pipelineSystem->loadPipelinesFromYAML(helloYaml);
-    if (std::find(created.begin(), created.end(), std::string("hello_triangle")) == created.end()) {
-        throw std::runtime_error("failed to create 'hello_triangle' from " + helloYaml);
-    }
-
-    const std::string meshYaml = "assets/pipelines/mesh_flat.yaml";
-    created = m_pipelineSystem->loadPipelinesFromYAML(meshYaml);
-    if (std::find(created.begin(), created.end(), std::string("mesh_flat")) == created.end()) {
-        throw std::runtime_error("failed to create 'mesh_flat' from " + helloYaml);
+    const std::string meshYaml = "assets/pipelines/default.yaml";
+    auto created = m_pipelineSystem->loadPipelinesFromYAML(meshYaml);
+    if (std::find(created.begin(), created.end(), std::string("default")) == created.end()) {
+        throw std::runtime_error("failed to create 'mesh_flat' from " + meshYaml);
     }
 
     const std::string rainbowYAML = "assets/pipelines/rainbow.yaml";
@@ -145,7 +137,7 @@ void VulkanRenderer::init() {
     };
     m_descAlloc.init(m_device, 512, std::span{ratios, std::size(ratios)});
 
-    const auto& prog = m_pipelineSystem->get("mesh_flat");
+    const auto& prog = m_pipelineSystem->get("default");
     if (!prog.setLayouts.empty()) {
         for (auto& fr : m_frames) {
             fr.frameSet = m_descAlloc.allocate(m_device, prog.setLayouts[0]);
