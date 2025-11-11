@@ -16,6 +16,7 @@
 #include "vulkan/vulkan.hpp"
 #include <vk_mem_alloc.h>
 
+#include "light.hpp"
 #include "math.hpp"
 #include "object.hpp"
 #include "pipeline_system.hpp"
@@ -30,12 +31,17 @@ class Window;
 /*
  * These are the canonical structs for per-object and per-frame data. Update as needed
  */
-struct FrameUBO {
+struct alignas(16) FrameUBO {
+    // Camera
     Matrix4 view;
     Matrix4 proj;
+
     float time = 0.0f;
 
-    glm::vec3 __pad{0,0,0}; // std140 pad
+    // Lights
+    Light lights[MAX_LIGHTS];
+    int lightCount = 0;
+    Vector3 cameraPos{0,0,0};
 };
 
 struct ObjectUBO {
@@ -115,6 +121,11 @@ public:
     MeshBuffers loadMeshOBJ(const std::string& path);
     std::vector<Object> initObjectsFromMesh(const std::string& pipelineName, const std::string& meshPath);
     void initObjectFromMesh(Object& obj, const std::string& pipelineName, const std::string& meshPath);
+
+    // Lights
+    int addLight(const Light& light);
+    void removeLight(int id);
+    [[nodiscard]] std::span<const Light> lights() const { return m_lights; }
 
     // Descriptor Materials
     void buildMaterialSetForObject(Object& obj, const std::string& texturePath);
@@ -237,6 +248,10 @@ private: // resources
 
     // Objects
     const std::vector<Object>* m_renderList = nullptr;
+
+    // Lights
+    std::vector<Light> m_lights;
+    std::vector<uint32_t> m_freeLights;
 
     // Per-frame
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;

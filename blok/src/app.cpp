@@ -112,6 +112,14 @@ void App::init() {
 
         VKR->setRenderList(&gScene);
 
+        // sunlight
+        Light sun = Directional(glm::normalize(glm::vec3(0.0f, -1.0f, 0.0f)),
+                                       glm::vec3(1.0f, 0.95f, 0.9f), // warm sunlight color
+                                       0.5f); // intensity
+
+        //Light sun = Spot(Vector3(0.0f, 0.0f, 40.0f), Vector3(0.0f, 0.0f, -1.0f), Vector3(1.0f, 0.0f, 0.0f), 15.0f, 150.0f);
+        int sunID = VKR->addLight(sun);
+
         glfwSetCursorPosCallback(gw, mouse_callback);
         glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }

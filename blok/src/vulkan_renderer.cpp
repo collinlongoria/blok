@@ -174,6 +174,11 @@ void VulkanRenderer::init() {
     s.handle = m_device.createSampler(sci);
     m_samplers["default"] = s;
 
+    // TODO: This will be moved.
+    // Reserve light list
+    m_lights.reserve(MAX_LIGHTS);
+    m_freeLights.reserve(MAX_LIGHTS);
+
     initGUI();
 }
 
@@ -248,6 +253,27 @@ void VulkanRenderer::initGUI() {
     // note: no longer need to upload the font to cmd buffer as of 2023
 }
 
+int VulkanRenderer::addLight(const Light &light) {
+    uint32_t id;
+    if (!m_freeLights.empty()) {
+        id = m_freeLights.back();
+        m_freeLights.pop_back();
+        m_lights[id] = light;
+    } else {
+        id = static_cast<uint32_t>(m_lights.size());
+        m_lights.push_back(light);
+    }
+    m_lights[id].active = true;
+    return id;
+}
+
+void VulkanRenderer::removeLight(int id) {
+    if (id < (int)m_lights.size()) {
+        m_lights[id].active = false;
+        m_freeLights.push_back(id);
+    }
+}
+
 void VulkanRenderer::beginFrame() {
     // Reset UBO allocator head for this frame
     m_frames[m_frameIndex].uboHead = 0;
@@ -276,7 +302,20 @@ void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
     float farPlane = 10000.0f;
     static float t = 0.0f;
     t += 0.00167f;
-    FrameUBO fubo{ cam.view(), cam.projection(aspect, nearPlane, farPlane), t, {} };
+
+    FrameUBO fubo{};
+    fubo.view = cam.view();
+    fubo.proj = cam.projection(aspect, nearPlane, farPlane);
+    fubo.time = t;
+    fubo.cameraPos = cam.position;
+
+    auto l = lights();
+    const int count = std::min<int>(l.size(), MAX_LIGHTS);
+    fubo.lightCount = count;
+    for (int i = 0; i < count; ++i) {
+        if (fubo.lights[i].active) fubo.lights[i] = l[i];
+    }
+
     uploadToBuffer(&fubo, sizeof(FrameUBO), fr.globalUBO, 0);
     fr.uboHead = alignUp(sizeof(FrameUBO), minAlign);
 
