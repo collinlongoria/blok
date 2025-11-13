@@ -24,6 +24,8 @@
 /* These includes are here so I can test build */
 #include <chrono>
 
+#include "imgui.h"
+
 #define VKR reinterpret_cast<VulkanRenderer*>(m_renderer.get())
 
 using namespace blok;
@@ -99,44 +101,26 @@ void App::init() {
         m_renderer = std::make_unique<VulkanRenderer>(m_window.get());
         m_renderer->init();
 
-        struct Vtx { float x,y,z,r,g,b; };
-
-        const Vtx cubeVerts[] = {
-            {-0.5f,-0.5f,-0.5f, 1,0,0},
-            { 0.5f,-0.5f,-0.5f, 0,1,0},
-            { 0.5f, 0.5f,-0.5f, 0,0,1},
-            {-0.5f, 0.5f,-0.5f, 1,1,0},
-            {-0.5f,-0.5f, 0.5f, 1,0,1},
-            { 0.5f,-0.5f, 0.5f, 0,1,1},
-            { 0.5f, 0.5f, 0.5f, 1,1,1},
-            {-0.5f, 0.5f, 0.5f, 0,0,0},
-        };
-
-        const uint32_t cubeIdx[] = {
-            // back
-            0,3,2,  2,1,0,
-            // front
-            4,5,6,  6,7,4,
-            // left
-            0,4,7,  7,3,0,
-            // right
-            1,2,6,  6,5,1,
-            // bottom
-            0,1,5,  5,4,0,
-            // top
-            3,7,6,  6,2,3
-        };
+        // resize callback
+        glfwSetFramebufferSizeCallback(m_window->getGLFWwindow(), vulkanFramebufferCallback);
 
         Object obj{};
-        obj.mesh = VKR->uploadMesh(cubeVerts, sizeof(cubeVerts),
-                                   std::size(cubeVerts), cubeIdx, std::size(cubeIdx));
-        obj.material.pipelineName = "hello_triangle";
+        // create object from mesh
+        VKR->initObjectFromMesh(obj, "mesh_flat", "assets/models/teapot/teapot.obj");
+
+        // configure transform / material as needed
+        obj.model.translation = {0.0f, 0.0f, -100.0f};
+        obj.model.scale = {0.1f, 0.1f, 0.1f};
+        obj.pipelineName = "mesh_flat";
+        VKR->buildMaterialSetForObject(obj, "assets/models/teapot/default.png");
 
         gScene.push_back(obj);
+
         VKR->setRenderList(&gScene);
 
         //glfwSetCursorPosCallback(gw, mouse_callback);
-        glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+        //glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+
     }
         break;
     }
@@ -179,6 +163,7 @@ void App::update() {
 
         case GraphicsApi::Vulkan:
             m_renderer->beginFrame();
+            ImGui::ShowDemoWindow();
             m_renderer->drawFrame(g_camera, g_scene);
             m_renderer->endFrame();
             break;

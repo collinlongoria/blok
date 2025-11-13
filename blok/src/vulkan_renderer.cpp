@@ -17,10 +17,35 @@
 #include "image_states.hpp"
 #include "GLFW/glfw3.h"
 
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
+#define STB_IMAGE_IMPLEMENTATION
+#include <filesystem>
+#include <fstream>
+#include <stb_image.h>
+
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
+
 #include "shader_pipe.hpp"
 #include "window.hpp"
+#include "assimp/version.h"
+
+bool resizeNeeded = false;
+void vulkanFramebufferCallback(GLFWwindow* window, int width, int height) {
+    resizeNeeded = true;
+}
 
 namespace blok {
+
+void recurseModelNodes(ModelData* meshdata,
+                       const  aiScene* aiscene,
+                       const  aiNode* node,
+                       const aiMatrix4x4& parentTr,
+                       const int level=0);
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityFlagBitsEXT messageSeverity,
     VkDebugUtilsMessageTypeFlagsEXT messageType, const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
@@ -100,6 +125,12 @@ void VulkanRenderer::init() {
         throw std::runtime_error("failed to create 'hello_triangle' from " + helloYaml);
     }
 
+    const std::string meshYaml = "assets/pipelines/mesh_flat.yaml";
+    created = m_pipelineSystem->loadPipelinesFromYAML(meshYaml);
+    if (std::find(created.begin(), created.end(), std::string("mesh_flat")) == created.end()) {
+        throw std::runtime_error("failed to create 'mesh_flat' from " + helloYaml);
+    }
+
     const std::string rainbowYAML = "assets/pipelines/rainbow.yaml";
     created = m_pipelineSystem->loadPipelinesFromYAML(rainbowYAML);
     if (std::find(created.begin(), created.end(), std::string("rainbow")) == created.end()) {
@@ -114,7 +145,7 @@ void VulkanRenderer::init() {
     };
     m_descAlloc.init(m_device, 512, std::span{ratios, std::size(ratios)});
 
-    const auto& prog = m_pipelineSystem->get("hello_triangle");
+    const auto& prog = m_pipelineSystem->get("mesh_flat");
     if (!prog.setLayouts.empty()) {
         for (auto& fr : m_frames) {
             fr.frameSet = m_descAlloc.allocate(m_device, prog.setLayouts[0]);
@@ -138,15 +169,113 @@ void VulkanRenderer::init() {
             w.clear();
         }
     }
+
+    vk::SamplerCreateInfo sci{};
+    sci.magFilter = vk::Filter::eLinear;
+    sci.minFilter = vk::Filter::eLinear;
+    sci.mipmapMode = vk::SamplerMipmapMode::eLinear;
+    sci.addressModeU = sci.addressModeV = sci.addressModeW =
+        vk::SamplerAddressMode::eRepeat;
+    sci.maxLod = VK_LOD_CLAMP_NONE;
+
+    Sampler s{};
+    s.handle = m_device.createSampler(sci);
+    m_samplers["default"] = s;
+
+    initGUI();
+}
+
+void VulkanRenderer::initGUI() {
+    // core stuff
+    IMGUI_CHECKVERSION();
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    ImGui::StyleColorsDark();
+
+    // hook window
+    ImGui_ImplGlfw_InitForVulkan(m_window->getGLFWwindow(), true);
+
+    vk::DescriptorPoolSize pool_sizes[] = {
+        { vk::DescriptorType::eSampler,                1000 },
+        { vk::DescriptorType::eCombinedImageSampler,   1000 },
+        { vk::DescriptorType::eSampledImage,           1000 },
+        { vk::DescriptorType::eStorageImage,           1000 },
+        { vk::DescriptorType::eUniformTexelBuffer,     1000 },
+        { vk::DescriptorType::eStorageTexelBuffer,     1000 },
+        { vk::DescriptorType::eUniformBuffer,          1000 },
+        { vk::DescriptorType::eStorageBuffer,          1000 },
+        { vk::DescriptorType::eUniformBufferDynamic,   1000 },
+        { vk::DescriptorType::eStorageBufferDynamic,   1000 },
+        { vk::DescriptorType::eInputAttachment,        1000 }
+    };
+
+    vk::DescriptorPoolCreateInfo pool_info{};
+    pool_info.flags = vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet;
+    pool_info.maxSets = 1000 * static_cast<uint32_t>(std::size(pool_sizes));
+    pool_info.poolSizeCount = static_cast<uint32_t>(std::size(pool_sizes));
+    pool_info.pPoolSizes = pool_sizes;
+
+    m_imguiDescriptorPool = m_device.createDescriptorPool(pool_info);
+
+    // init imgui
+    ImGui_ImplVulkan_InitInfo init_info{};
+    init_info.ApiVersion = VK_API_VERSION_1_4;
+    init_info.Instance       = static_cast<VkInstance>(m_instance);
+    init_info.PhysicalDevice = static_cast<VkPhysicalDevice>(m_physicalDevice);
+    init_info.Device         = static_cast<VkDevice>(m_device);
+    init_info.QueueFamily    = *m_qfi.graphics;
+    init_info.Queue          = static_cast<VkQueue>(m_graphicsQueue);
+    init_info.DescriptorPool = static_cast<VkDescriptorPool>(m_imguiDescriptorPool);
+    init_info.MinImageCount  = static_cast<uint32_t>(m_swapImages.size());
+    init_info.ImageCount     = static_cast<uint32_t>(m_swapImages.size());
+    init_info.PipelineInfoMain.MSAASamples    = VK_SAMPLE_COUNT_1_BIT;
+    init_info.Allocator      = nullptr;
+    init_info.CheckVkResultFn = nullptr;
+    init_info.UseDynamicRendering = VK_TRUE;
+
+    static VkFormat colorFormat;
+    colorFormat = static_cast<VkFormat>(m_colorFormat);
+
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo = {};
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO_KHR;
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo.colorAttachmentCount = 1;
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo.pColorAttachmentFormats = &colorFormat;
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo.depthAttachmentFormat   = VK_FORMAT_UNDEFINED;
+    init_info.PipelineInfoMain.PipelineRenderingCreateInfo.stencilAttachmentFormat = VK_FORMAT_UNDEFINED;
+
+    init_info.CheckVkResultFn = [](VkResult err) {
+        if (err != VK_SUCCESS) {
+            throw std::runtime_error("ImGui Vulkan backend error");
+        }
+    };
+
+    ImGui_ImplVulkan_Init(&init_info);
+
+    // note: no longer need to upload the font to cmd buffer as of 2023
 }
 
 void VulkanRenderer::beginFrame() {
     // Reset UBO allocator head for this frame
     m_frames[m_frameIndex].uboHead = 0;
+
+    // imgui
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
 }
 
 
 void VulkanRenderer::drawFrame(Camera &cam, const Scene &scene) {
+    // resize if needed
+    if (resizeNeeded) {
+        m_swapchainDirty = true;
+        resizeNeeded = false;
+        ImGui::EndFrame();
+        return;
+    }
+
     auto& fr = m_frames[m_frameIndex];
 
     const float aspect = static_cast<float>(m_swapExtent.width) / static_cast<float>(m_swapExtent.height);
@@ -170,7 +299,11 @@ void VulkanRenderer::drawFrame(Camera &cam, const Scene &scene) {
     uint32_t imageIndex = 0;
     const auto acq = m_device.acquireNextImageKHR(m_swapchain, UINT64_MAX,
                                                   fr.imageAvailable, nullptr, &imageIndex);
-    if (acq == vk::Result::eErrorOutOfDateKHR) { m_swapchainDirty = true; endFrame(); return; }
+    if (acq == vk::Result::eErrorOutOfDateKHR) {
+        m_swapchainDirty = true;
+        ImGui::EndFrame();
+        return;
+    }
     if (acq != vk::Result::eSuccess && acq != vk::Result::eSuboptimalKHR)
         throw std::runtime_error("acquireNextImageKHR failed");
 
@@ -200,51 +333,53 @@ void VulkanRenderer::drawFrame(Camera &cam, const Scene &scene) {
     it.ensure(m_depth, blok::Role::DepthAttachment);
 
        // Compute
-    const auto& cprog = m_pipelineSystem->get("rainbow");
+    if (false) {
+        const auto& cprog = m_pipelineSystem->get("rainbow");
 
-    fr.cmd.bindPipeline(vk::PipelineBindPoint::eCompute, cprog.pipeline.get());
+        fr.cmd.bindPipeline(vk::PipelineBindPoint::eCompute, cprog.pipeline.get());
 
-    fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cprog.layout.get(),
-                              /*firstSet*/0, /*count*/1, &fr.computeFrameSet, 0, nullptr);
+        fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cprog.layout.get(),
+                                  /*firstSet*/0, /*count*/1, &fr.computeFrameSet, 0, nullptr);
 
 
-    if (m_renderList) {
-        for (const auto& obj : *m_renderList) {
-            if (!obj.mesh.vertex || obj.mesh.vertexCount == 0) continue;
+        if (m_renderList) {
+            for (const auto& obj : *m_renderList) {
+                if (!obj.mesh.vertex || obj.mesh.vertexCount == 0) continue;
 
-            // Allocate per-object set 1 for the vertex storage buffer
-            vk::DescriptorSet objSet = m_descAlloc.allocate(m_device, cprog.setLayouts[1]);
-            DescriptorWriter w;
-            const vk::DeviceSize bytes = obj.mesh.vertexCount * 24; // 6 floats * 4 bytes
-            w.write_buffer(/*binding*/0, static_cast<vk::Buffer>(obj.mesh.vertex),
-                           bytes, /*offset*/0, vk::DescriptorType::eStorageBuffer);
-            w.updateSet(m_device, objSet);
-            w.clear();
+                // Allocate per-object set 1 for the vertex storage buffer
+                vk::DescriptorSet objSet = m_descAlloc.allocate(m_device, cprog.setLayouts[1]);
+                DescriptorWriter w;
+                const vk::DeviceSize bytes = obj.mesh.vertexCount * 24; // 6 floats * 4 bytes
+                w.write_buffer(/*binding*/0, static_cast<vk::Buffer>(obj.mesh.vertex),
+                               bytes, /*offset*/0, vk::DescriptorType::eStorageBuffer);
+                w.updateSet(m_device, objSet);
+                w.clear();
 
-            // Bind set 1
-            fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cprog.layout.get(),
-                                      /*firstSet*/1, /*count*/1, &objSet, 0, nullptr);
+                // Bind set 1
+                fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eCompute, cprog.layout.get(),
+                                          /*firstSet*/1, /*count*/1, &objSet, 0, nullptr);
 
-            // Push vertexCount
-            uint32_t vcount = obj.mesh.vertexCount;
-            fr.cmd.pushConstants<uint32_t>(cprog.layout.get(), vk::ShaderStageFlagBits::eCompute, 0, vcount);
+                // Push vertexCount
+                uint32_t vcount = obj.mesh.vertexCount;
+                fr.cmd.pushConstants<uint32_t>(cprog.layout.get(), vk::ShaderStageFlagBits::eCompute, 0, vcount);
 
-            // Dispatch: groups of 64
-            uint32_t groups = (vcount + 63) / 64;
-            fr.cmd.dispatch(groups, 1, 1);
+                // Dispatch: groups of 64
+                uint32_t groups = (vcount + 63) / 64;
+                fr.cmd.dispatch(groups, 1, 1);
 
-            // Barrier: make compute writes visible to vertex input (graphics)
-            vk::BufferMemoryBarrier2 b{};
-            b.srcStageMask  = vk::PipelineStageFlagBits2::eComputeShader;
-            b.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
-            b.dstStageMask  = vk::PipelineStageFlagBits2::eVertexInput;
-            b.dstAccessMask = vk::AccessFlagBits2::eVertexAttributeRead;
-            b.buffer        = static_cast<vk::Buffer>(obj.mesh.vertex);
-            b.offset        = 0;
-            b.size          = VK_WHOLE_SIZE;
+                // Barrier: make compute writes visible to vertex input (graphics)
+                vk::BufferMemoryBarrier2 b{};
+                b.srcStageMask  = vk::PipelineStageFlagBits2::eComputeShader;
+                b.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
+                b.dstStageMask  = vk::PipelineStageFlagBits2::eVertexInput;
+                b.dstAccessMask = vk::AccessFlagBits2::eVertexAttributeRead;
+                b.buffer        = static_cast<vk::Buffer>(obj.mesh.vertex);
+                b.offset        = 0;
+                b.size          = VK_WHOLE_SIZE;
 
-            vk::DependencyInfo dep{}; dep.setBufferMemoryBarriers(b);
-            fr.cmd.pipelineBarrier2(dep);
+                vk::DependencyInfo dep{}; dep.setBufferMemoryBarriers(b);
+                fr.cmd.pipelineBarrier2(dep);
+            }
         }
     }
     // End Compute
@@ -262,7 +397,7 @@ void VulkanRenderer::drawFrame(Camera &cam, const Scene &scene) {
         vk::Pipeline lastPipe{};
         for (const auto& obj : *m_renderList) {
             // bind pipeline by material name
-            const auto& prog = m_pipelineSystem->get(obj.material.pipelineName);
+            const auto& prog = m_pipelineSystem->get(obj.pipelineName);
             if (prog.pipeline.get() != lastPipe) {
                 fr.cmd.bindPipeline(vk::PipelineBindPoint::eGraphics, prog.pipeline.get());
                 lastPipe = prog.pipeline.get();
@@ -295,6 +430,19 @@ void VulkanRenderer::drawFrame(Camera &cam, const Scene &scene) {
                 fr.cmd.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, prog.layout.get(), 1, 1, &objSet, 0, nullptr);
             }
 
+            // bind material set (set = 2) if present
+            if (prog.setLayouts.size() >= 3 && obj.material.materialSet) {
+                fr.cmd.bindDescriptorSets(
+                    vk::PipelineBindPoint::eGraphics,
+                    prog.layout.get(),
+                    2,
+                    1,
+                    &obj.material.materialSet,
+                    0,
+                    nullptr
+                );
+            }
+
             // bind vertex/index and draw
             vk::DeviceSize off = 0;
             if (obj.mesh.vertex) {
@@ -310,6 +458,31 @@ void VulkanRenderer::drawFrame(Camera &cam, const Scene &scene) {
     }
 
     endRendering(fr.cmd);
+
+    // imgui
+    {
+        vk::RenderingAttachmentInfo uiColor{};
+        uiColor.imageView   = sw.view;
+        uiColor.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+        uiColor.loadOp      = vk::AttachmentLoadOp::eLoad;   // keep scene
+        uiColor.storeOp     = vk::AttachmentStoreOp::eStore;
+        // clearValue ignored with eLoad
+
+        vk::RenderingInfo uiInfo{};
+        uiInfo.renderArea        = vk::Rect2D({0, 0}, m_swapExtent);
+        uiInfo.layerCount        = 1;
+        uiInfo.colorAttachmentCount = 1;
+        uiInfo.pColorAttachments = &uiColor;
+        uiInfo.pDepthAttachment  = nullptr;
+        uiInfo.pStencilAttachment= nullptr;
+
+        fr.cmd.beginRendering(uiInfo);
+
+        ImGui::Render();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), static_cast<VkCommandBuffer>(fr.cmd), VK_NULL_HANDLE);
+
+        fr.cmd.endRendering();
+    }
 
     it.ensure(sw, blok::Role::Present);
     m_swapImageLayouts[imageIndex] = sw.currentLayout;
@@ -338,8 +511,10 @@ void VulkanRenderer::drawFrame(Camera &cam, const Scene &scene) {
     pi.pImageIndices      = &imageIndex;
 
     const auto pres = m_presentQueue.presentKHR(pi);
-    if (pres == vk::Result::eErrorOutOfDateKHR || pres == vk::Result::eSuboptimalKHR) m_swapchainDirty = true;
-    else if (pres != vk::Result::eSuccess) throw std::runtime_error("presentKHR failed");
+    if (pres == vk::Result::eErrorOutOfDateKHR || pres == vk::Result::eSuboptimalKHR)
+        m_swapchainDirty = true;
+    else if (pres != vk::Result::eSuccess)
+        throw std::runtime_error("presentKHR failed");
 }
 
 void VulkanRenderer::endFrame() {
@@ -357,20 +532,66 @@ void VulkanRenderer::shutdown() {
 
     m_device.waitIdle();
 
+    // imgui
+    ImGui_ImplVulkan_Shutdown();
+    ImGui_ImplGlfw_Shutdown();
+    ImGui::DestroyContext();
+
+    if (m_imguiDescriptorPool) {
+        m_device.destroyDescriptorPool(m_imguiDescriptorPool);
+        m_imguiDescriptorPool = nullptr;
+    }
+
     // per frame resources
     for (auto& fr : m_frames) {
-        if (fr.globalUBO.handle) { vmaDestroyBuffer(m_allocator, fr.globalUBO.handle, fr.globalUBO.alloc); }
+        if (fr.globalUBO.handle) { vmaDestroyBuffer(m_allocator, fr.globalUBO.handle, fr.globalUBO.alloc); fr.globalUBO.handle = nullptr; fr.globalUBO.alloc = nullptr; }
         if (fr.cmdPool) { m_device.destroyCommandPool(fr.cmdPool); }
         if (fr.imageAvailable) { m_device.destroySemaphore(fr.imageAvailable); }
         if (fr.renderFinished) { m_device.destroySemaphore(fr.renderFinished); }
         if (fr.inFlight) { m_device.destroyFence(fr.inFlight); }
     }
 
+    // owned images
+    for (auto& [_,i] : m_images) {
+        if (i.view) {
+            m_device.destroyImageView(i.view);
+            i.view = nullptr;
+        }
+        if (i.handle) {
+            vmaDestroyImage(m_allocator, i.handle, i.alloc);
+            i.handle = nullptr;
+            i.alloc = nullptr;
+        }
+    }
+    m_images.clear();
+
+    // named buffers
+    for (auto& [_, b] : m_buffers) {
+        if (b.handle) {
+            vmaDestroyBuffer(m_allocator, b.handle, b.alloc);
+            b.handle = nullptr;
+            b.alloc = nullptr;
+        }
+    }
+    m_buffers.clear();
+
+    // meshes (not needed)
+    m_meshes.clear();
+
     // owned buffers
     for (auto& b : m_ownedBuffers) {
         if (b.handle) vmaDestroyBuffer(m_allocator, b.handle, b.alloc);
     }
     m_ownedBuffers.clear();
+
+    // samplers
+    for (auto& [_, s] : m_samplers) {
+        if (s.handle) {
+            m_device.destroySampler(s.handle);
+            s.handle = nullptr;
+        }
+    }
+    m_samplers.clear();
 
     if (m_uploadFence) { m_device.destroyFence(m_uploadFence); }
     if (m_uploadCmd) { m_device.freeCommandBuffers(m_uploadPool, 1, &m_uploadCmd); }
@@ -389,6 +610,291 @@ void VulkanRenderer::shutdown() {
     if (m_device) m_device.destroy();
     if (m_surface) m_instance.destroySurfaceKHR(m_surface);
     if (m_instance) m_instance.destroy();
+}
+
+void VulkanRenderer::buildMaterialSetForObject(Object& obj,
+                                               const std::string& texturePath)
+{
+    const auto& prog = m_pipelineSystem->get(obj.pipelineName);
+
+    // This pipeline must define set 2 in its YAML layout
+    if (prog.setLayouts.size() < 3) {
+        throw std::runtime_error("Pipeline '" + obj.pipelineName +
+                                 "' has no set 2 layout for materials");
+    }
+
+    // Load or reuse texture
+    Image img;
+    if (auto it = m_images.find(texturePath); it != m_images.end()) {
+        img = it->second;
+    } else {
+        img = loadTexture2D(texturePath, true);
+    }
+
+    // Get sampler (created once, reused)
+    vk::Sampler sampler = m_samplers.at("default").handle;
+
+    // Allocate set 2 using the layout that came from YAML
+    vk::DescriptorSet matSet = m_descAlloc.allocate(m_device, prog.setLayouts[2]);
+
+    // For this pipeline, set 2 / binding 0 is a combined_image_sampler
+    DescriptorWriter w;
+    w.write_image(0, img.view, sampler, vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
+    w.updateSet(m_device, matSet);
+    w.clear();
+
+    obj.material.materialSet = matSet;
+    // TODO: Optionally track that this material uses texture index X
+    // obj.material.textureId = something;
+}
+
+
+Image VulkanRenderer::loadTexture2D(const std::string &path, bool generateMips) {
+    int w, h, ch;
+    stbi_uc* pixels = stbi_load(path.c_str(), &w, &h, &ch, STBI_rgb_alpha);
+    if (!pixels) {
+        throw std::runtime_error("failed to load texture " + path);
+    }
+
+    vk::DeviceSize size = static_cast<vk::DeviceSize>(w) * h * 4;
+
+    // staging buffer
+    Buffer staging = createBuffer(size, vk::BufferUsageFlagBits::eTransferSrc, VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+        VMA_MEMORY_USAGE_AUTO_PREFER_HOST, true);
+    std::memcpy(staging.mapped, pixels, static_cast<size_t>(size));
+    stbi_image_free(pixels);
+
+    // mips
+    uint32_t mipLevels = 1;
+    if (generateMips) {
+        mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(w, h)))) + 1;
+    }
+
+    Image img = createImage(
+        static_cast<uint32_t>(w),
+        static_cast<uint32_t>(h),
+        vk::Format::eR8G8B8A8Unorm,
+        vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eSampled,
+        vk::ImageTiling::eOptimal,
+        vk::SampleCountFlagBits::e1,
+        mipLevels,
+        1,
+        VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
+    );
+
+    // record upload on dedicated transient cmd buffer
+    auto r = m_device.resetFences(1, &m_uploadFence);
+    m_uploadCmd.reset({});
+
+    vk::CommandBufferBeginInfo bi{};
+    bi.flags = vk::CommandBufferUsageFlagBits::eOneTimeSubmit;
+    m_uploadCmd.begin(bi);
+
+    // layout: undefined -> transfer dst
+    ImageTransitions it{ m_uploadCmd };
+    it.ensure(img, Role::TransferDst);
+
+    // copy level 0
+    copyBufferToImage(m_uploadCmd, staging, img, w, h);
+
+    // generate mipmaps and transition to shader read
+    if (generateMips && mipLevels > 1) {
+        generateMipmaps(m_uploadCmd, img);
+    } else {
+        // no mips: just transition full image to shader read
+        vk::ImageMemoryBarrier2 b{};
+        b.oldLayout     = vk::ImageLayout::eTransferDstOptimal;
+        b.newLayout     = vk::ImageLayout::eShaderReadOnlyOptimal;
+        b.srcStageMask  = vk::PipelineStageFlagBits2::eTransfer;
+        b.dstStageMask  = vk::PipelineStageFlagBits2::eFragmentShader;
+        b.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+        b.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+        b.image         = img.handle;
+        b.subresourceRange = { aspectFromFormat(img.format), 0, img.mipLevels, 0, img.layers };
+
+        vk::DependencyInfo dep{}; dep.setImageMemoryBarriers(b);
+        m_uploadCmd.pipelineBarrier2(dep);
+        img.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    }
+
+    m_uploadCmd.end();
+
+    vk::SubmitInfo si{};
+    si.commandBufferCount = 1;
+    si.pCommandBuffers    = &m_uploadCmd;
+    auto result = m_graphicsQueue.submit(1, &si, m_uploadFence);
+    result = m_device.waitForFences(1, &m_uploadFence, VK_TRUE, UINT64_MAX);
+
+    // keep staging buffer around or destroy here
+    vmaDestroyBuffer(m_allocator, staging.handle, staging.alloc);
+
+    m_images[path] = img;
+    return img;
+}
+
+MeshBuffers VulkanRenderer::loadMeshOBJ(const std::string &path) {
+    // Cache lookup: reuse GPU buffers if we’ve already loaded this OBJ
+    auto it = m_meshes.find(path);
+    if (it != m_meshes.end()) {
+        return it->second;
+    }
+
+    // CPU-side mesh using Assimp
+    ModelData model;
+    if (!model.readAssimpFile(path, Matrix4(1.0f))) {
+        throw std::runtime_error("Failed to load OBJ: " + path);
+    }
+
+    if (model.vertices.empty()) {
+        throw std::runtime_error("OBJ has no vertices: " + path);
+    }
+
+    const vk::DeviceSize vbytes =
+        static_cast<vk::DeviceSize>(model.vertices.size()) * sizeof(Vertex);
+    const uint32_t vcount = static_cast<uint32_t>(model.vertices.size());
+
+    const uint32_t icount = static_cast<uint32_t>(model.indices.size());
+    const uint32_t* idxPtr = icount ? model.indices.data() : nullptr;
+
+    MeshBuffers mesh = uploadMesh(
+        model.vertices.data(), vbytes, vcount,
+        idxPtr, icount
+    );
+
+    // store in cache
+    m_meshes.emplace(path, mesh);
+    std::cout << "Mesh Loaded!" << std::endl;
+    return mesh;
+}
+
+void VulkanRenderer::initObjectFromMesh(Object &obj, const std::string &pipelineName, const std::string &meshPath) {
+    MeshBuffers mesh = loadMeshOBJ(meshPath);
+
+    obj.pipelineName = pipelineName;
+    obj.mesh         = mesh;
+}
+
+void recurseModelNodes(ModelData* meshdata, const aiScene* aiscene, const aiNode* node, const aiMatrix4x4& parentTr, const int level) {
+    // accumulate transformations while traversing hierarchy
+    aiMatrix4x4 childTr = parentTr * node->mTransformation;
+    aiMatrix3x3 normalTr = aiMatrix3x3(childTr); // TODO: full inverse transpose
+
+    // loop through nodes meshes
+    for (unsigned int m = 0; m < node->mNumMeshes; ++m) {
+        aiMesh* aimesh = aiscene->mMeshes[node->mMeshes[m]];
+
+        // loop through all vertices and record the v/n/uv/tan data with the nodes model applied
+        unsigned int faceOffset = meshdata->vertices.size();
+        for (unsigned int t = 0; t < aimesh->mNumVertices; ++t) {
+            aiVector3D aipnt = childTr * aimesh->mVertices[t];
+            aiVector3D ainrm = aimesh->HasNormals() ? normalTr * aimesh->mNormals[t] : aiVector3D(0,0,1);
+            aiVector3D aitex = aimesh->HasTextureCoords(0) ? aimesh->mTextureCoords[0][t] : aiVector3D(0,0,0);
+            aiVector3D aitan = aimesh->HasTangentsAndBitangents() ? normalTr * aimesh->mTangents[t] : aiVector3D(1,0,0);
+
+            meshdata->vertices.push_back({{aipnt.x, aipnt.y, aipnt.z},
+            {ainrm.x, ainrm.y, ainrm.z},
+            {aitex.x, aitex.y}});
+        }
+
+        // loop through all faces recording indices
+        for (unsigned int t=0; t < aimesh->mNumFaces; ++t) {
+            aiFace* aiface = &aimesh->mFaces[t];
+            for (int i = 2; i < aiface->mNumIndices; ++i) {
+                meshdata->matIdx.push_back(aimesh->mMaterialIndex);
+                meshdata->indices.push_back(aiface->mIndices[0] + faceOffset);
+                meshdata->indices.push_back(aiface->mIndices[i-1] + faceOffset);
+                meshdata->indices.push_back(aiface->mIndices[i] + faceOffset);
+            }
+        }
+    }
+
+    // recurse into nodes children
+    for (unsigned int i = 0; i < node->mNumChildren; ++i) {
+        recurseModelNodes(meshdata, aiscene, node->mChildren[i], childTr, level+1);
+    }
+}
+
+bool ModelData::readAssimpFile(const std::string &path, const Matrix4 &M) {
+    std::cout << "Reading " << path << std::endl;
+
+    aiMatrix4x4 modelTr(M[0][0], M[1][0], M[2][0], M[3][0],
+        M[0][1], M[1][1], M[2][1], M[3][1],
+        M[0][2], M[1][2], M[2][2], M[3][2],
+        M[0][3], M[1][3], M[2][3], M[3][3]);
+
+    // check if file exists
+    std::ifstream find_it(path.c_str());
+    if (find_it.fail()) {
+        std::cerr << "File not found: " << path << std::endl;
+        return false;
+    }
+
+    // read file with assimp
+    std::cout << "Assimp " << aiGetVersionMajor() << "." << aiGetVersionMinor() << "." << aiGetVersionPatch() << " Reading " << path << std::endl;
+    Assimp::Importer imp;
+    const aiScene* aiscene = imp.ReadFile(path.c_str(), aiProcess_Triangulate | aiProcess_GenSmoothNormals);
+
+    if (!aiscene) {
+        throw std::runtime_error("Error reading file: " + path);
+    }
+    if (!aiscene->mRootNode) {
+        throw std::runtime_error("Scene has no root node: " + path);
+    }
+
+    std::cout << "Assimp mNumMeshes: " << aiscene->mNumMeshes << "\n";
+    std::cout << "Assimp mNumMaterials: " << aiscene->mNumMaterials << "\n";
+    std::cout << "Assimp mNumTextures: " << aiscene->mNumTextures << "\n";
+
+    for (int i = 0; i < aiscene->mNumMaterials; ++i) {
+        aiMaterial* mtl = aiscene->mMaterials[i];
+        aiString name;
+        mtl->Get(AI_MATKEY_NAME, name);
+        aiColor3D emit(0.0f, 0.0f, 0.0f);
+        aiColor3D diff(0.0f, 0.0f, 0.0f), spec(0.0f, 0.0f, 0.0f);
+        float alpha = 20.0f;
+        bool he = mtl->Get(AI_MATKEY_COLOR_EMISSIVE, emit);
+        bool hd = mtl->Get(AI_MATKEY_COLOR_DIFFUSE, diff);
+        bool hs = mtl->Get(AI_MATKEY_COLOR_SPECULAR, spec);
+        bool ha = mtl->Get(AI_MATKEY_SHININESS, &alpha, NULL);
+        aiColor3D trans;
+        bool ht = mtl->Get(AI_MATKEY_COLOR_TRANSPARENT, trans);
+
+        Material nMat;
+        if (!emit.IsBlack()) { // i.e, an emitter
+            nMat.diffuse = {1,1,1};
+            nMat.specular = {0,0,0};
+            nMat.shininess = 0.0f;
+            nMat.emission = {emit.r, emit.g, emit.b};
+            nMat.textureId = -1;
+        }
+        else {
+            Vector3 Kd(0.5f, 0.5f, 0.5f);
+            Vector3 Ks(0.03f, 0.03f, 0.03f);
+            if (AI_SUCCESS == hd) Kd = Vector3(diff.r, diff.g, diff.b);
+            if (AI_SUCCESS == hs) Ks = Vector3(spec.r, spec.g, spec.b);
+            nMat.diffuse = {Kd[0],Kd[1],Kd[2]};
+            nMat.specular = {Ks[0],Ks[1],Ks[2]};
+            nMat.shininess = alpha; // sqrtf(2.0f/2.0f+alpha));
+            nMat.emission = {0,0,0};
+            nMat.textureId = -1;
+        }
+
+        aiString texPath;
+        if (AI_SUCCESS == mtl->GetTexture(aiTextureType_DIFFUSE, 0, &texPath)) {
+            std::filesystem::path fullPath = path;
+            fullPath.replace_filename(texPath.C_Str());
+            std::cout << "Texture: " << fullPath << std::endl;
+            nMat.textureId = textures.size();
+            auto xxx = fullPath.u8string();
+            textures.emplace_back(reinterpret_cast<const char*>(xxx.c_str()), xxx.size());
+        }
+
+        materials.push_back(nMat);
+    }
+
+    recurseModelNodes(this, aiscene, aiscene->mRootNode, modelTr);
+
+    return true;
 }
 
 void VulkanRenderer::createInstance() {
@@ -568,12 +1074,14 @@ void VulkanRenderer::createSwapChain() {
     GLFWwindow* win = m_window ? m_window->getGLFWwindow() : nullptr;
     glfwGetFramebufferSize(win, reinterpret_cast<int*>(&fbw), reinterpret_cast<int*>(&fbh));
 
-    if (caps.currentExtent.width == 0 != std::numeric_limits<uint32_t>::max()) {
+    if (caps.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
         m_swapExtent = caps.currentExtent;
     }
     else {
-        m_swapExtent = vk::Extent2D{ std::clamp(fbw, caps.minImageExtent.width, caps.maxImageExtent.width),
-            std::clamp(fbh, caps.minImageExtent.height, caps.maxImageExtent.height) };
+        m_swapExtent = vk::Extent2D{
+            std::clamp(fbw, caps.minImageExtent.width,  caps.maxImageExtent.width),
+            std::clamp(fbh, caps.minImageExtent.height, caps.maxImageExtent.height)
+        };
     }
 
     uint32_t imageCount = std::min(caps.maxImageCount ? caps.maxImageCount : UINT32_MAX,
@@ -785,18 +1293,20 @@ Image VulkanRenderer::createImage(uint32_t w, uint32_t h, vk::Format fmt, vk::Im
     return out;
 }
 
-void VulkanRenderer::copyBufferToImage(Buffer &staging, Image &img, uint32_t w, uint32_t h, uint32_t baseLayer, uint32_t layerCount) {
-    auto& fr = m_frames[m_frameIndex];
+void VulkanRenderer::copyBufferToImage(vk::CommandBuffer cmd, Buffer &staging, Image &img, uint32_t w, uint32_t h, uint32_t baseLayer, uint32_t layerCount) {
 
     vk::BufferImageCopy region{};
     region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
     region.imageSubresource.aspectMask = aspectFromFormat(img.format);
     region.imageSubresource.mipLevel = 0;
     region.imageSubresource.baseArrayLayer = baseLayer;
     region.imageSubresource.layerCount = layerCount;
+    region.imageOffset = vk::Offset3D{ 0, 0, 0 };
     region.imageExtent = vk::Extent3D{ w, h, 1 };
 
-    fr.cmd.copyBufferToImage(staging.handle, img.handle, vk::ImageLayout::eTransferDstOptimal, 1, &region);
+    cmd.copyBufferToImage(staging.handle, img.handle, vk::ImageLayout::eTransferDstOptimal, 1, &region);
 }
 
 vk::Buffer VulkanRenderer::uploadVertexBuffer(const void *data, vk::DeviceSize sizeBytes, uint32_t vertexCount) {
@@ -833,61 +1343,86 @@ void VulkanRenderer::setRenderList(const std::vector<Object> *list) {
     m_renderList = list;
 }
 
-void VulkanRenderer::generateMipmaps(Image &img) {
+void VulkanRenderer::generateMipmaps(vk::CommandBuffer cmd, Image &img) {
     if (img.mipLevels <= 1) return;
-    auto& fr = m_frames[m_frameIndex];
+
+    int32_t mipWidth  = static_cast<int32_t>(img.width);
+    int32_t mipHeight = static_cast<int32_t>(img.height);
+
+    vk::ImageMemoryBarrier2 barrier{};
+    barrier.image = img.handle;
+    barrier.subresourceRange.aspectMask = aspectFromFormat(img.format);
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = img.layers;
+    barrier.subresourceRange.levelCount = 1;
+
+    vk::DependencyInfo dep{};
 
     for (uint32_t i = 1; i < img.mipLevels; ++i) {
-        // transition src mip i-1 to transfer src
-        {
-            vk::ImageMemoryBarrier2 b{};
-            b.oldLayout = (i==1) ? vk::ImageLayout::eTransferDstOptimal : vk::ImageLayout::eTransferSrcOptimal;
-            b.newLayout = vk::ImageLayout::eTransferSrcOptimal;
-            b.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
-            b.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-            b.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
-            b.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
-            b.image = img.handle;
-            b.subresourceRange = { aspectFromFormat(img.format), i-1, 1, 0, img.layers };
-            vk::DependencyInfo dep{}; dep.setImageMemoryBarriers(b);
-            fr.cmd.pipelineBarrier2(dep);
-        }
-        // transition dst mip i to transfer dst
-        {
-            vk::ImageMemoryBarrier2 b{};
-            b.oldLayout = vk::ImageLayout::eUndefined;
-            b.newLayout = vk::ImageLayout::eTransferDstOptimal;
-            b.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
-            b.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-            b.srcAccessMask = {};
-            b.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
-            b.image = img.handle;
-            b.subresourceRange = { aspectFromFormat(img.format), i, 1, 0, img.layers };
-            vk::DependencyInfo dep{}; dep.setImageMemoryBarriers(b);
-            fr.cmd.pipelineBarrier2(dep);
-        }
+        // Transition src mip (i-1) from TRANSFER_DST -> TRANSFER_SRC
+        barrier.subresourceRange.baseMipLevel = i - 1;
+        barrier.oldLayout     = vk::ImageLayout::eTransferDstOptimal;
+        barrier.newLayout     = vk::ImageLayout::eTransferSrcOptimal;
+        barrier.srcStageMask  = vk::PipelineStageFlagBits2::eTransfer;
+        barrier.dstStageMask  = vk::PipelineStageFlagBits2::eTransfer;
+        barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+        barrier.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
 
-        // blit
+        dep.setImageMemoryBarriers(barrier);
+        cmd.pipelineBarrier2(dep);
+
+        // Blit i-1 -> i
         vk::ImageBlit2 blit{};
-        blit.srcSubresource = { aspectFromFormat(img.format), i-1, 0, img.layers };
-        blit.srcOffsets[0] = vk::Offset3D{ 0, 0, 0 };
-        blit.srcOffsets[1] = vk::Offset3D{ static_cast<int32_t>(std::max(1u, img.width  >> (i-1))),
-                                static_cast<int32_t>(std::max(1u, img.height >> (i-1))), 1 };
+        blit.srcSubresource = { aspectFromFormat(img.format), i - 1, 0, img.layers };
+        blit.srcOffsets[0]  = vk::Offset3D{0, 0, 0};
+        blit.srcOffsets[1]  = vk::Offset3D{mipWidth, mipHeight, 1};
         blit.dstSubresource = { aspectFromFormat(img.format), i, 0, img.layers };
-        blit.dstOffsets[0] = vk::Offset3D{ 0, 0, 0 };
-        blit.dstOffsets[1] = vk::Offset3D{ static_cast<int32_t>(std::max(1u, img.width  >> i)),
-                                static_cast<int32_t>(std::max(1u, img.height >> i)), 1 };
+        blit.dstOffsets[0]  = vk::Offset3D{0, 0, 0};
+        blit.dstOffsets[1]  = vk::Offset3D{
+            std::max(mipWidth  / 2, 1),
+            std::max(mipHeight / 2, 1),
+            1
+        };
 
-        vk::BlitImageInfo2 bi{};
-        bi.srcImage = img.handle; bi.srcImageLayout = vk::ImageLayout::eTransferSrcOptimal;
-        bi.dstImage = img.handle; bi.dstImageLayout = vk::ImageLayout::eTransferDstOptimal;
-        bi.regionCount = 1; bi.pRegions = &blit;
-        bi.filter = vk::Filter::eLinear;
-        fr.cmd.blitImage2(bi);
+        vk::BlitImageInfo2 blitInfo{};
+        blitInfo.srcImage       = img.handle;
+        blitInfo.srcImageLayout = vk::ImageLayout::eTransferSrcOptimal;
+        blitInfo.dstImage       = img.handle;
+        blitInfo.dstImageLayout = vk::ImageLayout::eTransferDstOptimal;
+        blitInfo.regionCount    = 1;
+        blitInfo.pRegions       = &blit;
+        blitInfo.filter         = vk::Filter::eLinear;
+
+        cmd.blitImage2(blitInfo);
+
+        // Transition src mip (i-1) from TRANSFER_SRC -> SHADER_READ_ONLY
+        barrier.oldLayout     = vk::ImageLayout::eTransferSrcOptimal;
+        barrier.newLayout     = vk::ImageLayout::eShaderReadOnlyOptimal;
+        barrier.srcStageMask  = vk::PipelineStageFlagBits2::eTransfer;
+        barrier.dstStageMask  = vk::PipelineStageFlagBits2::eFragmentShader;
+        barrier.srcAccessMask = vk::AccessFlagBits2::eTransferRead;
+        barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+
+        dep.setImageMemoryBarriers(barrier);
+        cmd.pipelineBarrier2(dep);
+
+        if (mipWidth > 1)  mipWidth  /= 2;
+        if (mipHeight > 1) mipHeight /= 2;
     }
-    // final transition whole image to shader read
-    //transitionImage(img, vk::ImageLayout::eShaderReadOnlyOptimal,
-                    //{}, {}, {}, {}, aspectFromFormat(img.format), 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS);
+
+    // Transition last mip level from TRANSFER_DST -> SHADER_READ_ONLY
+    barrier.subresourceRange.baseMipLevel = img.mipLevels - 1;
+    barrier.oldLayout     = vk::ImageLayout::eTransferDstOptimal;
+    barrier.newLayout     = vk::ImageLayout::eShaderReadOnlyOptimal;
+    barrier.srcStageMask  = vk::PipelineStageFlagBits2::eTransfer;
+    barrier.dstStageMask  = vk::PipelineStageFlagBits2::eFragmentShader;
+    barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+    barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+
+    dep.setImageMemoryBarriers(barrier);
+    cmd.pipelineBarrier2(dep);
+
+    img.currentLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
 }
 
 void VulkanRenderer::beginRendering(vk::CommandBuffer cmd, vk::ImageView colorView, vk::ImageView depthView, vk::Extent2D extent, const std::array<float, 4> &clearColor, float clearDepth, uint32_t clearStencil) {

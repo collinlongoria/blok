@@ -18,7 +18,7 @@
 
 namespace blok {
 
-enum class Role { StorageWrite, Sampled, ColorAttachment, DepthAttachment, Present};
+enum class Role { StorageWrite, Sampled, ColorAttachment, DepthAttachment, Present, TransferDst};
 
 struct ImageState {
     vk::ImageLayout layout = vk::ImageLayout::eUndefined;
@@ -58,6 +58,7 @@ private:
             case Role::ColorAttachment: return {vk::ImageLayout::eColorAttachmentOptimal, vk::ImageAspectFlagBits::eColor};
             case Role::DepthAttachment: return {vk::ImageLayout::eDepthAttachmentOptimal, vk::ImageAspectFlagBits::eDepth};
             case Role::Present: return {vk::ImageLayout::ePresentSrcKHR, vk::ImageAspectFlagBits::eColor};
+            case Role::TransferDst: return {vk::ImageLayout::eTransferDstOptimal, vk::ImageAspectFlagBits::eColor};
         }
         return {};
     }
