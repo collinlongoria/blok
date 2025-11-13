@@ -73,7 +73,9 @@ void addWindow()
 UI::UI(const std::shared_ptr<Window>& window) :
 	m_window(window),
 	m_camera(nullptr),
-	m_mouseSetting(DEFAULT)
+	m_mouseSetting(DEFAULT),
+	frameCount(1),
+	averageFps(0.0)
 {
 	glfwSetWindowUserPointer(window->getGLFWwindow(), this);
 }
@@ -130,7 +132,7 @@ void UI::handleCameraControls(Camera* cam)
 {
 	m_camera = cam;
 
-	if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem | ImGuiHoveredFlags_RootAndChildWindows))
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly) && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem | ImGuiHoveredFlags_RootAndChildWindows))
 	{
 		GLFWcursor* handCursor = glfwCreateStandardCursor(GLFW_CROSSHAIR_CURSOR);
 		glfwSetCursor(m_window->getGLFWwindow(), handCursor);
@@ -151,6 +153,10 @@ void UI::handleCameraControls(Camera* cam)
 			}
 
 			m_mouseData.firstMouse = true;
+
+			ImGui::BeginTooltip();
+			ImGui::Text("Hold Right Click for Camera Controls");
+			ImGui::EndTooltip();
 		}
 	}
 	else
@@ -181,15 +187,18 @@ void blok::UI::renderToWindow(unsigned int texture)
 
 void blok::UI::displayData(float dt)
 {
-	ImGui::ShowDemoWindow();
-
-	ImGui::Begin("Delete after testing"); //del after
+	//ImGui::ShowDemoWindow();
 
 	ImGui::BeginChild("Data Display");
-	ImGui::Text("%f", 1/dt);
-	ImGui::EndChild();
+	ImGui::SeparatorText("Data Display");
+	ImGui::Text("FPS: %f", 1/dt);
+	averageFps += 1 / dt;
+	ImGui::Text("Average FPS: %f", averageFps/frameCount++);
 
-	ImGui::End(); //del after
+
+	ImGui::Separator();
+
+	ImGui::EndChild();
 }
 
 void blok::UI::beginWindow(std::string windowName)

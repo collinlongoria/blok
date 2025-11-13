@@ -38,11 +38,11 @@ namespace blok {
         //void renderToNewWindow(unsigned int texture, std::string windowName = "");
         void renderToWindow(unsigned int texture);
 
-        /*Displays App Information as a Child Window (Not Done Yet)*/
+        /*Displays App Information as a Child Window (WIP)*/
         void displayData(float dt);
 
         
-        void beginWindow(std::string windowName = "");
+        void beginWindow(std::string windowName = "New Window");
         /*Must be called after beginWindow*/
         void endWindow();
         
@@ -55,11 +55,14 @@ namespace blok {
             bool firstMouse = true;
         } m_mouseData;
         
+         /*Controls*/
          MouseBehaviour m_mouseSetting;
          const std::shared_ptr<Window>& m_window;
          Camera* m_camera;
 
-         
+         /*Data*/
+         double averageFps;
+         unsigned frameCount;
 
          static void mouseCameraCallback(GLFWwindow* window, double xpos, double ypos);
          void swapMouseBehaviour(MouseBehaviour behaviour);

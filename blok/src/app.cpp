@@ -159,7 +159,10 @@ void App::update() {
             m_renderer->drawFrame(g_camera, g_scene);
 
             addWindow();
+
+            g_ui->beginWindow();
             g_ui->displayData(dt);
+            g_ui->endWindow();
 
             m_renderer->endFrame();
             break;
@@ -167,9 +170,16 @@ void App::update() {
         case GraphicsApi::Vulkan:
             m_renderer->beginFrame();
             ImGui::ShowDemoWindow();
+
+            g_ui->beginWindow();
+            g_ui->displayData(dt);
+            g_ui->endWindow();
+
             m_renderer->drawFrame(g_camera, g_scene);
             m_renderer->endFrame();
             break;
+
+            
     }
 }
 
