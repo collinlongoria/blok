@@ -24,7 +24,14 @@ layout(set = 0, binding = 0, std140) uniform FrameUBO {
     vec3 cameraPos;
 } frame;
 
-layout(set = 2, binding = 0) uniform sampler2D uAlbedo;
+layout(set = 2, binding = 0, std140) uniform MaterialUBO {
+    vec3 diffuse;
+    vec3 specular;
+    vec3 emission;
+    float shininess;
+} material;
+
+layout(set = 2, binding = 1) uniform sampler2D uAlbedo;
 
 layout(location = 0) in vec3 vWorldPos;
 layout(location = 1) in vec3 vWorldNrm;
@@ -93,10 +100,11 @@ vec3 evaluatePhong(Light L, vec3 N, vec3 V, vec3 albedo, vec3 worldPos){
     vec3 H = normalize(V + s.L);
     float NdotH = max(dot(N, H), 0.0);
 
-    float spec = pow(NdotH, PHONG_SPEC_POWER);
+    float specPower = max(material.shininess, 1.0);
+    float spec = pow(NdotH, specPower);
 
     vec3 diffuse = albedo * s.NdotL;
-    vec3 specular = spec * vec3(1.0);
+    vec3 specular = spec * material.specular;
 
     float weight = s.attenuation * s.spotFactor;
     return s.color * weight * (diffuse + specular);
@@ -107,14 +115,17 @@ void main()
     vec3 N = normalize(vWorldNrm);
     vec3 V = normalize(frame.cameraPos - vWorldPos);
 
+    vec3 albedo = material.diffuse;
+    float alpha = 1.0;
+
     vec4 tex = texture(uAlbedo, vUV);
-    vec3 albedo = tex.rgb;
-    float alpha = tex.a;
+    albedo *= tex.rgb;
+    alpha = tex.a;
 
     vec3 color = vec3(0.0);
 
     // simple ambient
-    vec3 ambient = 0.03 * albedo;
+    vec3 ambient = 0.1 * albedo * material.diffuse;
     color += ambient;
 
     for(int i = 0; i < frame.lightCount; ++i){
@@ -122,6 +133,9 @@ void main()
 
         color += evaluatePhong(L, N, V, albedo, vWorldPos);
     }
+
+    // TODO: emission dont work
+    //color += material.emission;
 
     outColor = vec4(color, alpha);
 }

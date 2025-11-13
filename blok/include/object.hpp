@@ -32,7 +32,7 @@ struct Material {
     Vector3 specular;
     Vector3 emission;
     float shininess;
-    int textureId;
+    int textureId = -1;
 
     // baked descriptor set (set = 2)
     // TODO: change to scene=0, material=1, object=2

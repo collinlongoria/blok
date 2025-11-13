@@ -5,8 +5,6 @@ project(
   LANGUAGES C CXX
 )
 
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Z7")
-
 # ---- Output dirs ----
 set(OUT_BIN ${CMAKE_SOURCE_DIR}/build/$<CONFIG>/bin)
 set(OUT_LIB ${CMAKE_SOURCE_DIR}/build/$<CONFIG>/lib)

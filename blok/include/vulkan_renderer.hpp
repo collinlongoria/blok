@@ -48,6 +48,13 @@ struct ObjectUBO {
     glm::mat4 model;
 };
 
+struct alignas(16) GPUMaterial{
+    alignas(16) Vector3 diffuse;
+    alignas(16) Vector3 specular;
+    alignas(16) Vector3 emission;
+    alignas(16) float shininess;
+};
+
 struct Buffer {
     vk::Buffer      handle{};
     VmaAllocation   alloc{};

@@ -657,8 +657,7 @@ void VulkanRenderer::buildMaterialSetForObject(Object& obj,
 
     // This pipeline must define set 2 in its YAML layout
     if (prog.setLayouts.size() < 3) {
-        throw std::runtime_error("Pipeline '" + obj.pipelineName +
-                                 "' has no set 2 layout for materials");
+        throw std::runtime_error("Pipeline '" + obj.pipelineName + "' has no set 2 layout for materials");
     }
 
     // Load or reuse texture
@@ -675,15 +674,38 @@ void VulkanRenderer::buildMaterialSetForObject(Object& obj,
     // Allocate set 2 using the layout that came from YAML
     vk::DescriptorSet matSet = m_descAlloc.allocate(m_device, prog.setLayouts[2]);
 
+    // TODO: I need to do this better. I need image index
+    // Write uniform buffer (binding 0)
+    GPUMaterial mubo{};
+    mubo.diffuse   = obj.material.diffuse;
+    mubo.specular  = obj.material.specular;
+    mubo.emission  = obj.material.emission;
+    mubo.shininess = obj.material.shininess;
+
+    Buffer materialUBO = createBuffer(
+        sizeof(GPUMaterial),
+        vk::BufferUsageFlagBits::eUniformBuffer,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        VMA_MEMORY_USAGE_AUTO_PREFER_HOST,
+        true // mapped
+    );
+
+    uploadToBuffer(&mubo, sizeof(GPUMaterial), materialUBO, 0);
+    vk::DescriptorBufferInfo bufInfo{materialUBO.handle, 0, sizeof(GPUMaterial)};
+
+    // Write texture (binding 1)
+    vk::DescriptorImageInfo imgInfo{
+        sampler, img.view, vk::ImageLayout::eShaderReadOnlyOptimal
+    };
+
     // For this pipeline, set 2 / binding 0 is a combined_image_sampler
     DescriptorWriter w;
-    w.write_image(0, img.view, sampler, vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
+    w.write_buffer(0, materialUBO.handle, sizeof(GPUMaterial), 0, vk::DescriptorType::eUniformBuffer);
+    w.write_image(1, img.view, sampler, vk::ImageLayout::eShaderReadOnlyOptimal, vk::DescriptorType::eCombinedImageSampler);
     w.updateSet(m_device, matSet);
     w.clear();
 
     obj.material.materialSet = matSet;
-    // TODO: Optionally track that this material uses texture index X
-    // obj.material.textureId = something;
 }
 
 
@@ -911,6 +933,9 @@ std::vector<Object> VulkanRenderer::initObjectsFromMesh(const std::string &pipel
             if (srcMat.textureId >= 0 && static_cast<size_t>(srcMat.textureId) < model.textures.size()) {
                 std::string texPath = model.textures[srcMat.textureId];
                 buildMaterialSetForObject(obj, texPath);
+            }
+            else {
+                buildMaterialSetForObject(obj, "assets/white.png");
             }
 
         }

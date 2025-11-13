@@ -18,6 +18,9 @@
       - set: 2
         bindings:
           - binding: 0
+            type: uniform_buffer
+            stages: [fragment]
+          - binding: 1
             type: combined_image_sampler
             stages: [fragment]
     push_constants: []
