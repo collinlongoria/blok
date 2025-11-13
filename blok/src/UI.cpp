@@ -191,3 +191,13 @@ void blok::UI::displayData(float dt)
 
 	ImGui::End(); //del after
 }
+
+void blok::UI::beginWindow(std::string windowName)
+{
+	ImGui::Begin(windowName.c_str());
+}
+
+void blok::UI::endWindow()
+{
+	ImGui::End();
+}

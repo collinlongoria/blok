@@ -37,7 +37,14 @@ namespace blok {
 
         //void renderToNewWindow(unsigned int texture, std::string windowName = "");
         void renderToWindow(unsigned int texture);
+
+        /*Displays App Information as a Child Window (Not Done Yet)*/
         void displayData(float dt);
+
+        
+        void beginWindow(std::string windowName = "");
+        /*Must be called after beginWindow*/
+        void endWindow();
         
     private:
 
