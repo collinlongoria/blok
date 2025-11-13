@@ -10,6 +10,7 @@
 #ifndef BLOK_MATH_HPP
 #define BLOK_MATH_HPP
 
+#define GLM_ENABLE_EXPERIMENTAL
 #include <glm.hpp>
 #include <gtc/quaternion.hpp>
 #include <iostream>

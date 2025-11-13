@@ -55,6 +55,19 @@ struct alignas(16) GPUMaterial{
     alignas(16) float shininess;
 };
 
+// Push constant for raytracing
+struct RayPC {
+
+};
+
+struct RayPayload {
+    bool hit;
+    Vector3 hitPos; // world coords of hit point
+    int instanceIndex; // index of the object instance hit
+    int primitiveIndex; // index of the hit triangle primitive within the object
+    Vector3 bc; // barycentric coordinates of the hit point within the triangle
+};
+
 struct Buffer {
     vk::Buffer      handle{};
     VmaAllocation   alloc{};
@@ -200,6 +213,10 @@ private: // functions
         return (v + (a - 1)) & ~(a - 1);
     }
 
+    // Raytracing
+    void initRayTracing();
+    void
+
 private: // resources
     std::shared_ptr<Window> m_window = nullptr;
 
@@ -272,6 +289,15 @@ private: // resources
 
     // Flags
     bool m_swapchainDirty = false;
+
+    // Raytracing
+    float m_maxAnis = 0;
+    RayPC m_pcRay{};
+    int m_num_atrous_iterations = 5;
+    uint32_t handleSize{};
+    uint32_t handleAlignment{};
+    uint32_t baseAlignment{};
+
 };
 }
 
