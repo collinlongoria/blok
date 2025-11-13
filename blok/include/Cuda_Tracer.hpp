@@ -3,7 +3,6 @@
 * Project: blok
 * Author: Wes Morosan
 * Created on: 9/12/2025
-*
 * Description: Raytracing core
 */
 #ifndef RENDERER_CUDA_HPP
@@ -32,7 +31,7 @@ public:
     void beginFrame() override;
     void endFrame() override;
     void resize(unsigned int w, unsigned int h);
-    unsigned int getGLTex() const { return m_glTex; };
+    unsigned int getGLTex() const { return m_glTex; }
     void resetAccum();
 
     struct CamSig { float pos[3], fwd[3], right[3], up[3], fov; };
@@ -40,15 +39,15 @@ public:
 private:
     void cleanup();
 
-    unsigned int m_width = 0;
+    unsigned int m_width  = 0;
     unsigned int m_height = 0;
 
-    unsigned int m_pbo = 0;
-    unsigned int m_glTex = 0;
+    unsigned int m_pbo    = 0;
+    unsigned int m_glTex  = 0;
 
     struct cudaGraphicsResource* m_cudaPBO = nullptr;
 
-    float4*   m_dAccum = nullptr; // device accumulation buffer
+    float4*   m_dAccum     = nullptr; // xyz=sum, w=spp
     uint32_t  m_frameIndex = 0;
 
     CamSig m_prevCam{};
