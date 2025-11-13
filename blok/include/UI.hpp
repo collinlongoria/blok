@@ -35,9 +35,9 @@ namespace blok {
         /*Handles Camera movement through mouse controls*/
         void handleCameraControls(Camera* camera);
 
-        void renderToNewWindow(unsigned int texture, std::string windowName = "");
+        //void renderToNewWindow(unsigned int texture, std::string windowName = "");
         void renderToWindow(unsigned int texture);
-        void displayData();
+        void displayData(float dt);
         
     private:
 

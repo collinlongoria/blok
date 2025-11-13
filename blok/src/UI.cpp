@@ -165,21 +165,29 @@ void UI::handleCameraControls(Camera* cam)
 	}
 }
 
-void blok::UI::renderToNewWindow(unsigned int texture, std::string windowName)
+/*void blok::UI::renderToNewWindow(unsigned int texture, std::string windowName)
 {
 	ImGui::Begin(windowName.c_str());
 
 	ImGui::Image((ImTextureID)(intptr_t)texture, ImVec2((float)m_window->getWidth(), (float)m_window->getHeight()));
 
 	ImGui::End();
-}
+}*/
 
 void blok::UI::renderToWindow(unsigned int texture)
 {
 	ImGui::Image((ImTextureID)(intptr_t)texture, ImVec2((float)m_window->getWidth(), (float)m_window->getHeight()));
 }
 
-void blok::UI::displayData()
+void blok::UI::displayData(float dt)
 {
 	ImGui::ShowDemoWindow();
+
+	ImGui::Begin("Delete after testing"); //del after
+
+	ImGui::BeginChild("Data Display");
+	ImGui::Text("%f", 1/dt);
+	ImGui::EndChild();
+
+	ImGui::End(); //del after
 }

@@ -32,6 +32,7 @@ using namespace blok;
 static Camera g_camera;
 static Scene  g_scene;
 static UI* g_ui;
+static double lastFrame;
 
 /* This was all moved to ui.cpp
 static float lastX = 400.0f;
@@ -82,6 +83,8 @@ void App::init() {
 
     g_ui = new UI(m_window);
 
+    lastFrame = glfwGetTime();
+
     if (m_backend == GraphicsApi::OpenGL) {
         glfwMakeContextCurrent(gw);
         if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
@@ -129,7 +132,7 @@ void App::init() {
 void App::update() {
     Window::pollEvents();
 
-    static double lastFrame = glfwGetTime();
+    
     double now = glfwGetTime();
     float dt = static_cast<float>(now - lastFrame);
     lastFrame = now;
@@ -156,7 +159,7 @@ void App::update() {
             m_renderer->drawFrame(g_camera, g_scene);
 
             addWindow();
-            g_ui->displayData();
+            g_ui->displayData(dt);
 
             m_renderer->endFrame();
             break;
