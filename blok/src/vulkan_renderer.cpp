@@ -266,7 +266,8 @@ void VulkanRenderer::beginFrame() {
     ImGui::NewFrame();
 }
 
-void VulkanRenderer::drawFrame(const Camera &cam, const Scene &scene) {
+
+void VulkanRenderer::drawFrame(Camera &cam, const Scene &scene) {
     // resize if needed
     if (resizeNeeded) {
         m_swapchainDirty = true;

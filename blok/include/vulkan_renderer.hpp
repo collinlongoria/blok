@@ -102,7 +102,7 @@ public:
     void init() override;
 
     void beginFrame() override;
-    void drawFrame(const Camera &cam, const Scene &scene) override;
+    void drawFrame(Camera &cam, const Scene &scene) override;
     void endFrame() override;
 
     [[nodiscard]] vk::Format getColorFormat() const { return m_colorFormat; }
