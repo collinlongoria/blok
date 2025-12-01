@@ -1,0 +1,259 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+
+struct SvoNode {
+    uint childMask;
+    uint firstChild;
+    uint color;
+    float occupancy;
+};
+
+struct ChunkGpu {
+    uint nodeOffset;
+    uint nodeCount;
+    uint reserved0;
+    uint reserved1;
+    vec3 worldMin;
+    float pad0;
+    vec3 worldMax;
+    float pad1;
+};
+
+layout(binding = 1, set = 0) readonly buffer SvoBuffer {
+    SvoNode nodes[];
+};
+
+layout(binding = 2, set = 0) readonly buffer ChunkBuffer {
+    ChunkGpu chunks[];
+};
+
+struct HitAttribs {
+    vec3 normal;
+    vec3 color;
+};
+hitAttributeEXT HitAttribs hitAttribs;
+
+const uint INVALID_NODE_INDEX = 0xFFFFFFFF;
+const uint MAX_DEPTH = 7u;
+const uint DIM = 128u;
+
+// Morton3d, matches the cpp implementation
+uint spreadBits21(uint v) {
+    uint x = v & 0x3ffu;
+    x = (x | (x << 16u)) & 0x030000ffu;
+    x = (x | (x << 8u))  & 0x0300f00fu;
+    x = (x | (x << 4u))  & 0x030c30c3u;
+    x = (x | (x << 2u))  & 0x09249249u;
+    return x;
+}
+
+uint encodeMorton(uint x, uint y, uint z) {
+    return spreadBits21(x) | (spreadBits21(y) << 1u) | (spreadBits21(z) << 2u);
+}
+
+uint octantFromMorton(uint mortonCode, uint level) {
+    uint shift = 3u * (MAX_DEPTH - 1u - level);
+    return (mortonCode >> shift) & 0x7u;
+}
+
+uint getOctant(uvec3 voxelPos, uint level) {
+    uint morton = encodeMorton(voxelPos.x, voxelPos.y, voxelPos.z);
+    return octantFromMorton(morton, level);
+}
+
+bool isVoxelOccupied(uvec3 voxelPos, ChunkGpu chunk, out vec3 voxelColor) {
+    voxelColor = vec3(0.0);
+
+    if (any(greaterThanEqual(voxelPos, uvec3(DIM)))) {
+        return false;
+    }
+
+    uint nodeIndex = chunk.nodeOffset;
+
+    for (uint level = 0u; level < MAX_DEPTH; ++level) {
+        if (nodeIndex >= chunk.nodeOffset + chunk.nodeCount) {
+            return false;
+        }
+
+        SvoNode node = nodes[nodeIndex];
+        uint octant = getOctant(voxelPos, level);
+
+        if ((node.childMask & (1u << octant)) == 0u) {
+            return false;
+        }
+
+        if (node.firstChild == INVALID_NODE_INDEX) {
+            return false;
+        }
+
+        nodeIndex = chunk.nodeOffset + node.firstChild + octant;
+    }
+
+    if (nodeIndex >= chunk.nodeOffset + chunk.nodeCount) {
+        return false;
+    }
+
+    SvoNode leaf = nodes[nodeIndex];
+    if (leaf.occupancy <= 0.0) {
+        return false;
+    }
+
+    // Extract and return the color
+    voxelColor = vec3(
+        float((leaf.color >> 16) & 0xFFu) / 255.0,
+        float((leaf.color >> 8) & 0xFFu) / 255.0,
+        float((leaf.color >> 0) & 0xFFu) / 255.0
+    );
+
+    return true;
+}
+
+// Ray-AABB intersection
+bool intersectAABB(vec3 rayOrigin, vec3 rayDir, vec3 boxMin, vec3 boxMax, out float tNear, out float tFar) {
+    vec3 invDir = 1.0 / rayDir;
+    vec3 t0 = (boxMin - rayOrigin) * invDir;
+    vec3 t1 = (boxMax - rayOrigin) * invDir;
+
+    vec3 tmin = min(t0, t1);
+    vec3 tmax = max(t0, t1);
+
+    tNear = max(max(tmin.x, tmin.y), tmin.z);
+    tFar = min(min(tmax.x, tmax.y), tmax.z);
+
+    return tFar >= tNear && tFar > 0.0;
+}
+
+void main() {
+    uint chunkIndex = gl_PrimitiveID;
+    ChunkGpu chunk = chunks[chunkIndex];
+
+    vec3 rayOrigin = gl_WorldRayOriginEXT;
+    vec3 rayDir = gl_WorldRayDirectionEXT;
+
+    float tNear, tFar;
+    if (!intersectAABB(rayOrigin, rayDir, chunk.worldMin, chunk.worldMax, tNear, tFar)) {
+        return;
+    }
+
+    tNear = max(tNear, gl_RayTminEXT);
+    tFar = min(tFar, gl_RayTmaxEXT);
+
+    if (tNear > tFar) {
+        return;
+    }
+
+    float tStart = max(tNear, 0.001);
+
+    vec3 chunkSize = chunk.worldMax - chunk.worldMin;
+    float voxelSize = chunkSize.x / float(DIM);
+
+    vec3 startPos = rayOrigin + rayDir * tStart;
+
+    vec3 localPos = (startPos - chunk.worldMin) / chunkSize;
+    localPos = clamp(localPos, vec3(0.0), vec3(0.9999));
+
+    vec3 voxelPosF = localPos * float(DIM);
+    ivec3 voxelPos = ivec3(floor(voxelPosF));
+    voxelPos = clamp(voxelPos, ivec3(0), ivec3(DIM - 1u));
+
+    ivec3 step = ivec3(sign(rayDir));
+    if (rayDir.x == 0.0) step.x = 0;
+    if (rayDir.y == 0.0) step.y = 0;
+    if (rayDir.z == 0.0) step.z = 0;
+
+    vec3 deltaDist;
+    deltaDist.x = (rayDir.x != 0.0) ? abs(voxelSize / rayDir.x) : 1e30;
+    deltaDist.y = (rayDir.y != 0.0) ? abs(voxelSize / rayDir.y) : 1e30;
+    deltaDist.z = (rayDir.z != 0.0) ? abs(voxelSize / rayDir.z) : 1e30;
+
+    vec3 sideDist;
+    vec3 voxelMin = chunk.worldMin + vec3(voxelPos) * voxelSize;
+
+    if (rayDir.x < 0.0) {
+        sideDist.x = (startPos.x - voxelMin.x) / abs(rayDir.x);
+    } else if (rayDir.x > 0.0) {
+        sideDist.x = (voxelMin.x + voxelSize - startPos.x) / rayDir.x;
+    } else {
+        sideDist.x = 1e30;
+    }
+
+    if (rayDir.y < 0.0) {
+        sideDist.y = (startPos.y - voxelMin.y) / abs(rayDir.y);
+    } else if (rayDir.y > 0.0) {
+        sideDist.y = (voxelMin.y + voxelSize - startPos.y) / rayDir.y;
+    } else {
+        sideDist.y = 1e30;
+    }
+
+    if (rayDir.z < 0.0) {
+        sideDist.z = (startPos.z - voxelMin.z) / abs(rayDir.z);
+    } else if (rayDir.z > 0.0) {
+        sideDist.z = (voxelMin.z + voxelSize - startPos.z) / rayDir.z;
+    } else {
+        sideDist.z = 1e30;
+    }
+
+    // Check starting voxel
+    vec3 voxelColor;
+    if (isVoxelOccupied(uvec3(voxelPos), chunk, voxelColor)) {
+        vec3 voxCenter = chunk.worldMin + (vec3(voxelPos) + 0.5) * voxelSize;
+        vec3 localHit = (startPos - voxCenter) / voxelSize;
+        vec3 absHit = abs(localHit);
+
+        if (absHit.x > absHit.y && absHit.x > absHit.z) {
+            hitAttribs.normal = vec3(-sign(rayDir.x), 0.0, 0.0);
+        } else if (absHit.y > absHit.z) {
+            hitAttribs.normal = vec3(0.0, -sign(rayDir.y), 0.0);
+        } else {
+            hitAttribs.normal = vec3(0.0, 0.0, -sign(rayDir.z));
+        }
+
+        hitAttribs.color = voxelColor;
+        reportIntersectionEXT(tStart, 0);
+        return;
+    }
+
+    // DDA traversal
+    float currentT = tStart;
+    const int MAX_STEPS = 512;
+
+    for (int i = 0; i < MAX_STEPS; i++) {
+        int axis;
+        float minSide = sideDist.x;
+        axis = 0;
+
+        if (sideDist.y < minSide) {
+            minSide = sideDist.y;
+            axis = 1;
+        }
+        if (sideDist.z < minSide) {
+            minSide = sideDist.z;
+            axis = 2;
+        }
+
+        float tCross = currentT + minSide;
+
+        if (tCross > tFar) {
+            return;
+        }
+
+        voxelPos[axis] += step[axis];
+        currentT = tCross;
+
+        sideDist -= vec3(minSide);
+        sideDist[axis] = deltaDist[axis];
+
+        if (any(lessThan(voxelPos, ivec3(0))) || any(greaterThanEqual(voxelPos, ivec3(DIM)))) {
+            return;
+        }
+
+        if (isVoxelOccupied(uvec3(voxelPos), chunk, voxelColor)) {
+            hitAttribs.normal = vec3(0.0);
+            hitAttribs.normal[axis] = -float(step[axis]);
+            hitAttribs.color = voxelColor;
+
+            reportIntersectionEXT(tCross, 0);
+            return;
+        }
+    }
+}

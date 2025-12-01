@@ -27,15 +27,7 @@ set_target_properties(blok PROPERTIES
 target_include_directories(blok PRIVATE ${CUDAToolkit_INCLUDE_DIRS})
 target_link_libraries(blok PRIVATE ${CUDAToolkit_LIBRARIES})
 
-target_compile_options(blok PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
-
-# ---- Assimp ----
-target_link_libraries(blok PRIVATE assimp)
-target_include_directories(blok PRIVATE ${CMAKE_SOURCE_DIR}/external/assimp/include)
-
-# ---- yaml-cpp ----
-target_link_libraries(blok PRIVATE yaml-cpp)
-target_include_directories(blok PRIVATE ${CMAKE_SOURCE_DIR}/external/yaml-cpp/include)
+target_compile_options(blok PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr --diag-suppress=3189>)
 
 # ---- stb (image, etc.) ----
 target_include_directories(blok PRIVATE ${CMAKE_SOURCE_DIR}/external/stb)

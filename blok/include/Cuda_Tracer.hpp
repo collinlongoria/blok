@@ -14,20 +14,21 @@
 #include <memory>
 
 namespace blok {
+struct Scene;
 
 class Window;
 class RendererGL;
 
-class CudaTracer : public Renderer {
+class CudaTracer {
 public:
     CudaTracer(unsigned int width, unsigned int height);
-    ~CudaTracer() override;
+    ~CudaTracer();
 
-    void init() override;
-    void drawFrame(const Camera& cam, const Scene& scene) override;
-    void shutdown() override;
-    void beginFrame() override;
-    void endFrame() override;
+    void init();
+    void drawFrame(const Camera& cam, const Scene& scene);
+    void shutdown();
+    void beginFrame();
+    void endFrame();
 
     unsigned int getGLTex() const { return m_glTex; }
 

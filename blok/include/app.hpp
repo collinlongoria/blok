@@ -10,13 +10,13 @@
 #define BLOK_APP_HPP
 
 #include <memory>
-#include <string>
 #include "backend.hpp"
 
 namespace blok {
 
 class Window;
 class Renderer;
+class RendererGL;
 class CudaTracer;
 
 class App {
@@ -35,6 +35,7 @@ private:
 
     std::shared_ptr<Window>  m_window;
     std::unique_ptr<Renderer> m_renderer;
+    std::unique_ptr<RendererGL> m_rendererGL;
     std::unique_ptr<CudaTracer> m_cudaTracer;
 };
 

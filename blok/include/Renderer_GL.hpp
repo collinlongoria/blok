@@ -23,20 +23,20 @@ class Window;
 class Camera;
 struct Scene;
 
-class RendererGL : public Renderer {
+class RendererGL {
 public:
     explicit RendererGL(std::shared_ptr<Window> window);
-    ~RendererGL() override;
+    ~RendererGL();
 
-    void init() override;
-    void drawFrame(const Camera& cam, const Scene& scene) override;
-    void shutdown() override;
+    void init();
+    void drawFrame(const Camera& cam, const Scene& scene);
+    void shutdown();
 
     // external (e.g. CUDA) provides texture to display
     void setTexture(unsigned int tex, unsigned int w, unsigned int h);
 
-    void beginFrame() override;
-    void endFrame() override;
+    void beginFrame();
+    void endFrame();
 
 private:
     std::shared_ptr<Window> m_window;
