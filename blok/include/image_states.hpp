@@ -1,24 +1,11 @@
-/*
-* File: image_states.hpp
-* Project: blok
-* Author: ${AUTHOR}
-* Created on: 10/22/2025
-*
-* Copyright (c) 2025 Collin Longoria
-*
-* This software is released under the MIT License.
-* https://opensource.org/licenses/MIT
-*/
-
-#ifndef BLOK_IMAGE_STATES_HPP
-#define BLOK_IMAGE_STATES_HPP
-
-#include "vulkan_renderer.hpp"
-#include <unordered_map>
+#ifndef IMAGE_STATES_HPP
+#define IMAGE_STATES_HPP
+#include "vulkan_context.hpp"
+#include "resources.hpp"
 
 namespace blok {
 
-enum class Role { StorageWrite, Sampled, ColorAttachment, DepthAttachment, Present, TransferDst};
+enum class Role { General, StorageWrite, Sampled, ColorAttachment, DepthAttachment, Present, TransferDst, TransferSrc};
 
 struct ImageState {
     vk::ImageLayout layout = vk::ImageLayout::eUndefined;
@@ -53,19 +40,21 @@ private:
 
     static ImageState toLayout(Role r) {
         switch (r) {
+            case Role::General: return {vk::ImageLayout::eGeneral, vk::ImageAspectFlagBits::eColor};
             case Role::StorageWrite: return {vk::ImageLayout::eGeneral, vk::ImageAspectFlagBits::eColor};
             case Role::Sampled: return {vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor};
             case Role::ColorAttachment: return {vk::ImageLayout::eColorAttachmentOptimal, vk::ImageAspectFlagBits::eColor};
             case Role::DepthAttachment: return {vk::ImageLayout::eDepthAttachmentOptimal, vk::ImageAspectFlagBits::eDepth};
             case Role::Present: return {vk::ImageLayout::ePresentSrcKHR, vk::ImageAspectFlagBits::eColor};
             case Role::TransferDst: return {vk::ImageLayout::eTransferDstOptimal, vk::ImageAspectFlagBits::eColor};
+            case Role::TransferSrc: return {vk::ImageLayout::eTransferSrcOptimal, vk::ImageAspectFlagBits::eColor};
         }
         return {};
     }
 
     static vk::PipelineStageFlags2 stagesFor(vk::ImageLayout l){
         if (l==vk::ImageLayout::eUndefined) return vk::PipelineStageFlagBits2::eTopOfPipe;
-        if (l==vk::ImageLayout::eGeneral) return vk::PipelineStageFlagBits2::eComputeShader;
+        if (l==vk::ImageLayout::eGeneral) return vk::PipelineStageFlagBits2::eRayTracingShaderKHR;
         if (l==vk::ImageLayout::eShaderReadOnlyOptimal) return vk::PipelineStageFlagBits2::eFragmentShader;
         if (l==vk::ImageLayout::eColorAttachmentOptimal) return vk::PipelineStageFlagBits2::eColorAttachmentOutput;
         if (l==vk::ImageLayout::eDepthAttachmentOptimal) return vk::PipelineStageFlagBits2::eEarlyFragmentTests;
@@ -89,4 +78,4 @@ private:
 
 }
 
-#endif //BLOK_IMAGE_STATES_HPP
+#endif //IMAGE_STATES_HPP

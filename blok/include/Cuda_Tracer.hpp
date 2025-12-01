@@ -16,21 +16,22 @@
 struct float4;
 
 namespace blok {
+struct Scene;
 
 class Window;
 class RendererGL;
 
-class CudaTracer : public Renderer {
+class CudaTracer {
 public:
     CudaTracer(unsigned int width, unsigned int height);
-    ~CudaTracer() { shutdown(); }
+    ~CudaTracer();
 
-    void init() override;
-    void drawFrame(Camera& cam, const Scene& scene) override;
-    void shutdown() override;
-    void beginFrame() override;
-    void endFrame() override;
-    void resize(unsigned int w, unsigned int h);
+    void init();
+    void drawFrame(const Camera& cam, const Scene& scene);
+    void shutdown();
+    void beginFrame();
+    void endFrame();
+
     unsigned int getGLTex() const { return m_glTex; }
     void resetAccum();
 

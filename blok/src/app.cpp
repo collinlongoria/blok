@@ -4,44 +4,39 @@
 * Author: Collin Longoria / Wes Morosan
 * Created on: 9/12/2025
 */
-
 #include "app.hpp"
+
+#include <chrono>
+#include <stdexcept>
+#include <iostream>
+
 #include "window.hpp"
 #include "ui.hpp"
 
+#include "renderer.hpp"
 #include "Renderer_GL.hpp"
-#include "vulkan_renderer.hpp"
-
 #include "Cuda_Tracer.hpp"
-
-#include <stdexcept>
-#include <iostream>
 
 #define GLFW_INCLUDE_NONE
 #include <GLFW/glfw3.h>
 #include <glad/glad.h>
-
-/* These includes are here so I can test build */
-#include <chrono>
-
 #include "imgui.h"
+
+#include "camera.hpp"
+#include "chunk_manager.hpp"
+#include "scene.hpp"
 
 #define VKR reinterpret_cast<VulkanRenderer*>(m_renderer.get())
 
 using namespace blok;
 static Camera g_camera;
 static Scene  g_scene;
-static UI* g_ui;
-static double lastFrame;
-
-/* This was all moved to ui.cpp
+static ChunkManager g_mgr(128, 1.0f);
 static float lastX = 400.0f;
 static float lastY = 300.0f;
 static bool firstMouse = true;
-*/static std::vector<Object> gScene;/*
 
-// ---------------- Input Callbacks ----------------
-void mouse_pcallback(GLFWwindow* window, double xpos, double ypos) {
+void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     if (firstMouse) {
         lastX = (float)xpos;
         lastY = (float)ypos;
@@ -69,9 +64,7 @@ App::~App() {
 void App::run() {
     init();
 
-    while (m_window && !m_window->shouldClose()) {
-        update();
-    }
+    update();
 
     shutdown();
 }
@@ -80,11 +73,6 @@ void App::init() {
     m_window = std::make_shared<Window>(800, 600, "blok", m_backend);
 
     GLFWwindow* gw = m_window->getGLFWwindow();
-
-    g_ui = new UI(m_window);
-
-    lastFrame = glfwGetTime();
-
     if (m_backend == GraphicsApi::OpenGL) {
         glfwMakeContextCurrent(gw);
         if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
@@ -92,7 +80,8 @@ void App::init() {
         }
         m_renderer = std::make_unique<RendererGL>(m_window);
         m_renderer->init();
-        reinterpret_cast<RendererGL*>(m_renderer.get())->setUI(g_ui);
+        glfwSetCursorPosCallback(gw, mouse_callback);
+        glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
     }
 
     switch (m_backend) {
@@ -123,7 +112,6 @@ void App::init() {
 
         //glfwSetCursorPosCallback(gw, mouse_callback);
         //glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
-
     }
         break;
     }
@@ -132,7 +120,7 @@ void App::init() {
 void App::update() {
     Window::pollEvents();
 
-    
+    static double lastFrame = glfwGetTime();
     double now = glfwGetTime();
     float dt = static_cast<float>(now - lastFrame);
     lastFrame = now;
@@ -143,24 +131,14 @@ void App::update() {
     if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) g_camera.processKeyboard('A', dt);
     if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) g_camera.processKeyboard('D', dt);
 
-    if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(win, GLFW_TRUE);
-
-
-
 
     switch (m_backend) {
-
         case GraphicsApi::OpenGL:
             // ImGui + present path (one swap inside endFrame)
             m_cudaTracer->drawFrame(g_camera, g_scene);
             m_renderer->beginFrame();
             reinterpret_cast<RendererGL*>(m_renderer.get())->setTexture(m_cudaTracer->getGLTex(), m_window->getWidth(), m_window->getHeight());
-
             m_renderer->drawFrame(g_camera, g_scene);
-
-            addWindow();
-            g_ui->displayData(dt);
-
             m_renderer->endFrame();
             break;
 
@@ -170,6 +148,7 @@ void App::update() {
             m_renderer->drawFrame(g_camera, g_scene);
             m_renderer->endFrame();
             break;
+    }
     }
 }
 
