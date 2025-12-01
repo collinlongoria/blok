@@ -23,6 +23,8 @@
 #include "backends/imgui_impl_glfw.h"
 #include "backends/imgui_impl_opengl3.h"
 
+#include "ui.hpp"
+
 using namespace blok;
 
 static GLuint compileShader(GLenum type, const char* src) {
@@ -55,12 +57,17 @@ static GLuint linkProgram(GLuint vs, GLuint fs) {
 }
 
 RendererGL::RendererGL(std::shared_ptr<Window> window)
-    : m_window(std::move(window)) {}
+    : m_window(std::move(window)), m_ui(nullptr) {}
 
 RendererGL::~RendererGL() { if (active) { shutdown(); } }
 
 void RendererGL::setTexture(unsigned int tex, unsigned int w, unsigned int h) {
     m_tex = tex; m_texW = static_cast<int>(w); m_texH = static_cast<int>(h);
+}
+
+void blok::RendererGL::setUI(UI* ui)
+{
+    m_ui = ui;
 }
 
 void RendererGL::beginFrame() {
@@ -148,7 +155,7 @@ void RendererGL::createFullScreenQuad() {
     glBindVertexArray(0);
 }
 
-void RendererGL::drawFrame(const Camera& /*cam*/, const Scene& /*scene*/) {
+void RendererGL::drawFrame(Camera& cam, const Scene& /*scene*/) {
     /*
     if (m_tex != 0) {
         glUseProgram(m_prog);
@@ -166,11 +173,19 @@ void RendererGL::drawFrame(const Camera& /*cam*/, const Scene& /*scene*/) {
     }
     */
 
-    if (m_tex != 0) {
-        ImGui::Begin("CUDA Output");
+    if (m_tex != 0 && m_ui != nullptr) {
+        m_ui->beginWindow("CUDA Output");
         ImGui::Text("Displaying raytraced texture:");
-        ImGui::Image((ImTextureID)(intptr_t)m_tex, ImVec2((float)m_texW, (float)m_texH));
-        ImGui::End();
+        m_ui->renderToWindow(m_tex);
+        m_ui->handleCameraControls(&cam);
+
+        m_ui->endWindow();
+    }
+    else
+    {
+        m_ui->beginWindow("Test Window");
+        ImGui::Text("OpenGL Window");
+        m_ui->endWindow();
     }
 }
 
