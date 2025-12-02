@@ -14,7 +14,7 @@ void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
 
 void Renderer::render(const Camera& c, float dt) {
     beginFrame();
-    ImGui::ShowDemoWindow();
+    //ImGui::ShowDemoWindow();
     drawFrame(c, dt);
     endFrame();
 }
@@ -50,6 +50,17 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     fubo.proj = c.projection(aspect, nearPlane, farPlane);
     fubo.delta_time = dt;
     fubo.camPos = c.position;
+
+    fubo.frame_count = m_frameCount;
+    fubo.sample_count = 1;
+
+    if (c.cameraChanged) {
+        m_frameCount = 0;
+        c.cameraChanged = false;
+    }
+    else {
+        m_frameCount++;
+    }
 
     uploadToBuffer(&fubo, sizeof(FrameUBO), fr.frameUBO, 0);
     fr.uboHead = alignUp(sizeof(FrameUBO), minAlign);

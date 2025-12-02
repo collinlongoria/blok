@@ -13,6 +13,8 @@ public:
     float pitch = 0.0f;
     float fov   = 60.0f;
 
+    mutable bool cameraChanged = false;
+
     [[nodiscard]]
     inline glm::vec3 forward() const {
         glm::vec3 dir;
@@ -51,6 +53,8 @@ public:
         if (key == 'S') position -= forward() * speed;
         if (key == 'A') position -= right() * speed;
         if (key == 'D') position += right() * speed;
+
+        cameraChanged = true;
     }
     void processMouse(float dx, float dy) {
         float sens = 0.01f;
@@ -59,6 +63,8 @@ public:
 
         if (pitch > 89.0f)  pitch = 89.0f;
         if (pitch < -89.0f) pitch = -89.0f;
+
+        cameraChanged = true;
     }
 };
 

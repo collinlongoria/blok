@@ -184,6 +184,7 @@ private:
 
     vk::PhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProps{};
     RayTracing m_raytracer;
+    uint32_t m_frameCount = 0;
     friend class RayTracing;
 };
 
