@@ -10,6 +10,7 @@
 #include "window.hpp"
 #include <memory> 
 #include <string>
+#include "math.hpp"
 
 void addWindow();
 
@@ -32,6 +33,8 @@ namespace blok {
 
         ~UI();
 
+        void update(float dt);
+
         /*Handles Camera movement through mouse controls*/
         void handleCameraControls(Camera* camera);
 
@@ -39,12 +42,14 @@ namespace blok {
         void renderToWindow(unsigned int texture);
 
         /*Displays App Information as a Child Window (WIP)*/
-        void displayData(float dt);
+        void displayData();
 
         
         void beginWindow(std::string windowName = "New Window");
         /*Must be called after beginWindow*/
         void endWindow();
+
+        void createButton(std::string windowName = "New Button", void func() = nullptr);
         
     private:
 
@@ -63,6 +68,10 @@ namespace blok {
          /*Data*/
          double averageFps;
          unsigned frameCount;
+         float dt;
+
+         /*Arrangement*/
+         Vector2 nextWindowPos;
 
          static void mouseCameraCallback(GLFWwindow* window, double xpos, double ypos);
          void swapMouseBehaviour(MouseBehaviour behaviour);

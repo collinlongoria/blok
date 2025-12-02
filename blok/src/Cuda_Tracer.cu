@@ -524,6 +524,7 @@ void CudaTracer::drawFrame(Camera& cam, const Scene& scene) {
     cudaGraphicsMapResources(1, &m_cudaPBO, 0);
     cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, m_cudaPBO);
 
+
     dim3 block(16, 16);
     dim3 grid((m_width + 15) / 16, (m_height + 15) / 16);
 

@@ -74,14 +74,30 @@ UI::UI(const std::shared_ptr<Window>& window) :
 	m_window(window),
 	m_camera(nullptr),
 	m_mouseSetting(DEFAULT),
-	frameCount(1),
-	averageFps(0.0)
+	frameCount(0),
+	averageFps(0.0),
+	nextWindowPos(0),
+	dt(0)
 {
+	//ImGuiIO& io = ImGui::GetIO();
+	//io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+	//io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+
 	glfwSetWindowUserPointer(window->getGLFWwindow(), this);
 }
 
 blok::UI::~UI()
 {
+}
+
+void blok::UI::update(float deltatime)
+{
+	/*framerate stuff*/
+	dt = deltatime;
+	averageFps += 1 / dt;
+	frameCount++;
+
+	nextWindowPos = Vector2(0.0f, 0.0f);
 }
 
 void UI::mouseCameraCallback(GLFWwindow* window, double xpos, double ypos) {
@@ -102,7 +118,7 @@ void UI::mouseCameraCallback(GLFWwindow* window, double xpos, double ypos) {
 
 		if (handler->m_camera != nullptr)
 		{
-			handler->m_camera->processMouse(dx * 2, dy * 2);
+			handler->m_camera->processMouse(dx * 5, dy * 5);
 		}
 	}
 }
@@ -185,15 +201,16 @@ void blok::UI::renderToWindow(unsigned int texture)
 	ImGui::Image((ImTextureID)(intptr_t)texture, ImVec2((float)m_window->getWidth(), (float)m_window->getHeight()));
 }
 
-void blok::UI::displayData(float dt)
+void blok::UI::displayData()
 {
-	//ImGui::ShowDemoWindow();
+	if (dt == 0) return;
 
-	ImGui::BeginChild("Data Display");
+
+	ImGui::BeginChild("Data Display", ImVec2(200.0f, 100.0f));
 	ImGui::SeparatorText("Data Display");
 	ImGui::Text("FPS: %f", 1/dt);
 	averageFps += 1 / dt;
-	ImGui::Text("Average FPS: %f", averageFps/frameCount++);
+	ImGui::Text("Average FPS: %f", averageFps/frameCount);
 
 
 	ImGui::Separator();
@@ -203,10 +220,29 @@ void blok::UI::displayData(float dt)
 
 void blok::UI::beginWindow(std::string windowName)
 {
+	//ImGui::SetNextWindowPos(ImVec2(nextWindowPos.x, nextWindowPos.y), ImGuiCond_Once);
+	ImGui::SetNextWindowSize(ImVec2(0, 0));// , ImGuiCond_Once);
+
 	ImGui::Begin(windowName.c_str());
 }
 
 void blok::UI::endWindow()
 {
+	//nextWindowPos += Vector2(ImGui::GetWindowSize().x,0.0f);
 	ImGui::End();
+}
+
+void blok::UI::createButton(std::string windowName, void func())
+{
+	if (func == nullptr)
+	{
+		ImGui::Button(windowName.c_str());
+	}
+	else
+	{
+		if (ImGui::Button(windowName.c_str()))
+		{
+			func();
+		}
+	}
 }

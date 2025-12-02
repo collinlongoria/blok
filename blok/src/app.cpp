@@ -129,6 +129,9 @@ void App::init() {
     }
 }
 
+bool wind = false;
+void trueWind() { wind = true; }
+
 void App::update() {
     Window::pollEvents();
 
@@ -143,9 +146,9 @@ void App::update() {
     if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) g_camera.processKeyboard('A', dt);
     if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) g_camera.processKeyboard('D', dt);
 
-    if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(win, GLFW_TRUE);
+    if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(win, GLFW_TRUE);   
 
-
+    g_ui->update(dt);
 
 
     switch (m_backend) {
@@ -159,20 +162,29 @@ void App::update() {
             m_renderer->drawFrame(g_camera, g_scene);
 
             addWindow();
+            ImGui::ShowDemoWindow();
 
             g_ui->beginWindow();
-            g_ui->displayData(dt);
+            g_ui->displayData();
+            g_ui->createButton("spawn window", trueWind);
             g_ui->endWindow();
+
+            if (wind)
+            {
+                g_ui->beginWindow("SPAWN");
+                g_ui->displayData();
+                g_ui->endWindow();
+            }
 
             m_renderer->endFrame();
             break;
 
         case GraphicsApi::Vulkan:
             m_renderer->beginFrame();
-            ImGui::ShowDemoWindow();
+            //ImGui::ShowDemoWindow();
 
             g_ui->beginWindow();
-            g_ui->displayData(dt);
+            g_ui->displayData();
             g_ui->endWindow();
 
             m_renderer->drawFrame(g_camera, g_scene);
