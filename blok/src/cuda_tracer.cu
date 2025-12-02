@@ -6,7 +6,7 @@
 * Description: Primarily responsible for raytracing
 */
 
-#include "Cuda_Tracer.hpp"
+#include "cuda_tracer.hpp"
 #include "camera.hpp"
 #include "scene.hpp"
 

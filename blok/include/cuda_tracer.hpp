@@ -24,13 +24,14 @@ class RendererGL;
 class CudaTracer {
 public:
     CudaTracer(unsigned int width, unsigned int height);
-    ~CudaTracer();
+    ~CudaTracer() = default;
 
     void init();
-    void drawFrame(const Camera& cam, const Scene& scene);
+    void drawFrame(Camera& cam, const Scene& scene);
     void shutdown();
     void beginFrame();
     void endFrame();
+    void resize(unsigned int w, unsigned int h);
 
     unsigned int getGLTex() const { return m_glTex; }
     void resetAccum();

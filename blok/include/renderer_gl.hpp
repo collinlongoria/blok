@@ -30,7 +30,7 @@ public:
     ~RendererGL();
 
     void init();
-    void drawFrame(const Camera& cam, const Scene& scene);
+    void drawFrame(Camera& cam, const Scene& scene);
     void shutdown();
 
     // external (e.g. CUDA) provides texture to display

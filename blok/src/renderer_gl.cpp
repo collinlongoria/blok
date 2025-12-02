@@ -6,7 +6,7 @@
 * Description: GL quad and shader setup
 */
 
-#include "Renderer_GL.hpp"
+#include "renderer_gl.hpp"
 #include "window.hpp"
 #include "camera.hpp"
 #include "scene.hpp"
