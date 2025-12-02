@@ -36,8 +36,8 @@ public:
         uploadSvoBuffers(*m_world);
 
         // Build BLAS/TLAS
-        m_world->blas = buildChunkBlas(*m_world);
-        m_world->tlas = buildChunkTlas(*m_world);
+        buildChunkBlas(*m_world);
+        buildChunkTlas(*m_world);
 
         // Update descriptor sets
         m_raytracer.updateDescriptorSet(*m_world);
@@ -45,27 +45,19 @@ public:
     void updateWorld() {
         if (!m_world) return;
 
-        m_device.waitIdle();  // Ensure GPU is done with old data
+        m_device.waitIdle();
 
-        // Re-upload SVO buffers
+        // Reupload SVO buffers
         uploadSvoBuffers(*m_world);
 
-        // Rebuild acceleration structures
-        // TODO: For better performance, only rebuild when chunk AABBs change
-        //       For now, we rebuild everything
-        if (m_world->blas) {
-            m_device.destroyAccelerationStructureKHR(m_world->blas);
-        }
-        if (m_world->tlas) {
-            m_device.destroyAccelerationStructureKHR(m_world->tlas);
-        }
+        // Rebuild BLAS/TLAS
+        buildChunkBlas(*m_world);
+        buildChunkTlas(*m_world);
 
-        m_world->blas = buildChunkBlas(*m_world);
-        m_world->tlas = buildChunkTlas(*m_world);
-
-        // Update descriptor set to point to new buffers
+        // Update descriptor sets
         m_raytracer.updateDescriptorSet(*m_world);
     }
+    void cleanupWorld(WorldSvoGpu& gpuWorld);
 
 private:
     // Device creation
@@ -180,7 +172,7 @@ private:
 
     ShaderManager m_shaderManager;
 
-    WorldSvoGpu* m_world;
+    WorldSvoGpu* m_world = nullptr;
 
     vk::PhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProps{};
     RayTracing m_raytracer;

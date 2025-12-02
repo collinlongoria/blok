@@ -21,8 +21,14 @@ vk::AccelerationStructureKHR Renderer::buildChunkBlas(WorldSvoGpu &gpuWorld) {
         aabbs[i].maxZ = ch.worldMax.z;
     }
 
+    // clean up old AABB buffer if it exists
+    if (gpuWorld.blasAabbBuffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.blasAabbBuffer.handle, gpuWorld.blasAabbBuffer.alloc);
+        gpuWorld.blasAabbBuffer = {};
+    }
+
     // create aabb buffer
-    Buffer aabbBuf = createBuffer(
+    gpuWorld.blasAabbBuffer = createBuffer(
         sizeof(vk::AabbPositionsKHR) * count,
         vk::BufferUsageFlagBits::eShaderDeviceAddress |
         vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR |
@@ -30,9 +36,9 @@ vk::AccelerationStructureKHR Renderer::buildChunkBlas(WorldSvoGpu &gpuWorld) {
         vk::BufferUsageFlagBits::eTransferDst,
         0, VMA_MEMORY_USAGE_AUTO
     );
-    uploadToBuffer(aabbs.data(), sizeof(aabbs[0]) * count, aabbBuf);
+    uploadToBuffer(aabbs.data(), sizeof(aabbs[0]) * count, gpuWorld.blasAabbBuffer);
 
-    vk::BufferDeviceAddressInfo ai{aabbBuf.handle};
+    vk::BufferDeviceAddressInfo ai{gpuWorld.blasAabbBuffer.handle};
     vk::DeviceAddress addr = m_device.getBufferAddress(ai);
 
     // build blas geo info
@@ -60,19 +66,29 @@ vk::AccelerationStructureKHR Renderer::buildChunkBlas(WorldSvoGpu &gpuWorld) {
         range.primitiveCount
     );
 
+    // cleanup old BLAS if it exists
+    if (gpuWorld.blas.handle) {
+        m_device.destroyAccelerationStructureKHR(gpuWorld.blas.handle);
+        gpuWorld.blas.handle = nullptr;
+    }
+    if (gpuWorld.blas.buffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.blas.buffer.handle, gpuWorld.blas.buffer.alloc);
+        gpuWorld.blas.buffer = {};
+    }
+
     // create blas buffer + as handle
-    Buffer asBuffer = createBuffer(
-        sizes.accelerationStructureSize,
-        vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
-        0, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
-    );
+    gpuWorld.blas.buffer = createBuffer(
+            sizes.accelerationStructureSize,
+            vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
+            0, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
+            );
 
     vk::AccelerationStructureCreateInfoKHR ci{};
-    ci.buffer = asBuffer.handle;
+    ci.buffer = gpuWorld.blas.buffer.handle;
     ci.size = sizes.accelerationStructureSize;
     ci.type = vk::AccelerationStructureTypeKHR::eBottomLevel;
 
-    gpuWorld.blas = m_device.createAccelerationStructureKHR(ci);
+    gpuWorld.blas.handle = m_device.createAccelerationStructureKHR(ci);
 
     // scratch buffer
     Buffer scratch = createBuffer(
@@ -85,7 +101,7 @@ vk::AccelerationStructureKHR Renderer::buildChunkBlas(WorldSvoGpu &gpuWorld) {
     vk::DeviceAddress scratchAddr =
         m_device.getBufferAddress({ scratch.handle });
 
-    build.dstAccelerationStructure = gpuWorld.blas;
+    build.dstAccelerationStructure = gpuWorld.blas.handle;
     build.scratchData.deviceAddress = scratchAddr;
 
     // build blas
@@ -103,7 +119,9 @@ vk::AccelerationStructureKHR Renderer::buildChunkBlas(WorldSvoGpu &gpuWorld) {
     m_graphicsQueue.submit(submitInfo, {});
     m_graphicsQueue.waitIdle();
 
-    return gpuWorld.blas;
+    vmaDestroyBuffer(m_allocator, scratch.handle, scratch.alloc);
+
+    return gpuWorld.blas.handle;
 }
 
 vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
@@ -118,7 +136,7 @@ vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
         {
             inst[i].accelerationStructureReference =
                 m_device.getAccelerationStructureAddressKHR(
-                    { gpuWorld.blas });
+                    { gpuWorld.blas.handle });
 
             inst[i].instanceCustomIndex = i; // ChunkMeta index
             inst[i].mask = 0xFF;
@@ -134,18 +152,24 @@ vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
             inst[i].transform = vk::TransformMatrixKHR{t};
         }
 
-        Buffer instBuf = createBuffer(
+        // cleanup old instance buffer if it exists
+        if (gpuWorld.tlasInstanceBuffer.handle) {
+            vmaDestroyBuffer(m_allocator, gpuWorld.tlasInstanceBuffer.handle, gpuWorld.tlasInstanceBuffer.alloc);
+            gpuWorld.tlasInstanceBuffer = {};
+        }
+
+        // create instance buffer (this is stored in gpu world)
+        gpuWorld.tlasInstanceBuffer = createBuffer(
             sizeof(inst[0]) * count,
             vk::BufferUsageFlagBits::eTransferDst |
             vk::BufferUsageFlagBits::eShaderDeviceAddress |
             vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR,
             0, VMA_MEMORY_USAGE_AUTO
         );
-
-        uploadToBuffer(inst.data(), sizeof(inst[0]) * count, instBuf);
+    uploadToBuffer(inst.data(), sizeof(inst[0]) * count, gpuWorld.tlasInstanceBuffer);
 
         vk::DeviceAddress instAddr = m_device.getBufferAddress(
-            { instBuf.handle });
+            { gpuWorld.tlasInstanceBuffer.handle });
 
         // Setup TLAS
         vk::AccelerationStructureGeometryInstancesDataKHR instances{};
@@ -171,18 +195,28 @@ vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
             range.primitiveCount
         );
 
-        Buffer asBuffer = createBuffer(
+        // cleanup old TLAS if it exists
+        if (gpuWorld.tlas.handle) {
+            m_device.destroyAccelerationStructureKHR(gpuWorld.tlas.handle);
+            gpuWorld.tlas.handle = nullptr;
+        }
+        if (gpuWorld.tlas.buffer.handle) {
+            vmaDestroyBuffer(m_allocator, gpuWorld.tlas.buffer.handle, gpuWorld.tlas.buffer.alloc);
+            gpuWorld.tlas.buffer = {};
+        }
+
+        gpuWorld.tlas.buffer = createBuffer(
             sizes.accelerationStructureSize,
             vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
             0, VMA_MEMORY_USAGE_AUTO
         );
 
         vk::AccelerationStructureCreateInfoKHR ci{};
-        ci.buffer = asBuffer.handle;
+        ci.buffer = gpuWorld.tlas.buffer.handle;
         ci.size = sizes.accelerationStructureSize;
         ci.type = vk::AccelerationStructureTypeKHR::eTopLevel;
 
-        gpuWorld.tlas = m_device.createAccelerationStructureKHR(ci);
+        gpuWorld.tlas.handle = m_device.createAccelerationStructureKHR(ci);
 
         // Scratch
         Buffer scratch = createBuffer(
@@ -195,7 +229,7 @@ vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
         vk::DeviceAddress scratchAddr =
             m_device.getBufferAddress({ scratch.handle });
 
-        build.dstAccelerationStructure = gpuWorld.tlas;
+        build.dstAccelerationStructure = gpuWorld.tlas.handle;
         build.scratchData.deviceAddress = scratchAddr;
 
         // Build TLAS
@@ -210,7 +244,9 @@ vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
         m_graphicsQueue.submit(submitInfo, {});
         m_graphicsQueue.waitIdle();
 
-        return gpuWorld.tlas;
+        vmaDestroyBuffer(m_allocator, scratch.handle, scratch.alloc);
+
+        return gpuWorld.tlas.handle;
 }
 
 RayTracing::RayTracing(Renderer* r_)
@@ -277,7 +313,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
     // Acceleration structure
     vk::WriteDescriptorSetAccelerationStructureKHR asInfo{};
     asInfo.accelerationStructureCount = 1;
-    asInfo.pAccelerationStructures = &gpu.tlas;
+    asInfo.pAccelerationStructures = &gpu.tlas.handle;
 
     vk::WriteDescriptorSet asWrite{};
     asWrite.dstSet = rtSet;
@@ -401,7 +437,7 @@ void RayTracing::createPipeline() {
     pci.pStages = stages.data();
     pci.groupCount = groups.size();
     pci.pGroups = groups.data();
-    pci.maxPipelineRayRecursionDepth = 2;
+    pci.maxPipelineRayRecursionDepth = 10;
     pci.layout = rtPipeline.layout;
 
     auto res = r->m_device.createRayTracingPipelinesKHR(
