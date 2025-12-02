@@ -1,3 +1,9 @@
+/*
+* File: chunk_manager.cpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #include "chunk_manager.hpp"
 
 #include <cmath>

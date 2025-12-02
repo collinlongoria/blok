@@ -1,3 +1,9 @@
+/*
+* File: renderer.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef RENDERER_HPP
 #define RENDERER_HPP
 #include "vulkan_context.hpp"
@@ -59,6 +65,9 @@ public:
     }
     void cleanupWorld(WorldSvoGpu& gpuWorld);
 
+    // gui
+    void updatePerformanceData(float fps, float ms);
+
 private:
     // Device creation
     void createWindow();
@@ -82,6 +91,7 @@ private:
     // gui
     void createGui();
     void destroyGui();
+    void renderPerformanceData();
 
     // Upload
     Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO, bool mapped = false);

@@ -1,3 +1,9 @@
+/*
+* File: renderer_draw.cpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #include "image_states.hpp"
 #include "renderer.hpp"
 
@@ -14,7 +20,7 @@ void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
 
 void Renderer::render(const Camera& c, float dt) {
     beginFrame();
-    //ImGui::ShowDemoWindow();
+    renderPerformanceData();
     drawFrame(c, dt);
     endFrame();
 }

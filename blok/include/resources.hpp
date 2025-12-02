@@ -1,3 +1,9 @@
+/*
+* File: resources.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef RESOURCES_HPP
 #define RESOURCES_HPP
 #include "vulkan_context.hpp"

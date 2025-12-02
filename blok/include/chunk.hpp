@@ -1,3 +1,9 @@
+/*
+* File: chunk.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef CHUNK_HPP
 #define CHUNK_HPP
 #include <vector>

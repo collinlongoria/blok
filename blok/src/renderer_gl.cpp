@@ -1,9 +1,8 @@
 /*
-* File: Renderer_GL
+* File: renderer_gl.cpp
 * Project: blok
 * Author: Wes Morosan
 * Created on: 9/12/2025
-* Description: GL quad and shader setup
 */
 
 #include "renderer_gl.hpp"

@@ -1,3 +1,9 @@
+/*
+* File: renderer_raytracing.cpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #include "renderer_raytracing.hpp"
 
 #include "renderer.hpp"

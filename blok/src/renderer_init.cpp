@@ -1,3 +1,9 @@
+/*
+* File: renderer_init.cpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #include <iostream>
 #include <set>
 
