@@ -69,6 +69,11 @@ Renderer::~Renderer() {
 
     destroyGui();
 
+    if (m_world) {
+        cleanupWorld(*m_world);
+        m_world = nullptr;
+    }
+
     // per frame resources
     for (auto& fr : m_frames) {
         if (fr.cmdPool) { m_device.destroyCommandPool(fr.cmdPool); }
@@ -102,6 +107,49 @@ Renderer::~Renderer() {
     if (m_instance) m_instance.destroy();
 }
 
+void Renderer::cleanupWorld(WorldSvoGpu& gpuWorld) {
+    // Wait for GPU to finish any pending work
+    m_device.waitIdle();
+
+    // Destroy TLAS and its resources
+    if (gpuWorld.tlas.handle && gpuWorld.tlas.handle != VK_NULL_HANDLE) {
+        m_device.destroyAccelerationStructureKHR(gpuWorld.tlas.handle);
+        gpuWorld.tlas.handle = nullptr;
+    }
+    if (gpuWorld.tlas.buffer.handle && gpuWorld.tlas.buffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.tlas.buffer.handle, gpuWorld.tlas.buffer.alloc);
+        gpuWorld.tlas.buffer = {};
+    }
+    if (gpuWorld.tlasInstanceBuffer.handle && gpuWorld.tlasInstanceBuffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.tlasInstanceBuffer.handle, gpuWorld.tlasInstanceBuffer.alloc);
+        gpuWorld.tlasInstanceBuffer = {};
+    }
+
+    // Destroy BLAS and its resources
+    if (gpuWorld.blas.handle && gpuWorld.blas.handle != VK_NULL_HANDLE) {
+        m_device.destroyAccelerationStructureKHR(gpuWorld.blas.handle);
+        gpuWorld.blas.handle = nullptr;
+    }
+    if (gpuWorld.blas.buffer.handle && gpuWorld.blas.buffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.blas.buffer.handle, gpuWorld.blas.buffer.alloc);
+        gpuWorld.blas.buffer = {};
+    }
+    if (gpuWorld.blasAabbBuffer.handle && gpuWorld.blasAabbBuffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.blasAabbBuffer.handle, gpuWorld.blasAabbBuffer.alloc);
+        gpuWorld.blasAabbBuffer = {};
+    }
+
+    // Destroy SVO and chunk buffers
+    if (gpuWorld.svoBuffer.handle && gpuWorld.svoBuffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.svoBuffer.handle, gpuWorld.svoBuffer.alloc);
+        gpuWorld.svoBuffer = {};
+    }
+    if (gpuWorld.chunkBuffer.handle && gpuWorld.chunkBuffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.chunkBuffer.handle, gpuWorld.chunkBuffer.alloc);
+        gpuWorld.chunkBuffer = {};
+    }
+}
+
 void Renderer::createWindow() {
     if (!glfwInit()) {
         throw std::runtime_error("Failed to initialize GLFW!");
@@ -110,7 +158,7 @@ void Renderer::createWindow() {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
-    m_window = glfwCreateWindow(m_width, m_height, "SVO Test", nullptr, nullptr);
+    m_window = glfwCreateWindow(m_width, m_height, "Blok!", nullptr, nullptr);
     if (!m_window) {
         glfwTerminate();
         throw std::runtime_error("Failed to create GLFW window");

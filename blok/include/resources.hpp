@@ -83,15 +83,23 @@ static_assert(sizeof(ChunkGpu) == 48, "expected 48 bytes");
 
 namespace blok {
 
+struct AccelerationStructure {
+    vk::AccelerationStructureKHR handle{};
+    Buffer buffer{};
+};
+
 struct WorldSvoGpu {
     std::vector<SvoNode> globalNodes;
     std::vector<ChunkGpu> globalChunks;
 
-    Buffer svoBuffer;
-    Buffer chunkBuffer;
+    Buffer svoBuffer{};
+    Buffer chunkBuffer{};
 
-    vk::AccelerationStructureKHR blas;
-    vk::AccelerationStructureKHR tlas;
+    AccelerationStructure blas{};
+    AccelerationStructure tlas{};
+
+    Buffer blasAabbBuffer{};
+    Buffer tlasInstanceBuffer{};
 };
 
 }
