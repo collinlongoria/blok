@@ -1,10 +1,8 @@
 /*
-* File: Renderer_GL
+* File: renderer_gl.hpp
 * Project: blok
 * Author: Wes Morosan
 * Created on: 9/12/2025
-*
-* Description: generates quad
 */
 #ifndef RENDERER_GL_HPP
 #define RENDERER_GL_HPP

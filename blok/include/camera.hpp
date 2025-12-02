@@ -1,3 +1,9 @@
+/*
+* File: camera.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef CAMERA_HPP
 #define CAMERA_HPP
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE

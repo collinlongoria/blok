@@ -1,10 +1,8 @@
 /*
-* File: math
+* File: math.hpp
 * Project: blok
 * Author: Collin Longoria
 * Created on: 9/11/2025
-*
-* Description: Math wrapper
 */
 
 #ifndef BLOK_MATH_HPP

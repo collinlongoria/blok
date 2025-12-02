@@ -1,10 +1,8 @@
 /*
-* File: scene
+* File: scene.hpp
 * Project: blok
 * Author: Wes Morosan
 * Created on: 9/12/2025
-*
-* Description: Simple scene with spheres and planes
 */
 #ifndef SCENE_HPP
 #define SCENE_HPP  

@@ -1,10 +1,13 @@
 TODO (that I know of):
 
 Refactor SVO rebuild into compute shader
-SVO storing PBR + color and optional textures
+SVO storing material index for PBR + color
 Denoising and accumulation
 obj loader and voxelizer
 noise gen for world
-update file headers
 make push constant for raytracing that allows for random depth and such
 incorporate julias imgui
+shadow payload
+optimize lighting (do this after PBR is implemented)
+fix issue with reflective surfaces having visible edges
+create non-pathtraced pipeline (raytraced, not using acceleration extension)

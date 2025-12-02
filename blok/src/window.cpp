@@ -1,14 +1,8 @@
 /*
-* File: window
+* File: window.cpp
 * Project: blok
 * Author: Collin Longoria / Wes Morosan
 * Created on: 9/8/2025
-*/
-
-/*
-* File: window.cpp
-* Project: blok
-* Description: GLFW wrapper window implementation
 */
 
 #include "window.hpp"

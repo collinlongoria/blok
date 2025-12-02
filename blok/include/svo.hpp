@@ -1,3 +1,9 @@
+/*
+* File: svo.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef SVO_HPP
 #define SVO_HPP
 #include <cassert>

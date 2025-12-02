@@ -1,10 +1,8 @@
 /*
-* File: app
+* File: app.hpp
 * Project: blok
 * Author: Collin Longoria
 * Created on: 9/12/2025
-*
-* Description: Main entry point for blok
 */
 #ifndef BLOK_APP_HPP
 #define BLOK_APP_HPP

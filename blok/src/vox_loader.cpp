@@ -1,10 +1,8 @@
 /*
-* File: vox_loader
+* File: vox_loader.cpp
 * Project: blok
 * Author: Collin Longoria
 * Created on: 12/2/2025
-*
-* Description:
 */
 
 #include "vox_loader.hpp"

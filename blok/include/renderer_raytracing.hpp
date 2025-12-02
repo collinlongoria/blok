@@ -1,3 +1,9 @@
+/*
+* File: renderer_raytracing.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef RENDERER_RAYTRACING_HPP
 #define RENDERER_RAYTRACING_HPP
 #include "resources.hpp"

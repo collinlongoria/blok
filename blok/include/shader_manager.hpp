@@ -1,3 +1,9 @@
+/*
+* File: shader_manager.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef SHADER_MANAGER_HPP
 #define SHADER_MANAGER_HPP
 #include <string>

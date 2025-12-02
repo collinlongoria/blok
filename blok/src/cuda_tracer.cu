@@ -1,9 +1,8 @@
 /*
-* File: Renderer_GL
+* File: cuda_tracer.cu
 * Project: blok
 * Author: Wes Morosan
 * Created on: 9/10/2025
-* Description: Primarily responsible for raytracing
 */
 
 #include "cuda_tracer.hpp"

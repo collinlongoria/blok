@@ -1,3 +1,9 @@
+/*
+* File: chunk_manager.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef CHUNK_MANAGER_HPP
 #define CHUNK_MANAGER_HPP
 #include <unordered_map>

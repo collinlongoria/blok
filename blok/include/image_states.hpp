@@ -1,3 +1,9 @@
+/*
+* File: image_states.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef IMAGE_STATES_HPP
 #define IMAGE_STATES_HPP
 #include "vulkan_context.hpp"

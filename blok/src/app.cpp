@@ -1,5 +1,5 @@
 /*
-* File: app
+* File: app.cpp
 * Project: blok
 * Author: Collin Longoria / Wes Morosan
 * Created on: 9/12/2025
@@ -135,6 +135,8 @@ void App::update() {
             if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) g_camera.processKeyboard('A', dt);
             if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) g_camera.processKeyboard('D', dt);
 
+            if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(win, true);
+
             // ImGui + present path (one swap inside endFrame)
             m_cudaTracer->drawFrame(g_camera, g_scene);
             m_rendererGL->beginFrame();
@@ -162,6 +164,12 @@ void App::update() {
             if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) g_camera.processKeyboard('S', dt);
             if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) g_camera.processKeyboard('A', dt);
             if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) g_camera.processKeyboard('D', dt);
+
+            if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(win, true);
+
+            float fps = 1.0f / dt;
+            float ms = dt * 1000.0f;
+            m_renderer->updatePerformanceData((int)fps, ms);
 
             m_renderer->render(g_camera, dt);
         }

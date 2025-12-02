@@ -1,3 +1,9 @@
+/*
+* File: shader_manager.cpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #include "shader_manager.hpp"
 
 #include <fstream>
