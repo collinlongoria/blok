@@ -1,6 +1,10 @@
 #include "image_states.hpp"
 #include "renderer.hpp"
 
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_vulkan.h"
+
 namespace blok {
 
 bool resizeNeeded = false;
@@ -10,6 +14,7 @@ void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
 
 void Renderer::render(const Camera& c, float dt) {
     beginFrame();
+    ImGui::ShowDemoWindow();
     drawFrame(c, dt);
     endFrame();
 }
@@ -17,6 +22,11 @@ void Renderer::render(const Camera& c, float dt) {
 void Renderer::beginFrame() {
     // reset UBO allocator for this frame
     m_frames[m_frameIndex].uboHead = 0;
+
+    // gui
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
 }
 
 void Renderer::drawFrame(const Camera& c, float dt) {
@@ -120,6 +130,30 @@ void Renderer::drawFrame(const Camera& c, float dt) {
         // Can do render stuff here
     cmdEndRendering(fr.cmd);
     */
+    // imgui
+    {
+        vk::RenderingAttachmentInfo uiColor{};
+        uiColor.imageView   = sw.view;
+        uiColor.imageLayout = vk::ImageLayout::eColorAttachmentOptimal;
+        uiColor.loadOp      = vk::AttachmentLoadOp::eLoad;   // keep scene
+        uiColor.storeOp     = vk::AttachmentStoreOp::eStore;
+        // clearValue ignored with eLoad
+
+        vk::RenderingInfo uiInfo{};
+        uiInfo.renderArea        = vk::Rect2D({0, 0}, m_swapExtent);
+        uiInfo.layerCount        = 1;
+        uiInfo.colorAttachmentCount = 1;
+        uiInfo.pColorAttachments = &uiColor;
+        uiInfo.pDepthAttachment  = nullptr;
+        uiInfo.pStencilAttachment= nullptr;
+
+        fr.cmd.beginRendering(uiInfo);
+
+        ImGui::Render();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), static_cast<VkCommandBuffer>(fr.cmd), VK_NULL_HANDLE);
+
+        fr.cmd.endRendering();
+    }
 
     it.ensure(sw, Role::Present);
     m_swapImageLayouts[imageIndex] = sw.currentLayout;
