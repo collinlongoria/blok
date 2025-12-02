@@ -56,6 +56,8 @@ Renderer::Renderer(int width, int height)
 
     m_raytracer.createPipeline();
     m_raytracer.createSBT();
+
+    createGui();
 }
 
 Renderer::~Renderer() {
@@ -64,6 +66,8 @@ Renderer::~Renderer() {
 
     if (!m_device) return;
     m_device.waitIdle();
+
+    destroyGui();
 
     // per frame resources
     for (auto& fr : m_frames) {

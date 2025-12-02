@@ -87,6 +87,10 @@ private:
     void createPerFrameUniforms();
     void queryRayTracingProperties();
 
+    // gui
+    void createGui();
+    void destroyGui();
+
     // Upload
     Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO, bool mapped = false);
     void uploadToBuffer(const void* src, vk::DeviceSize size, Buffer& dst, vk::DeviceSize dstOffset = 0);
@@ -164,6 +168,7 @@ private:
     Image m_outputImage{};
 
     DescriptorAllocatorGrowable m_descAlloc;
+    vk::DescriptorPool m_guiDescriptorPool{};
 
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
     uint32_t m_frameIndex = 0;
