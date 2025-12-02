@@ -10,3 +10,4 @@ obj loader and voxelizer
 noise gen for world
 update file headers
 fix formatting with switch cases
+make push constant for raytracing that allows for random depth and such
