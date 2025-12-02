@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 project(
   blok
-  VERSION 0.1.0
+  VERSION 1.0.0
   LANGUAGES C CXX
 )
 
@@ -31,10 +31,12 @@ set(CMAKE_CUDA_RUNTIME_LIBRARY Shared)
 
 # ---- Subdirectories ----
 add_subdirectory(external/glfw) # builds glfw3
-add_subdirectory(external/assimp) # builds assimp
-add_subdirectory(external/yaml-cpp) # builds yaml-cpp
 add_subdirectory(external/VulkanMemoryAllocator) # builds vma
-add_subdirectory(external/shader-pipe)
+# the following 4 are related to SPIR-V and shader compilation
+add_subdirectory(external/SPIRV-Headers)
+add_subdirectory(external/SPIRV-Tools)
+add_subdirectory(external/SPIRV-Cross)
+add_subdirectory(external/glslang)
 add_subdirectory(blok)
 
 # ---- Project-wide properties ----

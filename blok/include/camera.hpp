@@ -1,36 +1,73 @@
-/*
-* File: camera
-* Project: blok
-* Author: Wes Morosan
-* Created on: 9/12/2025
-*
-* Description: Camera struct for 3D navigation
-*/
 #ifndef CAMERA_HPP
 #define CAMERA_HPP
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <glm.hpp>
-
-#include "math.hpp"
+#include <gtc/matrix_transform.hpp>
 
 namespace blok {
 
-class Camera {
+struct Camera {
 public:
-    Vector3 position{0.0f, 0.0f, 3.0f};
+    glm::vec3 position{0.0f, 0.0f, 1.0f};
     float yaw   = -90.0f;
     float pitch = 0.0f;
     float fov   = 60.0f;
 
-    [[nodiscard]] Vector3 forward() const;
-    [[nodiscard]] Vector3 right() const;
-    [[nodiscard]] Vector3 up() const;
+    mutable bool cameraChanged = false;
 
-    [[nodiscard]] Matrix4 view() const;
-    [[nodiscard]] Matrix4 projection(float aspect, float zNear, float zFar) const;
+    [[nodiscard]]
+    inline glm::vec3 forward() const {
+        glm::vec3 dir;
+        dir.x = cos(glm::radians(yaw)) * cos(glm::radians(pitch));
+        dir.y = sin(glm::radians(pitch));
+        dir.z = sin(glm::radians(yaw)) * cos(glm::radians(pitch));
+        return glm::normalize(dir);
+    }
 
-    void processKeyboard(char key, float dt);
-    void processMouse(float dx, float dy);
+    [[nodiscard]]
+    inline glm::vec3 right() const {
+        return glm::normalize(glm::cross(forward(), glm::vec3(0.0f,1.0f,0.0f)));
+    }
+
+    [[nodiscard]]
+    inline glm::vec3 up() const {
+        return glm::normalize(glm::cross(right(), forward()));
+    }
+
+    [[nodiscard]]
+    inline glm::mat4 view() const {
+        const glm::vec3 f = forward();
+        return glm::lookAt(position, position + f, up());
+    }
+
+    [[nodiscard]]
+    inline glm::mat4 projection(float aspect, float zNear, float zFar) const {
+        glm::mat4 p = glm::perspective(glm::radians(fov), aspect, zNear, zFar);
+        p[1][1] *= -1.0f; // vulkan requirement
+        return p;
+    }
+
+    void processKeyboard(char key, float dt) {
+        float speed = 40.0f * dt;
+        if (key == 'W') position += forward() * speed;
+        if (key == 'S') position -= forward() * speed;
+        if (key == 'A') position -= right() * speed;
+        if (key == 'D') position += right() * speed;
+
+        cameraChanged = true;
+    }
+    void processMouse(float dx, float dy) {
+        float sens = 0.01f;
+        yaw   += dx * sens;
+        pitch += dy * sens;
+
+        if (pitch > 89.0f)  pitch = 89.0f;
+        if (pitch < -89.0f) pitch = -89.0f;
+
+        cameraChanged = true;
+    }
 };
 
-} // namespace blok
-#endif // CAMERA_HPP
+}
+
+#endif //CAMERA_HPP

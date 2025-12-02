@@ -1,0 +1,252 @@
+#version 460
+#extension GL_EXT_ray_tracing : require
+
+struct SvoNode {
+    uint childMask;
+    uint firstChild;
+    uint color;
+    float occupancy;
+};
+
+struct ChunkGpu {
+    uint nodeOffset;
+    uint nodeCount;
+    uint reserved0;
+    uint reserved1;
+    vec3 worldMin;
+    float pad0;
+    vec3 worldMax;
+    float pad1;
+};
+
+layout(binding = 1, set = 0) readonly buffer SvoBuffer {
+    SvoNode nodes[];
+};
+
+layout(binding = 2, set = 0) readonly buffer ChunkBuffer {
+    ChunkGpu chunks[];
+};
+
+struct HitAttribs {
+    vec3 normal;
+    vec3 color;
+};
+hitAttributeEXT HitAttribs hitAttribs;
+
+const uint INVALID_NODE_INDEX = 0xFFFFFFFF;
+const uint MAX_DEPTH = 7u;
+const uint MAX_STACK = 12u;
+
+// ray-AABB slab test
+vec2 intersectAABB(vec3 rayOrigin, vec3 invDir, vec3 boxMin, vec3 boxMax) {
+    vec3 t0 = (boxMin - rayOrigin) * invDir;
+    vec3 t1 = (boxMax - rayOrigin) * invDir;
+
+    vec3 tmin = min(t0, t1);
+    vec3 tmax = max(t0, t1);
+
+    float tNear = max(max(tmin.x, tmin.y), tmin.z);
+    float tFar = min(min(tmax.x, tmax.y), tmax.z);
+
+    return vec2(tNear, tFar);
+}
+
+// get the minimum corner of a child octant
+vec3 getChildMin(vec3 parentMin, float childSize, uint octant) {
+    return parentMin + vec3(
+        (octant & 1u) != 0u ? childSize : 0.0,
+        (octant & 2u) != 0u ? childSize : 0.0,
+        (octant & 4u) != 0u ? childSize : 0.0
+    );
+}
+
+// compute child traversal order mask based on ray direction
+// XOR with child index gives front-to-back order
+uint computeChildOrderMask(vec3 rayDir) {
+    uint mask = 0u;
+    if (rayDir.x < 0.0) mask |= 1u;
+    if (rayDir.y < 0.0) mask |= 2u;
+    if (rayDir.z < 0.0) mask |= 4u;
+    return mask;
+}
+
+// compute face normal from hit point
+vec3 computeNormal(vec3 hitPoint, vec3 boxMin, vec3 boxMax, vec3 rayDir) {
+    vec3 center = (boxMin + boxMax) * 0.5;
+    vec3 halfSize = (boxMax - boxMin) * 0.5;
+    vec3 d = abs((hitPoint - center) / halfSize);
+
+    const float eps = 1e-3;
+
+    if (d.x > d.y - eps && d.x > d.z - eps) {
+        return vec3(-sign(rayDir.x), 0.0, 0.0);
+    } else if (d.y > d.z - eps) {
+        return vec3(0.0, -sign(rayDir.y), 0.0);
+    } else {
+        return vec3(0.0, 0.0, -sign(rayDir.z));
+    }
+}
+
+void main() {
+    uint chunkIndex = gl_PrimitiveID;
+    ChunkGpu chunk = chunks[chunkIndex];
+
+    vec3 rayOrigin = gl_WorldRayOriginEXT;
+    vec3 rayDir = gl_WorldRayDirectionEXT;
+
+    // precompute inverse direction
+    vec3 invDir = vec3(
+        abs(rayDir.x) > 1e-8 ? 1.0 / rayDir.x : (rayDir.x >= 0.0 ? 1e30 : -1e30),
+        abs(rayDir.y) > 1e-8 ? 1.0 / rayDir.y : (rayDir.y >= 0.0 ? 1e30 : -1e30),
+        abs(rayDir.z) > 1e-8 ? 1.0 / rayDir.z : (rayDir.z >= 0.0 ? 1e30 : -1e30)
+    );
+
+    // test chunk AABB
+    vec2 chunkT = intersectAABB(rayOrigin, invDir, chunk.worldMin, chunk.worldMax);
+    float tNear = max(chunkT.x, gl_RayTminEXT);
+    float tFar = min(chunkT.y, gl_RayTmaxEXT);
+
+    if (tNear > tFar || tFar < 0.0) {
+        return;
+    }
+
+    uint childOrderMask = computeChildOrderMask(rayDir);
+
+    // stack arrays
+    uint  sNodeIndex[MAX_STACK];
+    uint  sDepth[MAX_STACK];
+    vec3  sNodeMin[MAX_STACK];
+    float sNodeSize[MAX_STACK];
+    uint  sNextChild[MAX_STACK];
+
+    // push root
+    float chunkSize = chunk.worldMax.x - chunk.worldMin.x;
+    sNodeIndex[0] = chunk.nodeOffset;
+    sDepth[0] = 0u;
+    sNodeMin[0] = chunk.worldMin;
+    sNodeSize[0] = chunkSize;
+    sNextChild[0] = 0u;
+    uint stackPtr = 1u;
+
+    float bestT = gl_RayTmaxEXT;
+    bool foundHit = false;
+    vec3 bestNormal;
+    vec3 bestColor;
+
+    uint iter = 0u;
+
+    while (stackPtr > 0u && iter < 256u) {
+        iter++;
+
+        uint si = stackPtr - 1u;
+
+        // are all children processed?
+        if (sNextChild[si] >= 8u) {
+            stackPtr--;
+            continue;
+        }
+
+        uint nodeIndex = sNodeIndex[si];
+        uint depth = sDepth[si];
+        vec3 nodeMin = sNodeMin[si];
+        float nodeSize = sNodeSize[si];
+
+        // bounds check
+        if (nodeIndex >= chunk.nodeOffset + chunk.nodeCount) {
+            stackPtr--;
+            continue;
+        }
+
+        SvoNode node = nodes[nodeIndex];
+        float childSize = nodeSize * 0.5;
+
+        // find next valid child
+        bool foundChild = false;
+        uint childNodeIndex;
+        vec3 childMin;
+
+        while (sNextChild[si] < 8u) {
+            uint c = sNextChild[si];
+            sNextChild[si] = c + 1u;
+
+            uint octant = c ^ childOrderMask;  // front to back order
+
+            // does child exist?
+            if ((node.childMask & (1u << octant)) == 0u) {
+                continue;
+            }
+
+            // are children allocated?
+            if (node.firstChild == INVALID_NODE_INDEX) {
+                continue;
+            }
+
+            // compute child bounds
+            childMin = getChildMin(nodeMin, childSize, octant);
+            vec3 childMax = childMin + vec3(childSize);
+
+            // ray-AABB test
+            vec2 childT = intersectAABB(rayOrigin, invDir, childMin, childMax);
+            float childTNear = max(childT.x, gl_RayTminEXT);
+            float childTFar = min(childT.y, bestT);
+
+            if (childTNear > childTFar || childTFar < 0.0) {
+                continue;
+            }
+
+            childNodeIndex = chunk.nodeOffset + node.firstChild + octant;
+
+            // bounds check
+            if (childNodeIndex >= chunk.nodeOffset + chunk.nodeCount) {
+                continue;
+            }
+
+            foundChild = true;
+            break;
+        }
+
+        if (!foundChild) {
+            stackPtr--;
+            continue;
+        }
+
+        // is this a leaf level?
+        if (depth + 1u >= MAX_DEPTH) {
+            SvoNode leaf = nodes[childNodeIndex];
+
+            if (leaf.occupancy > 0.0) {
+                vec3 childMax = childMin + vec3(childSize);
+                vec2 leafT = intersectAABB(rayOrigin, invDir, childMin, childMax);
+                float hitT = max(leafT.x, gl_RayTminEXT);
+
+                if (hitT < bestT && hitT >= gl_RayTminEXT) {
+                    bestT = hitT;
+                    foundHit = true;
+                    bestNormal = computeNormal(rayOrigin + rayDir * hitT, childMin, childMax, rayDir);
+                    bestColor = vec3(
+                        float((leaf.color >> 16) & 0xFFu) / 255.0,
+                        float((leaf.color >> 8) & 0xFFu) / 255.0,
+                        float(leaf.color & 0xFFu) / 255.0
+                    );
+                }
+            }
+            continue;  // don't push leaves
+        }
+
+        // push child for traversal
+        if (stackPtr < MAX_STACK) {
+            sNodeIndex[stackPtr] = childNodeIndex;
+            sDepth[stackPtr] = depth + 1u;
+            sNodeMin[stackPtr] = childMin;
+            sNodeSize[stackPtr] = childSize;
+            sNextChild[stackPtr] = 0u;
+            stackPtr++;
+        }
+    }
+
+    if (foundHit) {
+        hitAttribs.normal = bestNormal;
+        hitAttribs.color = bestColor;
+        reportIntersectionEXT(bestT, 0);
+    }
+}
