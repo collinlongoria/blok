@@ -47,6 +47,7 @@ struct FrameResources {
     vk::DeviceSize uboHead = 0;
 };
 
+// TODO check if i can use alignas instead of padding
 struct alignas(16) FrameUBO {
     // Cam
     glm::mat4 view{};
@@ -54,6 +55,12 @@ struct alignas(16) FrameUBO {
     glm::vec3 camPos{};
 
     float delta_time = 0.0f;
+
+    // Pathtracing
+    uint32_t frame_count = 0; // increment each frame
+    uint32_t sample_count = 1; // samples per pixel per frame
+    float padding1 = 0.0f;
+    float padding2 = 0.0f;
 };
 
 }
