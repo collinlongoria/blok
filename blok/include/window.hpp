@@ -40,8 +40,11 @@ public:
         if (m_window) glfwSetKeyCallback(m_window, callback);
     }
 
+    
+
 private:
     void onResize(int width, int height);
+    static void glfwCallback(GLFWwindow* window, int width, int height);
 
     uint32_t    m_width = 0, m_height = 0;
     std::string m_name;

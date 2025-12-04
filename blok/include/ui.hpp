@@ -29,7 +29,7 @@ namespace blok {
             CAMERA_CONTROL
         };
 
-        UI(const std::shared_ptr<Window>& window);
+        UI(Window* window);
 
         ~UI();
 
@@ -45,6 +45,7 @@ namespace blok {
         void displayData();
 
         
+        void beginWindow(Vector2 position, std::string windowName = "New Window");
         void beginWindow(std::string windowName = "New Window");
         /*Must be called after beginWindow*/
         void endWindow();
@@ -62,7 +63,7 @@ namespace blok {
         
          /*Controls*/
          MouseBehaviour m_mouseSetting;
-         const std::shared_ptr<Window>& m_window;
+         Window* m_window;
          Camera* m_camera;
 
          /*Data*/

@@ -21,6 +21,12 @@
 
 using namespace blok;
 
+void Window::glfwCallback(GLFWwindow* window, int width, int height)
+{
+    auto self = (Window*)glfwGetWindowUserPointer(window);
+    if (self) self->onResize(width, height);
+}
+
 Window::Window(uint32_t width, uint32_t height, const std::string& name, GraphicsApi backend)
     : m_width(width), m_height(height), m_name(name), m_window(nullptr), m_backend(backend)
 {
@@ -59,10 +65,7 @@ Window::Window(uint32_t width, uint32_t height, const std::string& name, Graphic
 
     glfwSetWindowUserPointer(m_window, this);
 
-    glfwSetFramebufferSizeCallback(m_window, [](GLFWwindow* w, int fbw, int fbh) {
-        auto* self = static_cast<Window*>(glfwGetWindowUserPointer(w));
-        if (self) self->onResize(fbw, fbh);
-    });
+    glfwSetFramebufferSizeCallback(m_window, glfwCallback);
 }
 
 Window::~Window() {
