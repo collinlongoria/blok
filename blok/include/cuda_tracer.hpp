@@ -1,9 +1,8 @@
 /*
-* File: Cuda_Tracer
+* File: cuda_tracer.hpp
 * Project: blok
 * Author: Wes Morosan
 * Created on: 9/12/2025
-* Description: Raytracing core
 */
 #ifndef RENDERER_CUDA_HPP
 #define RENDERER_CUDA_HPP

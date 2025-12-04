@@ -1,3 +1,9 @@
+/*
+* File: descriptors.cpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #include "descriptors.hpp"
 
 namespace blok {

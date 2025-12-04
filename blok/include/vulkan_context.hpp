@@ -1,3 +1,9 @@
+/*
+* File: vulkan_context.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef VULKAN_CONTEXT_HPP
 #define VULKAN_CONTEXT_HPP
 

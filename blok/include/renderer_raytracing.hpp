@@ -1,5 +1,12 @@
+/*
+* File: renderer_raytracing.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef RENDERER_RAYTRACING_HPP
 #define RENDERER_RAYTRACING_HPP
+#include <array>
 #include "resources.hpp"
 #include "vulkan_context.hpp"
 
@@ -24,22 +31,24 @@ class RayTracing {
 public:
     Renderer* r;
 
+    static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+
     vk::DescriptorSetLayout rtSetLayout{};
-    vk::DescriptorSet rtSet{};
+    std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT> rtSets{};
 
     RayTracingPipeline rtPipeline{};
 
 public:
-    RayTracing(Renderer* r);
+    explicit RayTracing(Renderer* r);
 
     void createDescriptorSetLayout();
     void allocateDescriptorSet();
-    void updateDescriptorSet(const WorldSvoGpu&);
+    void updateDescriptorSet(const WorldSvoGpu&, uint32_t frameIndex);
 
     void createPipeline();
     void createSBT();
 
-    void dispatchRayTracing(vk::CommandBuffer cmd, uint32_t w, uint32_t h);
+    void dispatchRayTracing(vk::CommandBuffer cmd, uint32_t w, uint32_t h, uint32_t frameIndex);
 };
 
 }

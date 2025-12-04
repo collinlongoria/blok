@@ -1,3 +1,9 @@
+/*
+* File: image_states.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef IMAGE_STATES_HPP
 #define IMAGE_STATES_HPP
 #include "vulkan_context.hpp"
@@ -5,7 +11,7 @@
 
 namespace blok {
 
-enum class Role { General, StorageWrite, Sampled, ColorAttachment, DepthAttachment, Present, TransferDst, TransferSrc};
+enum class Role { General, StorageWrite, Sampled, ShaderReadOnly, ColorAttachment, DepthAttachment, Present, TransferDst, TransferSrc};
 
 struct ImageState {
     vk::ImageLayout layout = vk::ImageLayout::eUndefined;
@@ -43,6 +49,7 @@ private:
             case Role::General: return {vk::ImageLayout::eGeneral, vk::ImageAspectFlagBits::eColor};
             case Role::StorageWrite: return {vk::ImageLayout::eGeneral, vk::ImageAspectFlagBits::eColor};
             case Role::Sampled: return {vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor};
+            case Role::ShaderReadOnly: return {vk::ImageLayout::eShaderReadOnlyOptimal, vk::ImageAspectFlagBits::eColor};
             case Role::ColorAttachment: return {vk::ImageLayout::eColorAttachmentOptimal, vk::ImageAspectFlagBits::eColor};
             case Role::DepthAttachment: return {vk::ImageLayout::eDepthAttachmentOptimal, vk::ImageAspectFlagBits::eDepth};
             case Role::Present: return {vk::ImageLayout::ePresentSrcKHR, vk::ImageAspectFlagBits::eColor};
@@ -55,7 +62,7 @@ private:
     static vk::PipelineStageFlags2 stagesFor(vk::ImageLayout l){
         if (l==vk::ImageLayout::eUndefined) return vk::PipelineStageFlagBits2::eTopOfPipe;
         if (l==vk::ImageLayout::eGeneral) return vk::PipelineStageFlagBits2::eRayTracingShaderKHR;
-        if (l==vk::ImageLayout::eShaderReadOnlyOptimal) return vk::PipelineStageFlagBits2::eFragmentShader;
+        if (l==vk::ImageLayout::eShaderReadOnlyOptimal) return vk::PipelineStageFlagBits2::eComputeShader | vk::PipelineStageFlagBits2::eFragmentShader;
         if (l==vk::ImageLayout::eColorAttachmentOptimal) return vk::PipelineStageFlagBits2::eColorAttachmentOutput;
         if (l==vk::ImageLayout::eDepthAttachmentOptimal) return vk::PipelineStageFlagBits2::eEarlyFragmentTests;
         if (l==vk::ImageLayout::eTransferDstOptimal || l==vk::ImageLayout::eTransferSrcOptimal) return vk::PipelineStageFlagBits2::eTransfer;

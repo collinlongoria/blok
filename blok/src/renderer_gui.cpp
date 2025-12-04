@@ -1,10 +1,8 @@
 /*
-* File: renderer_gui
+* File: renderer_gui.cpp
 * Project: blok
 * Author: Collin Longoria
 * Created on: 12/1/2025
-*
-* Description:
 */
 #include "renderer.hpp"
 
@@ -13,6 +11,17 @@
 #include "imgui_impl_vulkan.h"
 
 namespace blok {
+
+static constexpr int HISTORY_SIZE = 120;
+
+static float g_fps = 0;
+static float g_ms = 0.f;
+std::array<float, HISTORY_SIZE> fpsHistory{};
+std::array<float, HISTORY_SIZE> frameTimeHistory{};
+static float fpsMin = 0.0f, fpsMax = 60.0f;
+static float frameTimeMin = 0.0f, frameTimeMax = 16.67f;
+float frame_count = 0.f;
+float total_time = 0.f;
 
 void Renderer::createGui() {
     // core stuff
@@ -95,6 +104,75 @@ void Renderer::destroyGui() {
         m_device.destroyDescriptorPool(m_guiDescriptorPool);
         m_guiDescriptorPool = nullptr;
     }
+}
+
+void Renderer::updatePerformanceData(float fps, float ms) {
+    // Shift history and add new values
+    for (int i = 0; i < HISTORY_SIZE - 1; i++) {
+        fpsHistory[i] = fpsHistory[i + 1];
+        frameTimeHistory[i] = frameTimeHistory[i + 1];
+    }
+    fpsHistory[HISTORY_SIZE - 1] = fps;
+    frameTimeHistory[HISTORY_SIZE - 1] = ms;
+
+    // Update min/max for scaling
+    fpsMin = fpsMax = fpsHistory[0];
+    frameTimeMin = frameTimeMax = frameTimeHistory[0];
+    for (int i = 1; i < HISTORY_SIZE; i++) {
+        if (fpsHistory[i] < fpsMin) fpsMin = fpsHistory[i];
+        if (fpsHistory[i] > fpsMax) fpsMax = fpsHistory[i];
+        if (frameTimeHistory[i] < frameTimeMin) frameTimeMin = frameTimeHistory[i];
+        if (frameTimeHistory[i] > frameTimeMax) frameTimeMax = frameTimeHistory[i];
+    }
+
+    frame_count++;
+    total_time += (ms / 1000);
+}
+
+void Renderer::renderPerformanceData() {
+    ImGuiWindowFlags flags =
+                ImGuiWindowFlags_NoTitleBar |
+                ImGuiWindowFlags_NoResize |
+                ImGuiWindowFlags_NoMove |
+                ImGuiWindowFlags_NoScrollbar |
+                ImGuiWindowFlags_NoScrollWithMouse |
+                ImGuiWindowFlags_NoCollapse |
+                ImGuiWindowFlags_AlwaysAutoResize |
+                ImGuiWindowFlags_NoBackground |
+                ImGuiWindowFlags_NoSavedSettings |
+                ImGuiWindowFlags_NoFocusOnAppearing |
+                ImGuiWindowFlags_NoNav;
+
+    // top left corner
+    ImGui::SetNextWindowPos(ImVec2(10.0f, 10.0f), ImGuiCond_Always);
+
+    ImGui::Begin("##PerformancePanel", nullptr, flags);
+
+    const ImVec2 graphSize(200.0f, 50.0f);
+
+    // fps
+    float currentFps = fpsHistory[HISTORY_SIZE - 1];
+    char fpsOverlay[32];
+    snprintf(fpsOverlay, sizeof(fpsOverlay), "FPS: %.1f", currentFps);
+
+    ImGui::PlotLines("##FPS", fpsHistory.data(), HISTORY_SIZE, 0, fpsOverlay,
+                     fpsMin * 0.9f, fpsMax * 1.1f, graphSize);
+
+    ImGui::SameLine();
+
+    ImGui::Text("Average FPS: %.1f", (frame_count / total_time));
+
+    ImGui::Spacing();
+
+    // frame time
+    float currentFrameTime = frameTimeHistory[HISTORY_SIZE - 1];
+    char frameTimeOverlay[32];
+    snprintf(frameTimeOverlay, sizeof(frameTimeOverlay), "Frame: %.2f ms", currentFrameTime);
+
+    ImGui::PlotLines("##FrameTime", frameTimeHistory.data(), HISTORY_SIZE, 0, frameTimeOverlay,
+                     frameTimeMin * 0.9f, frameTimeMax * 1.1f, graphSize);
+
+    ImGui::End();
 }
 
 }

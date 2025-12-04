@@ -1,12 +1,18 @@
 TODO (that I know of):
 
 Refactor SVO rebuild into compute shader
-TLAS/BLAS buffers and related buffers not being destroyed at shutdown
-SVO storing PBR + color and optional textures
-Path traced lighting
-Denoising and accumulation
-vox loader
+SVO storing material index for PBR + color
 obj loader and voxelizer
 noise gen for world
-update file headers
-fix formatting with switch cases
+make push constant for raytracing that allows for random depth and such
+incorporate julias imgui
+shadow payload
+optimize lighting (do this after PBR is implemented)
+create non-pathtraced pipeline (raytraced, not using acceleration extension)
+SVGF spatial denoising
+tone mapping
+exposure control
+bloom
+TAA
+
+BUG: can no longer resize the screen as of 12/4/25

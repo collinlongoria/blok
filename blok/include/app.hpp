@@ -1,10 +1,8 @@
 /*
-* File: app
+* File: app.hpp
 * Project: blok
 * Author: Collin Longoria
 * Created on: 9/12/2025
-*
-* Description: Main entry point for blok
 */
 #ifndef BLOK_APP_HPP
 #define BLOK_APP_HPP
@@ -13,6 +11,7 @@
 #include "backend.hpp"
 
 namespace blok {
+struct WorldSvoGpu;
 
 class Window;
 class Renderer;
@@ -37,6 +36,8 @@ private:
     std::unique_ptr<Renderer> m_renderer;
     std::unique_ptr<RendererGL> m_rendererGL;
     std::unique_ptr<CudaTracer> m_cudaTracer;
+
+    std::unique_ptr<WorldSvoGpu> m_gpuWorld;
 };
 
 } // namespace blok

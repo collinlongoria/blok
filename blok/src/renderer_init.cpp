@@ -1,3 +1,9 @@
+/*
+* File: renderer_init.cpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #include <iostream>
 #include <set>
 
@@ -16,7 +22,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityF
 }
 
 Renderer::Renderer(int width, int height)
-    : m_width(width), m_height(height), m_shaderManager(m_device), m_raytracer(this) {
+    : m_width(width), m_height(height), m_shaderManager(m_device), m_raytracer(this), m_temporal(this) {
     VULKAN_HPP_DEFAULT_DISPATCHER.init();
 
     createWindow();
@@ -37,13 +43,13 @@ Renderer::Renderer(int width, int height)
     createPerFrameUniforms();
 
     DescriptorAllocatorGrowable::PoolSizeRatio ratios[] = {
-        {vk::DescriptorType::eUniformBuffer,            4.0f},
-        {vk::DescriptorType::eUniformBufferDynamic,     1.0f},
-        {vk::DescriptorType::eCombinedImageSampler,     4.0f},
-        {vk::DescriptorType::eStorageBuffer,            2.0f},
+        {vk::DescriptorType::eUniformBuffer, 4.0f},
+        {vk::DescriptorType::eUniformBufferDynamic, 1.0f},
+        {vk::DescriptorType::eCombinedImageSampler, 4.0f},
+        {vk::DescriptorType::eStorageBuffer, 2.0f},
         {vk::DescriptorType::eAccelerationStructureKHR, 1.0f},
-        {vk::DescriptorType::eSampledImage,             2.0f},
-        {vk::DescriptorType::eStorageImage,             1.0f},
+        {vk::DescriptorType::eSampledImage, 2.0f},
+        {vk::DescriptorType::eStorageImage, 1.0f},
     };
     m_descAlloc.init(m_device, 512, std::span{ratios, std::size(ratios)});
 
@@ -57,6 +63,8 @@ Renderer::Renderer(int width, int height)
     m_raytracer.createPipeline();
     m_raytracer.createSBT();
 
+    m_temporal.init(m_swapExtent.width, m_swapExtent.height);
+
     createGui();
 }
 
@@ -68,6 +76,11 @@ Renderer::~Renderer() {
     m_device.waitIdle();
 
     destroyGui();
+
+    if (m_world) {
+        cleanupWorld(*m_world);
+        m_world = nullptr;
+    }
 
     // per frame resources
     for (auto& fr : m_frames) {
@@ -90,6 +103,8 @@ Renderer::~Renderer() {
     if (m_raytracer.rtPipeline.hitSBT.handle) { vmaDestroyBuffer(m_allocator, m_raytracer.rtPipeline.hitSBT.handle, m_raytracer.rtPipeline.hitSBT.alloc); }
     if (m_raytracer.rtPipeline.missSBT.handle) { vmaDestroyBuffer(m_allocator, m_raytracer.rtPipeline.missSBT.handle, m_raytracer.rtPipeline.missSBT.alloc); }
 
+    m_temporal.cleanup();
+
     m_descAlloc.destroyPools(m_device);
 
     cleanupSwapChain();
@@ -102,6 +117,49 @@ Renderer::~Renderer() {
     if (m_instance) m_instance.destroy();
 }
 
+void Renderer::cleanupWorld(WorldSvoGpu& gpuWorld) {
+    // Wait for GPU to finish any pending work
+    m_device.waitIdle();
+
+    // Destroy TLAS and its resources
+    if (gpuWorld.tlas.handle && gpuWorld.tlas.handle != VK_NULL_HANDLE) {
+        m_device.destroyAccelerationStructureKHR(gpuWorld.tlas.handle);
+        gpuWorld.tlas.handle = nullptr;
+    }
+    if (gpuWorld.tlas.buffer.handle && gpuWorld.tlas.buffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.tlas.buffer.handle, gpuWorld.tlas.buffer.alloc);
+        gpuWorld.tlas.buffer = {};
+    }
+    if (gpuWorld.tlasInstanceBuffer.handle && gpuWorld.tlasInstanceBuffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.tlasInstanceBuffer.handle, gpuWorld.tlasInstanceBuffer.alloc);
+        gpuWorld.tlasInstanceBuffer = {};
+    }
+
+    // Destroy BLAS and its resources
+    if (gpuWorld.blas.handle && gpuWorld.blas.handle != VK_NULL_HANDLE) {
+        m_device.destroyAccelerationStructureKHR(gpuWorld.blas.handle);
+        gpuWorld.blas.handle = nullptr;
+    }
+    if (gpuWorld.blas.buffer.handle && gpuWorld.blas.buffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.blas.buffer.handle, gpuWorld.blas.buffer.alloc);
+        gpuWorld.blas.buffer = {};
+    }
+    if (gpuWorld.blasAabbBuffer.handle && gpuWorld.blasAabbBuffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.blasAabbBuffer.handle, gpuWorld.blasAabbBuffer.alloc);
+        gpuWorld.blasAabbBuffer = {};
+    }
+
+    // Destroy SVO and chunk buffers
+    if (gpuWorld.svoBuffer.handle && gpuWorld.svoBuffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.svoBuffer.handle, gpuWorld.svoBuffer.alloc);
+        gpuWorld.svoBuffer = {};
+    }
+    if (gpuWorld.chunkBuffer.handle && gpuWorld.chunkBuffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.chunkBuffer.handle, gpuWorld.chunkBuffer.alloc);
+        gpuWorld.chunkBuffer = {};
+    }
+}
+
 void Renderer::createWindow() {
     if (!glfwInit()) {
         throw std::runtime_error("Failed to initialize GLFW!");
@@ -110,7 +168,7 @@ void Renderer::createWindow() {
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
-    m_window = glfwCreateWindow(m_width, m_height, "SVO Test", nullptr, nullptr);
+    m_window = glfwCreateWindow(m_width, m_height, "Blok!", nullptr, nullptr);
     if (!m_window) {
         glfwTerminate();
         throw std::runtime_error("Failed to create GLFW window");
@@ -506,6 +564,9 @@ void Renderer::recreateSwapChain() {
     cleanupSwapChain();
     createSwapChain();
     createImageResources();
+
+    // resize temporal buffers too
+    m_temporal.resize(m_swapExtent.width, m_swapExtent.height);
 }
 
 std::vector<const char *> Renderer::getRequiredExtensions() {

@@ -1,3 +1,9 @@
+/*
+* File: renderer.hpp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/2/2025
+*/
 #ifndef RENDERER_HPP
 #define RENDERER_HPP
 #include "vulkan_context.hpp"
@@ -10,6 +16,7 @@
 #include "camera.hpp"
 #include "descriptors.hpp"
 #include "renderer_raytracing.hpp"
+#include "renderer_temporal_reprojection.hpp"
 #include "resources.hpp"
 #include "shader_manager.hpp"
 
@@ -36,36 +43,35 @@ public:
         uploadSvoBuffers(*m_world);
 
         // Build BLAS/TLAS
-        m_world->blas = buildChunkBlas(*m_world);
-        m_world->tlas = buildChunkTlas(*m_world);
+        buildChunkBlas(*m_world);
+        buildChunkTlas(*m_world);
 
         // Update descriptor sets
-        m_raytracer.updateDescriptorSet(*m_world);
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            m_raytracer.updateDescriptorSet(*m_world, i);
+        }
     }
     void updateWorld() {
         if (!m_world) return;
 
-        m_device.waitIdle();  // Ensure GPU is done with old data
+        m_device.waitIdle();
 
-        // Re-upload SVO buffers
+        // Reupload SVO buffers
         uploadSvoBuffers(*m_world);
 
-        // Rebuild acceleration structures
-        // TODO: For better performance, only rebuild when chunk AABBs change
-        //       For now, we rebuild everything
-        if (m_world->blas) {
-            m_device.destroyAccelerationStructureKHR(m_world->blas);
-        }
-        if (m_world->tlas) {
-            m_device.destroyAccelerationStructureKHR(m_world->tlas);
-        }
+        // Rebuild BLAS/TLAS
+        buildChunkBlas(*m_world);
+        buildChunkTlas(*m_world);
 
-        m_world->blas = buildChunkBlas(*m_world);
-        m_world->tlas = buildChunkTlas(*m_world);
-
-        // Update descriptor set to point to new buffers
-        m_raytracer.updateDescriptorSet(*m_world);
+        // Update descriptor sets
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            m_raytracer.updateDescriptorSet(*m_world, i);
+        }
     }
+    void cleanupWorld(WorldSvoGpu& gpuWorld);
+
+    // gui
+    void updatePerformanceData(float fps, float ms);
 
 private:
     // Device creation
@@ -90,6 +96,7 @@ private:
     // gui
     void createGui();
     void destroyGui();
+    void renderPerformanceData();
 
     // Upload
     Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO, bool mapped = false);
@@ -180,12 +187,14 @@ private:
 
     ShaderManager m_shaderManager;
 
-    WorldSvoGpu* m_world;
+    WorldSvoGpu* m_world = nullptr;
 
     vk::PhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProps{};
     RayTracing m_raytracer;
     uint32_t m_frameCount = 0;
+    TemporalReprojection m_temporal;
     friend class RayTracing;
+    friend class TemporalReprojection;
 };
 
 }

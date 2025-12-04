@@ -1,5 +1,5 @@
 /*
-* File: main
+* File: main.cpp
 * Project: blok
 * Author: Collin Longoria
 *
