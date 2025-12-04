@@ -5,6 +5,7 @@
 * Created on: 9/10/2025
 * Description: Primarily responsible for raytracing
 */
+#define VULKAN_HPP_NO_TO_STRING
 
 #include "cuda_tracer.hpp"
 #include "camera.hpp"
@@ -13,6 +14,7 @@
 #define GLFW_INCLUDE_NONE
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+
 
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
