@@ -300,11 +300,32 @@ void RayTracing::createDescriptorSetLayout() {
     outImg.descriptorType = vk::DescriptorType::eStorageImage;
     outImg.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
 
-    std::array<vk::DescriptorSetLayoutBinding, 5> bindings =
-    { tlas, svoBuf, chunkBuf, frameUBO, outImg };
+    // 5 = World Position Output
+    vk::DescriptorSetLayoutBinding wp{};
+    wp.binding = 5;
+    wp.descriptorCount = 1;
+    wp.descriptorType = vk::DescriptorType::eStorageImage;
+    wp.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
+
+    // 6 = Normal + Roughness Output
+    vk::DescriptorSetLayoutBinding nr{};
+    nr.binding = 6;
+    nr.descriptorCount = 1;
+    nr.descriptorType = vk::DescriptorType::eStorageImage;
+    nr.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
+
+    // 7 = Albedo + Metallic Output
+    vk::DescriptorSetLayoutBinding am{};
+    am.binding = 7;
+    am.descriptorCount = 1;
+    am.descriptorType = vk::DescriptorType::eStorageImage;
+    am.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
+
+    std::array<vk::DescriptorSetLayoutBinding, 8> bindings =
+    { tlas, svoBuf, chunkBuf, frameUBO, outImg, wp, nr, am };
 
     vk::DescriptorSetLayoutCreateInfo ci{};
-    ci.bindingCount = (uint32_t)bindings.size();
+    ci.bindingCount = static_cast<uint32_t>(bindings.size());
     ci.pBindings = bindings.data();
 
     rtSetLayout = r->m_device.createDescriptorSetLayout(ci);
@@ -316,6 +337,8 @@ void RayTracing::allocateDescriptorSet() {
 
 void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
 {
+    auto& gbuffer = r->m_temporal.gbuffer;
+
     // Acceleration structure
     vk::WriteDescriptorSetAccelerationStructureKHR asInfo{};
     asInfo.accelerationStructureCount = 1;
@@ -370,7 +393,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
     // Output Image
     vk::DescriptorImageInfo imgInfo{
         nullptr,
-        r->m_outputImage.view,
+        gbuffer.color.view,
         vk::ImageLayout::eGeneral
     };
 
@@ -380,8 +403,42 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
     imgWrite.descriptorType = vk::DescriptorType::eStorageImage;
     imgWrite.setImageInfo(imgInfo);
 
-    std::array<vk::WriteDescriptorSet, 5> writes =
-    { asWrite, svoWrite, chunkWrite, frameWrite, imgWrite };
+    // Temporal Reprojection
+    vk::DescriptorImageInfo wpInfo{
+        nullptr,
+        gbuffer.worldPosition.view,
+        vk::ImageLayout::eGeneral
+    };
+    vk::WriteDescriptorSet wpWrite{};
+    wpWrite.dstSet = rtSet;
+    wpWrite.dstBinding = 5;
+    wpWrite.descriptorType = vk::DescriptorType::eStorageImage;
+    wpWrite.setImageInfo(wpInfo);
+
+    vk::DescriptorImageInfo nrInfo{
+        nullptr,
+        gbuffer.normalRoughness.view,
+        vk::ImageLayout::eGeneral
+    };
+    vk::WriteDescriptorSet nrWrite{};
+    nrWrite.dstSet = rtSet;
+    nrWrite.dstBinding = 6;
+    nrWrite.descriptorType = vk::DescriptorType::eStorageImage;
+    nrWrite.setImageInfo(nrInfo);
+
+    vk::DescriptorImageInfo amInfo{
+        nullptr,
+        gbuffer.albedoMetallic.view,
+        vk::ImageLayout::eGeneral
+    };
+    vk::WriteDescriptorSet amWrite{};
+    amWrite.dstSet = rtSet;
+    amWrite.dstBinding = 7;
+    amWrite.descriptorType = vk::DescriptorType::eStorageImage;
+    amWrite.setImageInfo(amInfo);
+
+    std::array<vk::WriteDescriptorSet, 8> writes =
+    { asWrite, svoWrite, chunkWrite, frameWrite, imgWrite, wpWrite, nrWrite, amWrite };
 
     r->m_device.updateDescriptorSets(writes, {});
 }

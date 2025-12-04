@@ -38,6 +38,27 @@ struct Sampler {
     vk::Sampler handle{};
 };
 
+struct GBuffer {
+    // Current frame output
+    Image color; // RGBA32F
+    Image worldPosition; // RGBA32F
+    Image normalRoughness; // RGBA16F
+    Image albedoMetallic; // RGBA8
+
+    // History buffers
+    Image historyColor[2];
+    Image historyMoments[2];
+
+    uint32_t historyIndex = 0;
+
+    Image& currentHistory() { return historyColor[historyIndex]; }
+    Image& previousHistory() { return historyColor[1 - historyIndex]; }
+    Image& currentMoments() { return historyMoments[historyIndex]; }
+    Image& previousMoments() { return historyMoments[1 - historyIndex]; }
+
+    void swapHistory() { historyIndex = 1 - historyIndex; }
+};
+
 struct FrameResources {
     // Sync
     vk::Semaphore imageAvailable{};
@@ -63,14 +84,32 @@ struct alignas(16) FrameUBO {
     glm::mat4 invView{};
     glm::mat4 invProj{};
 
+    // temporal reprojection
+    glm::mat4 prevView{};
+    glm::mat4 prevProj{};
+    glm::mat4 prevViewProj{};
+
     glm::vec3 camPos{};
     float delta_time = 0.0f;
+    glm::vec3 prevCamPos{};
+    float padding0 = 0.f;
 
     // Pathtracing
     uint32_t frame_count = 0; // increment each frame
     uint32_t sample_count = 1; // samples per pixel per frame
-    float padding1 = 0.0f;
-    float padding2 = 0.0f;
+    uint32_t screen_width = 0;
+    uint32_t screen_height = 0;
+
+    // temporal settings
+    float temporalAlpha = 0.f; // base blend factor
+    float momentAlpha = 0.f; // blend factor for moments
+    float varianceClipGamma = 0.f; // for variance clipping
+    float depthThreshold = 0.f; // depth rejection threshold
+
+    float normalThreshold = 0.f; // normal rejection threshold
+    float padding1 = 0.f;
+    float padding2 = 0.f;
+    float padding3 = 0.f;
 };
 
 }

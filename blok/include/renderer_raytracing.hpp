@@ -36,7 +36,7 @@ public:
     RayTracingPipeline rtPipeline{};
 
 public:
-    RayTracing(Renderer* r);
+    explicit RayTracing(Renderer* r);
 
     void createDescriptorSetLayout();
     void allocateDescriptorSet();

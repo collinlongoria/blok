@@ -97,9 +97,8 @@ void App::init() {
 
             VoxFile vox;
             std::string err;
-            if (loadVoxFile("assets/models/VoxelGraveyard_DemoScene.vox", vox, err)) {
-                importVoxToChunks(vox, g_mgr, glm::vec3(10, 0, 0), 16);
-                importVoxToChunks(vox, g_mgr, glm::vec3(100, 0, 0), 11);
+            if (loadVoxFile("assets/models/chr_knight.vox", vox, err)) {
+                importVoxToChunks(vox, g_mgr, glm::vec3(0, 0, 0), 0);
                 uint8_t r, g, b;
                 vox.getPaletteRGB(1, r, g, b);
             }

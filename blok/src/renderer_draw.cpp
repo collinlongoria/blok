@@ -52,22 +52,21 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     float farPlane = 10000.0f;
 
     FrameUBO fubo{};
-    fubo.view = c.view();
-    fubo.proj = c.projection(aspect, nearPlane, farPlane);
-    fubo.delta_time = dt;
-    fubo.camPos = c.position;
-
-    fubo.invView = glm::inverse(fubo.view);
-    fubo.invProj = glm::inverse(fubo.proj);
-
-    fubo.frame_count = m_frameCount;
-    fubo.sample_count = 1;
+    m_temporal.fillFrameUBO(
+        fubo,
+        c.view(),
+        c.projection(aspect, nearPlane, farPlane),
+        c.position,
+        dt,
+        m_frameCount,
+        m_swapExtent.width,
+        m_swapExtent.height
+    );
 
     if (c.cameraChanged) {
         m_frameCount = 0;
         c.cameraChanged = false;
-    }
-    else {
+    } else {
         m_frameCount++;
     }
 
@@ -101,6 +100,7 @@ void Renderer::drawFrame(const Camera& c, float dt) {
 
     ImageTransitions it{ fr.cmd };
 
+    // swapchain image
     Image sw{};
     sw.handle        = m_swapImages[imageIndex];
     sw.view          = m_swapViews[imageIndex];
@@ -111,45 +111,96 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     sw.format        = m_colorFormat;
     sw.currentLayout = m_swapImageLayouts[imageIndex];
 
-    it.ensure(sw, Role::ColorAttachment);
-    it.ensure(m_depth, Role::DepthAttachment);
-    it.ensure(m_outputImage, Role::General);
+    // Transition G-buffer images to General for ray tracing write
+    it.ensure(m_temporal.gbuffer.color, Role::General);
+    it.ensure(m_temporal.gbuffer.worldPosition, Role::General);
+    it.ensure(m_temporal.gbuffer.normalRoughness, Role::General);
+    it.ensure(m_temporal.gbuffer.albedoMetallic, Role::General);
 
-    //m_raytracer.updateDescriptorSet();
+    if (m_world) {
+        m_raytracer.updateDescriptorSet(*m_world);
+    }
+
     m_raytracer.dispatchRayTracing(fr.cmd, m_swapExtent.width, m_swapExtent.height);
 
-    it.ensure(m_outputImage, Role::TransferSrc);
+    // Memory barrier: ray tracing writes -> compute shader reads
+    vk::MemoryBarrier2 rtToComputeBarrier{};
+    rtToComputeBarrier.srcStageMask = vk::PipelineStageFlagBits2::eRayTracingShaderKHR;
+    rtToComputeBarrier.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
+    rtToComputeBarrier.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader;
+    rtToComputeBarrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite;
+
+    vk::DependencyInfo rtToComputeDep{};
+    rtToComputeDep.memoryBarrierCount = 1;
+    rtToComputeDep.pMemoryBarriers = &rtToComputeBarrier;
+    fr.cmd.pipelineBarrier2(rtToComputeDep);
+
+    // Transition history buffers for temporal reprojection
+    // Previous history: read-only for sampling
+    // Current history: general for writing output
+    it.ensure(m_temporal.gbuffer.previousHistory(), Role::ShaderReadOnly);
+    it.ensure(m_temporal.gbuffer.previousMoments(), Role::General);  // Read as storage image
+    it.ensure(m_temporal.gbuffer.currentHistory(), Role::General);
+    it.ensure(m_temporal.gbuffer.currentMoments(), Role::General);
+
+    // Run temporal reprojection compute shader
+    m_temporal.updateDescriptorSet();
+    m_temporal.dispatch(fr.cmd, m_swapExtent.width, m_swapExtent.height);
+
+    // Memory barrier: compute shader writes -> transfer reads
+    vk::MemoryBarrier2 computeToTransferBarrier{};
+    computeToTransferBarrier.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader;
+    computeToTransferBarrier.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
+    computeToTransferBarrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    computeToTransferBarrier.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
+
+    vk::DependencyInfo computeToTransferDep{};
+    computeToTransferDep.memoryBarrierCount = 1;
+    computeToTransferDep.pMemoryBarriers = &computeToTransferBarrier;
+    fr.cmd.pipelineBarrier2(computeToTransferDep);
+
+    // Transition for blit
+    it.ensure(m_temporal.gbuffer.currentHistory(), Role::TransferSrc);
     it.ensure(sw, Role::TransferDst);
 
+    // Blit temporal output to swapchain
     vk::ImageBlit blit{};
     blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
     blit.srcSubresource.mipLevel   = 0;
     blit.srcSubresource.baseArrayLayer = 0;
     blit.srcSubresource.layerCount     = 1;
     blit.srcOffsets[0] = vk::Offset3D{0, 0, 0};
-    blit.srcOffsets[1] = vk::Offset3D{static_cast<int>(m_outputImage.width), static_cast<int>(m_outputImage.height), 1};
+    blit.srcOffsets[1] = vk::Offset3D{
+        static_cast<int>(m_temporal.gbuffer.currentHistory().width),
+        static_cast<int>(m_temporal.gbuffer.currentHistory().height),
+        1
+    };
 
     blit.dstSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
     blit.dstSubresource.mipLevel   = 0;
     blit.dstSubresource.baseArrayLayer = 0;
     blit.dstSubresource.layerCount     = 1;
     blit.dstOffsets[0] = vk::Offset3D{0, 0, 0};
-    blit.dstOffsets[1] = vk::Offset3D{static_cast<int>(m_swapExtent.width), static_cast<int>(m_swapExtent.height), 1};
+    blit.dstOffsets[1] = vk::Offset3D{
+        static_cast<int>(m_swapExtent.width),
+        static_cast<int>(m_swapExtent.height),
+        1
+    };
 
-    fr.cmd.blitImage(m_outputImage.handle, vk::ImageLayout::eTransferSrcOptimal,
+    fr.cmd.blitImage(
+        m_temporal.gbuffer.currentHistory().handle, vk::ImageLayout::eTransferSrcOptimal,
         sw.handle, vk::ImageLayout::eTransferDstOptimal,
-        1, &blit, vk::Filter::eLinear);
+        1, &blit, vk::Filter::eLinear
+    );
 
-    // TODO this could be reincluded to allow for tradition raster rendering loop as well
-    // Current issue: it is clearing the screen. Solution is to clear -> ray blit -> raster -> present
-    /*
     it.ensure(sw, Role::ColorAttachment);
-
+/*
     const std::array<float,4> clear{0.0f,0.0f,0.0f,1.0f};
     cmdBeginRendering(fr.cmd, sw.view, m_depth.view, m_swapExtent, clear, 1.0f, 0);
-        // Can do render stuff here
+    // Can do render stuff here
     cmdEndRendering(fr.cmd);
-    */
+*/
+
     // imgui
     {
         vk::RenderingAttachmentInfo uiColor{};
@@ -206,6 +257,10 @@ void Renderer::drawFrame(const Camera& c, float dt) {
         m_swapchainDirty = true;
     else if (pres != vk::Result::eSuccess)
         throw std::runtime_error("presentKHR failed");
+
+    // After submit, update previous frame data
+    m_temporal.updatePreviousFrameData(c.view(), c.projection(aspect, nearPlane, farPlane), c.position);
+    m_temporal.swapHistoryBuffers();
 }
 
 void Renderer::cmdBeginRendering(vk::CommandBuffer cmd, vk::ImageView colorView, vk::ImageView depthView, vk::Extent2D extent, const std::array<float, 4> &clearColor, float clearDepth, uint32_t clearStencil) {

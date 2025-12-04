@@ -10,18 +10,42 @@
 
 layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(binding = 3, set = 0) uniform FrameUBO {
+    // Current frame
     mat4 view;
     mat4 proj;
     mat4 invView;
     mat4 invProj;
+
+    // Previous frame
+    mat4 prevView;
+    mat4 prevProj;
+    mat4 prevViewProj;
+
     vec3 camPos;
-    float delta_time;
-    uint frameCount;    // For temporal accumulation
-    uint sampleCount;   // Samples per pixel per frame
+    float deltaTime;
+
+    vec3 prevCamPos;
+    float padding0;
+
+    uint frameCount;
+    uint sampleCount;
+    uint screenWidth;
+    uint screenHeight;
+
+    float temporalAlpha;
+    float momentAlpha;
+    float varianceClipGamma;
+    float depthThreshold;
+
+    float normalThreshold;
     float padding1;
     float padding2;
+    float padding3;
 } frame;
-layout(binding = 4, set = 0, rgba32f) uniform image2D outputImage;
+layout(binding = 4, set = 0, rgba32f) uniform image2D outColor;
+layout(binding = 5, set = 0, rgba32f) uniform image2D outWorldPosition;
+layout(binding = 6, set = 0, rgba16f) uniform image2D outNormalRoughness;
+layout(binding = 7, set = 0, rgba8)   uniform image2D outAlbedoMetallic;
 
 // Ray payload for path tracing
 struct RayPayload {
@@ -140,6 +164,15 @@ void main() {
     const uvec2 pixelCoord = gl_LaunchIDEXT.xy;
     const vec2 pixelSize = vec2(gl_LaunchSizeEXT.xy);
 
+    // Initialize G-buffer outputs for this pixel
+    vec3 firstHitPos = vec3(0.0);
+    vec3 firstHitNormal = vec3(0.0, 1.0, 0.0);
+    vec3 firstHitAlbedo = vec3(0.0);
+    float firstHitRoughness = 1.0;
+    float firstHitMetallic = 0.0;
+    float firstHitDepth = -1.0;  // -1 means sky/miss
+    bool hadFirstHit = false;
+
     // accumulate multiple samples
     vec3 accumulatedColor = vec3(0.0);
     const uint samplesPerPixel = max(frame.sampleCount, 1u);
@@ -162,7 +195,7 @@ void main() {
         vec3 radiance = vec3(0.0);
         vec3 throughput = vec3(1.0);
 
-        const uint MAX_BOUNCES = 1u; // TODO push constant data such as this, allowing for random MAX
+        const uint MAX_BOUNCES = 4u; // TODO push constant data such as this, allowing for random MAX
 
         for (uint bounce = 0u; bounce < MAX_BOUNCES; bounce++) {
             // init payload
@@ -195,6 +228,19 @@ void main() {
             if (payload.hitT < 0.0) {
                 radiance += throughput * getSkyColor(rayDir);
                 break;
+            }
+
+            // Store first hit data for G-buffer (only on first bounce, first sample)
+            if (bounce == 0u && sampleIdx == 0u && !hadFirstHit) {
+                hadFirstHit = true;
+                firstHitPos = payload.hitPos;
+                firstHitNormal = payload.normal;
+                firstHitAlbedo = payload.albedo;
+                firstHitRoughness = payload.roughness;
+                firstHitMetallic = payload.metallic;
+
+                // Compute linear depth (distance from camera)
+                firstHitDepth = payload.hitT;
             }
 
             // hit, so get surface props
@@ -247,7 +293,7 @@ void main() {
             specularWeight = mix(specularWeight, 1.0, metallic); // (metals are always specular)
 
             // simple material model (blends between diffuse and specular based on metallic)
-            if (randomFloat(rng) < metallic) {
+            if (randomFloat(rng) < specularWeight) {
                 // specular
                 vec3 H = sampleGGX(u, N, max(roughness, 0.04));
                 vec3 newDir = reflect(rayDir, H);
@@ -290,17 +336,22 @@ void main() {
     // clamp to prevent infinite propagation - this should fix black spots?
     color = clamp(color, vec3(0.0), vec3(100.0));
 
-    // temporal accumulation
-    if (frame.frameCount > 0u) {
-        vec4 prevColor = imageLoad(outputImage, ivec2(pixelCoord));
+    // Raw noisy color
+    imageStore(outColor, ivec2(pixelCoord), vec4(color, 1.0));
 
-        // only blend if previous color is valid
-        if (!any(isnan(prevColor.rgb)) && !any(isinf(prevColor.rgb))) {
-            float blend = 1.0 / float(frame.frameCount + 1u);
-            color = mix(prevColor.rgb, color, blend);
-        }
+    // World position + linear depth
+    // If we missed (hit sky), store a large depth value
+    if (!hadFirstHit) {
+        firstHitDepth = 10000.0;
+        firstHitPos = frame.camPos + normalize((frame.invView * vec4(0.0, 0.0, -1.0, 0.0)).xyz) * 10000.0;
     }
+    imageStore(outWorldPosition, ivec2(pixelCoord), vec4(firstHitPos, firstHitDepth));
 
-    // store result
-    imageStore(outputImage, ivec2(pixelCoord), vec4(color, 1.0));
+    // Normal (encoded) + roughness
+    // Normals are in [-1, 1], we store them directly in 16F
+    imageStore(outNormalRoughness, ivec2(pixelCoord), vec4(firstHitNormal, firstHitRoughness));
+
+    // Albedo + metallic
+    // Pack into RGBA8 [0, 255]
+    imageStore(outAlbedoMetallic, ivec2(pixelCoord), vec4(firstHitAlbedo, firstHitMetallic));
 }
