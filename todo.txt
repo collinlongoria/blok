@@ -1,14 +1,4 @@
-TODO (that I know of):
-
-Refactor SVO rebuild into compute shader
-SVO storing material index for PBR + color
-obj loader and voxelizer
-noise gen for world
-
-incorporate Julia's imgui
-shadow payload
-optimize lighting (do this after PBR is implemented)
-create non-pathtraced pipeline (raytraced, not using acceleration extension)
+TODO (Collin)
 
 // NEXT 2 weeks:
 SVGF spatial denoising
@@ -17,3 +7,16 @@ exposure control
 bloom
 TAA
 motion blur?
+
+// NEXT 2 weeks:
+SVO storing material index for PBR + color
+implement a list of lights, multiple lights, and emissives
+noise gen for world
+
+// NEXT 2 weeks:
+Refactor SVO rebuild into compute shader
+obj loader and voxelizer
+
+// LONG term:
+shadow payload
+create non-pathtraced pipeline (raytraced, not using acceleration extension)
