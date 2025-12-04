@@ -65,7 +65,7 @@ public:
 
     void updatePreviousFrameData(const glm::mat4& view, const glm::mat4& proj, const glm::vec3& camPos);
 
-    void fillFrameUBO(FrameUBO& ubo, const glm::mat4& view, const glm::mat4& proj, const glm::vec3& camPos, float deltaTime, uint32_t frameCount, uint32_t screenWidth, uint32_t screenHeight);
+    void fillFrameUBO(FrameUBO& ubo, const glm::mat4& view, const glm::mat4& proj, const glm::vec3& camPos, float deltaTime, int depth, uint32_t frameCount, uint32_t screenWidth, uint32_t screenHeight);
 
     void dispatch(vk::CommandBuffer cmd, uint32_t width, uint32_t height, uint32_t frameIndex);
 

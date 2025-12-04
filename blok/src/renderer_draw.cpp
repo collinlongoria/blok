@@ -53,6 +53,10 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     float nearPlane = 0.1f;
     float farPlane = 10000.0f;
 
+    int depth = 1;
+    while (static_cast<float>(rand()) / RAND_MAX < 0.7) depth++;
+    depth = std::min(depth, 4);
+
     FrameUBO fubo{};
     m_temporal.fillFrameUBO(
         fubo,
@@ -60,6 +64,7 @@ void Renderer::drawFrame(const Camera& c, float dt) {
         c.projection(aspect, nearPlane, farPlane),
         c.position,
         dt,
+        depth,
         m_frameCount,
         m_swapExtent.width,
         m_swapExtent.height
