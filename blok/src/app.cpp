@@ -75,7 +75,7 @@ void App::init() {
             m_window = std::make_shared<Window>(800, 600, "blok", m_backend);
             GLFWwindow* gw = m_window->getGLFWwindow();
 
-            g_ui = new UI(m_window);
+            g_ui = new UI(m_window.get());
 
             glfwMakeContextCurrent(gw);
             if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress)) {
@@ -116,6 +116,7 @@ void App::init() {
 }
 
 void App::update() {
+
     using clock = std::chrono::steady_clock;
     auto last = clock::now();
 
@@ -128,6 +129,8 @@ void App::update() {
 
             Window::pollEvents();
 
+            m_cudaTracer->resize(m_window->getWidth() - 220.f, m_window->getHeight() - 60);
+
             GLFWwindow* win = m_window->getGLFWwindow();
             if (glfwGetKey(win, GLFW_KEY_W) == GLFW_PRESS) g_camera.processKeyboard('W', dt);
             if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) g_camera.processKeyboard('S', dt);
@@ -137,18 +140,24 @@ void App::update() {
             if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(win, true);
 
             // ImGui + present path (one swap inside endFrame)
+            g_ui->update(dt);
             m_cudaTracer->drawFrame(g_camera, g_scene);
             m_rendererGL->beginFrame();
-            reinterpret_cast<RendererGL*>(m_rendererGL.get())->setTexture(m_cudaTracer->getGLTex(), m_window->getWidth(), m_window->getHeight());
+            reinterpret_cast<RendererGL*>(m_rendererGL.get())->setTexture(m_cudaTracer->getGLTex(), 0, 0);//m_window->getWidth() - 216.f * 4, m_window->getHeight());
             m_rendererGL->drawFrame(g_camera, g_scene);
 
-            addWindow();
-            g_ui->displayData(dt);
+            //addWindow();
+            //ImGui::ShowDemoWindow();
+
+            g_ui->beginWindow();
+            g_ui->displayData();
+            g_ui->endWindow();
 
             m_rendererGL->endFrame();
         }
         break;
     }
+
 
     case GraphicsApi::Vulkan: {
         while (!glfwWindowShouldClose(m_renderer->getWindow())) {
@@ -174,6 +183,7 @@ void App::update() {
         }
         break;
     }
+
     }
 }
 

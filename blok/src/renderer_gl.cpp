@@ -173,7 +173,7 @@ void RendererGL::drawFrame(Camera& cam, const Scene& /*scene*/) {
     */
 
     if (m_tex != 0 && m_ui != nullptr) {
-        m_ui->beginWindow("CUDA Output");
+        m_ui->beginWindow(Vector2(0.f,0.f),"CUDA Output");
         ImGui::Text("Displaying raytraced texture:");
         m_ui->renderToWindow(m_tex);
         m_ui->handleCameraControls(&cam);
@@ -182,7 +182,7 @@ void RendererGL::drawFrame(Camera& cam, const Scene& /*scene*/) {
     }
     else
     {
-        m_ui->beginWindow("Test Window");
+        m_ui->beginWindow(Vector2(0.f, 0.f), "Test Window");
         ImGui::Text("OpenGL Window");
         m_ui->endWindow();
     }

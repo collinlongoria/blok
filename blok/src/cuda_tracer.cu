@@ -4,6 +4,7 @@
 * Author: Wes Morosan
 * Created on: 9/10/2025
 */
+#define VULKAN_HPP_NO_TO_STRING
 
 #include "cuda_tracer.hpp"
 #include "camera.hpp"
@@ -12,6 +13,7 @@
 #define GLFW_INCLUDE_NONE
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+
 
 #include <cuda_runtime.h>
 #include <cuda_gl_interop.h>
@@ -522,6 +524,7 @@ void CudaTracer::drawFrame(Camera& cam, const Scene& scene) {
     uchar4* devPtr = nullptr; size_t size = 0;
     cudaGraphicsMapResources(1, &m_cudaPBO, 0);
     cudaGraphicsResourceGetMappedPointer((void**)&devPtr, &size, m_cudaPBO);
+
 
     dim3 block(16, 16);
     dim3 grid((m_width + 15) / 16, (m_height + 15) / 16);
