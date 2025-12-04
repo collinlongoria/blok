@@ -40,6 +40,8 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     if (resizeNeeded) {
         m_swapchainDirty = true;
         resizeNeeded = false;
+
+        ImGui::EndFrame();
         return;
     }
 
