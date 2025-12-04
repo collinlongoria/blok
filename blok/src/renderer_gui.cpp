@@ -20,6 +20,8 @@ std::array<float, HISTORY_SIZE> fpsHistory{};
 std::array<float, HISTORY_SIZE> frameTimeHistory{};
 static float fpsMin = 0.0f, fpsMax = 60.0f;
 static float frameTimeMin = 0.0f, frameTimeMax = 16.67f;
+float frame_count = 0.f;
+float total_time = 0.f;
 
 void Renderer::createGui() {
     // core stuff
@@ -123,6 +125,8 @@ void Renderer::updatePerformanceData(float fps, float ms) {
         if (frameTimeHistory[i] > frameTimeMax) frameTimeMax = frameTimeHistory[i];
     }
 
+    frame_count++;
+    total_time += (ms / 1000);
 }
 
 void Renderer::renderPerformanceData() {
@@ -153,6 +157,10 @@ void Renderer::renderPerformanceData() {
 
     ImGui::PlotLines("##FPS", fpsHistory.data(), HISTORY_SIZE, 0, fpsOverlay,
                      fpsMin * 0.9f, fpsMax * 1.1f, graphSize);
+
+    ImGui::SameLine();
+
+    ImGui::Text("Average FPS: %.1f", (frame_count / total_time));
 
     ImGui::Spacing();
 

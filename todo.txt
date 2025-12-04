@@ -14,3 +14,5 @@ tone mapping
 exposure control
 bloom
 TAA
+
+BUG: can no longer resize the screen as of 12/4/25
