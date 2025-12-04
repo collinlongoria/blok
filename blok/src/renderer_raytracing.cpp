@@ -332,12 +332,15 @@ void RayTracing::createDescriptorSetLayout() {
 }
 
 void RayTracing::allocateDescriptorSet() {
-    rtSet = r->m_descAlloc.allocate(r->m_device, rtSetLayout);
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        rtSets[i] = r->m_descAlloc.allocate(r->m_device, rtSetLayout);
+    }
 }
 
-void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
+void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu, uint32_t frameIndex)
 {
     auto& gbuffer = r->m_temporal.gbuffer;
+    vk::DescriptorSet currentSet = rtSets[frameIndex];
 
     // Acceleration structure
     vk::WriteDescriptorSetAccelerationStructureKHR asInfo{};
@@ -345,7 +348,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
     asInfo.pAccelerationStructures = &gpu.tlas.handle;
 
     vk::WriteDescriptorSet asWrite{};
-    asWrite.dstSet = rtSet;
+    asWrite.dstSet = currentSet;
     asWrite.dstBinding = 0;
     asWrite.descriptorType = vk::DescriptorType::eAccelerationStructureKHR;
     asWrite.descriptorCount = 1;
@@ -359,7 +362,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
     };
 
     vk::WriteDescriptorSet svoWrite{};
-    svoWrite.dstSet = rtSet;
+    svoWrite.dstSet = currentSet;
     svoWrite.dstBinding = 1;
     svoWrite.descriptorType = vk::DescriptorType::eStorageBuffer;
     svoWrite.setBufferInfo(svoInfo);
@@ -371,7 +374,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
     };
 
     vk::WriteDescriptorSet chunkWrite{};
-    chunkWrite.dstSet = rtSet;
+    chunkWrite.dstSet = currentSet;
     chunkWrite.dstBinding = 2;
     chunkWrite.descriptorType = vk::DescriptorType::eStorageBuffer;
     chunkWrite.setBufferInfo(chunkInfo);
@@ -385,7 +388,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
     };
 
     vk::WriteDescriptorSet frameWrite{};
-    frameWrite.dstSet = rtSet;
+    frameWrite.dstSet = currentSet;
     frameWrite.dstBinding = 3;
     frameWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
     frameWrite.setBufferInfo(frameInfo);
@@ -398,7 +401,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
     };
 
     vk::WriteDescriptorSet imgWrite{};
-    imgWrite.dstSet = rtSet;
+    imgWrite.dstSet = currentSet;
     imgWrite.dstBinding = 4;
     imgWrite.descriptorType = vk::DescriptorType::eStorageImage;
     imgWrite.setImageInfo(imgInfo);
@@ -410,7 +413,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
         vk::ImageLayout::eGeneral
     };
     vk::WriteDescriptorSet wpWrite{};
-    wpWrite.dstSet = rtSet;
+    wpWrite.dstSet = currentSet;
     wpWrite.dstBinding = 5;
     wpWrite.descriptorType = vk::DescriptorType::eStorageImage;
     wpWrite.setImageInfo(wpInfo);
@@ -421,7 +424,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
         vk::ImageLayout::eGeneral
     };
     vk::WriteDescriptorSet nrWrite{};
-    nrWrite.dstSet = rtSet;
+    nrWrite.dstSet = currentSet;
     nrWrite.dstBinding = 6;
     nrWrite.descriptorType = vk::DescriptorType::eStorageImage;
     nrWrite.setImageInfo(nrInfo);
@@ -432,7 +435,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu)
         vk::ImageLayout::eGeneral
     };
     vk::WriteDescriptorSet amWrite{};
-    amWrite.dstSet = rtSet;
+    amWrite.dstSet = currentSet;
     amWrite.dstBinding = 7;
     amWrite.descriptorType = vk::DescriptorType::eStorageImage;
     amWrite.setImageInfo(amInfo);
@@ -576,7 +579,7 @@ void RayTracing::createSBT() {
     rtPipeline.callRegion = vk::StridedDeviceAddressRegionKHR{};
 }
 
-void RayTracing::dispatchRayTracing(vk::CommandBuffer cmd, uint32_t w, uint32_t h) {
+void RayTracing::dispatchRayTracing(vk::CommandBuffer cmd, uint32_t w, uint32_t h, uint32_t frameIndex) {
     cmd.bindPipeline(
         vk::PipelineBindPoint::eRayTracingKHR,
         rtPipeline.pipeline
@@ -585,7 +588,7 @@ void RayTracing::dispatchRayTracing(vk::CommandBuffer cmd, uint32_t w, uint32_t 
     cmd.bindDescriptorSets(
         vk::PipelineBindPoint::eRayTracingKHR,
         rtPipeline.layout,
-        0, rtSet, {}
+        0, rtSets[frameIndex], {}
     );
 
     cmd.traceRaysKHR(

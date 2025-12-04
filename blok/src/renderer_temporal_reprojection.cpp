@@ -17,10 +17,6 @@ TemporalReprojection::TemporalReprojection(Renderer *r)
     prevCamPos = glm::vec3(0.0f);
 }
 
-TemporalReprojection::~TemporalReprojection() {
-    cleanup();
-}
-
 void TemporalReprojection::init(uint32_t width, uint32_t height) {
     createGBuffer(width, height);
     createHistoryBuffers(width, height);
@@ -28,7 +24,10 @@ void TemporalReprojection::init(uint32_t width, uint32_t height) {
     createDescriptorSetLayout();
     allocateDescriptorSet();
     createPipeline();
-    updateDescriptorSet();
+    // Initialize all per-frame descriptor sets
+    for (uint32_t i = 0; i < TemporalPipeline::MAX_FRAMES_IN_FLIGHT; ++i) {
+        updateDescriptorSet(i);
+    }
 }
 
 void TemporalReprojection::cleanup() {
@@ -67,7 +66,9 @@ void TemporalReprojection::resize(uint32_t width, uint32_t height) {
     createGBuffer(width, height);
     createHistoryBuffers(width, height);
 
-    updateDescriptorSet();
+    for (uint32_t i = 0; i < TemporalPipeline::MAX_FRAMES_IN_FLIGHT; ++i) {
+        updateDescriptorSet(i);
+    }
 
     // Reset history since we resized
     hasPreviousFrame = false;
@@ -236,14 +237,16 @@ void TemporalReprojection::createDescriptorSetLayout() {
 }
 
 void TemporalReprojection::allocateDescriptorSet() {
-    pipeline.descriptorSet = renderer->m_descAlloc.allocate(
-        renderer->m_device,
-        pipeline.descriptorSetLayout
-    );
+    for (uint32_t i = 0; i < TemporalPipeline::MAX_FRAMES_IN_FLIGHT; ++i) {
+        pipeline.descriptorSets[i] = renderer->m_descAlloc.allocate(
+            renderer->m_device,
+            pipeline.descriptorSetLayout
+        );
+    }
 }
 
-void TemporalReprojection::updateDescriptorSet() {
-    // Pre-allocate all descriptor info structs to avoid pointer invalidation
+void TemporalReprojection::updateDescriptorSet(uint32_t frameIndex) {
+    vk::DescriptorSet currentSet = pipeline.descriptorSets[frameIndex];
 
     // Image infos for storage images (all use General layout)
     vk::DescriptorImageInfo inColorInfo{
@@ -314,7 +317,7 @@ void TemporalReprojection::updateDescriptorSet() {
     std::array<vk::WriteDescriptorSet, 10> writes{};
 
     // 0: inColor
-    writes[0].dstSet = pipeline.descriptorSet;
+    writes[0].dstSet = currentSet;
     writes[0].dstBinding = 0;
     writes[0].dstArrayElement = 0;
     writes[0].descriptorType = vk::DescriptorType::eStorageImage;
@@ -322,7 +325,7 @@ void TemporalReprojection::updateDescriptorSet() {
     writes[0].pImageInfo = &inColorInfo;
 
     // 1: inWorldPosition
-    writes[1].dstSet = pipeline.descriptorSet;
+    writes[1].dstSet = currentSet;
     writes[1].dstBinding = 1;
     writes[1].dstArrayElement = 0;
     writes[1].descriptorType = vk::DescriptorType::eStorageImage;
@@ -330,7 +333,7 @@ void TemporalReprojection::updateDescriptorSet() {
     writes[1].pImageInfo = &inWorldPosInfo;
 
     // 2: inNormalRoughness
-    writes[2].dstSet = pipeline.descriptorSet;
+    writes[2].dstSet = currentSet;
     writes[2].dstBinding = 2;
     writes[2].dstArrayElement = 0;
     writes[2].descriptorType = vk::DescriptorType::eStorageImage;
@@ -338,7 +341,7 @@ void TemporalReprojection::updateDescriptorSet() {
     writes[2].pImageInfo = &inNormalInfo;
 
     // 3: historyColor (sampled)
-    writes[3].dstSet = pipeline.descriptorSet;
+    writes[3].dstSet = currentSet;
     writes[3].dstBinding = 3;
     writes[3].dstArrayElement = 0;
     writes[3].descriptorType = vk::DescriptorType::eCombinedImageSampler;
@@ -346,7 +349,7 @@ void TemporalReprojection::updateDescriptorSet() {
     writes[3].pImageInfo = &historyColorInfo;
 
     // 4: historyWorldPosition
-    writes[4].dstSet = pipeline.descriptorSet;
+    writes[4].dstSet = currentSet;
     writes[4].dstBinding = 4;
     writes[4].dstArrayElement = 0;
     writes[4].descriptorType = vk::DescriptorType::eStorageImage;
@@ -354,7 +357,7 @@ void TemporalReprojection::updateDescriptorSet() {
     writes[4].pImageInfo = &historyWorldPosInfo;
 
     // 5: historyNormalRoughness
-    writes[5].dstSet = pipeline.descriptorSet;
+    writes[5].dstSet = currentSet;
     writes[5].dstBinding = 5;
     writes[5].dstArrayElement = 0;
     writes[5].descriptorType = vk::DescriptorType::eStorageImage;
@@ -362,7 +365,7 @@ void TemporalReprojection::updateDescriptorSet() {
     writes[5].pImageInfo = &historyNormalInfo;
 
     // 6: historyMoments
-    writes[6].dstSet = pipeline.descriptorSet;
+    writes[6].dstSet = currentSet;
     writes[6].dstBinding = 6;
     writes[6].dstArrayElement = 0;
     writes[6].descriptorType = vk::DescriptorType::eStorageImage;
@@ -370,7 +373,7 @@ void TemporalReprojection::updateDescriptorSet() {
     writes[6].pImageInfo = &historyMomentsInfo;
 
     // 7: outColor
-    writes[7].dstSet = pipeline.descriptorSet;
+    writes[7].dstSet = currentSet;
     writes[7].dstBinding = 7;
     writes[7].dstArrayElement = 0;
     writes[7].descriptorType = vk::DescriptorType::eStorageImage;
@@ -378,7 +381,7 @@ void TemporalReprojection::updateDescriptorSet() {
     writes[7].pImageInfo = &outColorInfo;
 
     // 8: outMoments
-    writes[8].dstSet = pipeline.descriptorSet;
+    writes[8].dstSet = currentSet;
     writes[8].dstBinding = 8;
     writes[8].dstArrayElement = 0;
     writes[8].descriptorType = vk::DescriptorType::eStorageImage;
@@ -386,7 +389,7 @@ void TemporalReprojection::updateDescriptorSet() {
     writes[8].pImageInfo = &outMomentsInfo;
 
     // 9: FrameUBO
-    writes[9].dstSet = pipeline.descriptorSet;
+    writes[9].dstSet = currentSet;
     writes[9].dstBinding = 9;
     writes[9].dstArrayElement = 0;
     writes[9].descriptorType = vk::DescriptorType::eUniformBuffer;
@@ -478,7 +481,7 @@ void TemporalReprojection::fillFrameUBO(
     ubo.padding3 = 0.0f;
 }
 
-void TemporalReprojection::dispatch(vk::CommandBuffer cmd, uint32_t width, uint32_t height) {
+void TemporalReprojection::dispatch(vk::CommandBuffer cmd, uint32_t width, uint32_t height, uint32_t frameIndex) {
     // Bind pipeline
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.pipeline);
 
@@ -487,7 +490,7 @@ void TemporalReprojection::dispatch(vk::CommandBuffer cmd, uint32_t width, uint3
         vk::PipelineBindPoint::eCompute,
         pipeline.pipelineLayout,
         0,
-        pipeline.descriptorSet,
+        pipeline.descriptorSets[frameIndex],
         {}
     );
 

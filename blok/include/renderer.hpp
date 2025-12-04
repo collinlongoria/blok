@@ -47,7 +47,9 @@ public:
         buildChunkTlas(*m_world);
 
         // Update descriptor sets
-        m_raytracer.updateDescriptorSet(*m_world);
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            m_raytracer.updateDescriptorSet(*m_world, i);
+        }
     }
     void updateWorld() {
         if (!m_world) return;
@@ -62,7 +64,9 @@ public:
         buildChunkTlas(*m_world);
 
         // Update descriptor sets
-        m_raytracer.updateDescriptorSet(*m_world);
+        for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+            m_raytracer.updateDescriptorSet(*m_world, i);
+        }
     }
     void cleanupWorld(WorldSvoGpu& gpuWorld);
 

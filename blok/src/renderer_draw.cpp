@@ -118,10 +118,10 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     it.ensure(m_temporal.gbuffer.albedoMetallic, Role::General);
 
     if (m_world) {
-        m_raytracer.updateDescriptorSet(*m_world);
+        m_raytracer.updateDescriptorSet(*m_world, m_frameIndex);
     }
 
-    m_raytracer.dispatchRayTracing(fr.cmd, m_swapExtent.width, m_swapExtent.height);
+    m_raytracer.dispatchRayTracing(fr.cmd, m_swapExtent.width, m_swapExtent.height, m_frameIndex);
 
     // Memory barrier: ray tracing writes -> compute shader reads
     vk::MemoryBarrier2 rtToComputeBarrier{};
@@ -144,8 +144,8 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     it.ensure(m_temporal.gbuffer.currentMoments(), Role::General);
 
     // Run temporal reprojection compute shader
-    m_temporal.updateDescriptorSet();
-    m_temporal.dispatch(fr.cmd, m_swapExtent.width, m_swapExtent.height);
+    m_temporal.updateDescriptorSet(m_frameIndex);
+    m_temporal.dispatch(fr.cmd, m_swapExtent.width, m_swapExtent.height, m_frameIndex);
 
     // Memory barrier: compute shader writes -> transfer reads
     vk::MemoryBarrier2 computeToTransferBarrier{};

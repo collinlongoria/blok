@@ -7,15 +7,17 @@
 
 #ifndef RENDERER_TEMPORAL_REPROJECTION_HPP
 #define RENDERER_TEMPORAL_REPROJECTION_HPP
-
+#include <array>
 #include "resources.hpp"
 namespace blok {
 
 class Renderer;
 
 struct TemporalPipeline {
+    static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+
     vk::DescriptorSetLayout descriptorSetLayout;
-    vk::DescriptorSet descriptorSet;
+    std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT> descriptorSets;
     vk::PipelineLayout pipelineLayout;
     vk::Pipeline pipeline;
 
@@ -47,7 +49,6 @@ public:
 
 public:
     explicit TemporalReprojection(Renderer* r);
-    ~TemporalReprojection();
 
     void init(uint32_t width, uint32_t height);
     void cleanup();
@@ -58,7 +59,7 @@ public:
     void createDescriptorSetLayout();
 
     void allocateDescriptorSet();
-    void updateDescriptorSet();
+    void updateDescriptorSet(uint32_t frameIndex);
 
     void createPipeline();
 
@@ -66,7 +67,7 @@ public:
 
     void fillFrameUBO(FrameUBO& ubo, const glm::mat4& view, const glm::mat4& proj, const glm::vec3& camPos, float deltaTime, uint32_t frameCount, uint32_t screenWidth, uint32_t screenHeight);
 
-    void dispatch(vk::CommandBuffer cmd, uint32_t width, uint32_t height);
+    void dispatch(vk::CommandBuffer cmd, uint32_t width, uint32_t height, uint32_t frameIndex);
 
     void swapHistoryBuffers(); // call after dispatch
 
