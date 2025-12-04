@@ -11,3 +11,9 @@ shadow payload
 optimize lighting (do this after PBR is implemented)
 fix issue with reflective surfaces having visible edges
 create non-pathtraced pipeline (raytraced, not using acceleration extension)
+temporal reprojection
+SVGF spatial denoising
+tone mapping
+exposure control
+bloom
+TAA

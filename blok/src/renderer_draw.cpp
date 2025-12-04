@@ -57,6 +57,9 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     fubo.delta_time = dt;
     fubo.camPos = c.position;
 
+    fubo.invView = glm::inverse(fubo.view);
+    fubo.invProj = glm::inverse(fubo.proj);
+
     fubo.frame_count = m_frameCount;
     fubo.sample_count = 1;
 

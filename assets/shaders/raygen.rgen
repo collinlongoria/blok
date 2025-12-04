@@ -12,6 +12,8 @@ layout(binding = 0, set = 0) uniform accelerationStructureEXT topLevelAS;
 layout(binding = 3, set = 0) uniform FrameUBO {
     mat4 view;
     mat4 proj;
+    mat4 invView;
+    mat4 invProj;
     vec3 camPos;
     float delta_time;
     uint frameCount;    // For temporal accumulation
@@ -36,6 +38,9 @@ struct RayPayload {
 
 layout(location = 0) rayPayloadEXT RayPayload payload;
 
+const float PI = 3.14159265359;
+const float INV_PI = 0.31830988618;
+
 // PRNG
 // TODO move this to an include shader
 
@@ -55,7 +60,10 @@ vec2 randomVec2(inout uint state) {
 }
 
 uint initRNG(uvec2 pixel, uint frame, uint sampleIndex) {
-    uint seed = pixel.x + pixel.y * 65536u + frame * 16777216u + sampleIndex * 1024u;
+    uint seed = pixel.x + pixel.y * 65536u;
+    seed ^= frame * 747796405u;
+    seed ^= sampleIndex * 2891336453u;
+
     pcg(seed);
     pcg(seed);
     return seed;
@@ -65,15 +73,15 @@ uint initRNG(uvec2 pixel, uint frame, uint sampleIndex) {
 vec3 sampleCosineHemisphere(vec2 u, vec3 N) {
     // map to disk
     float r = sqrt(u.x);
-    float phi = 2.0 * 3.14159265359 * u.y;
+    float phi = 2.0 * PI * u.y;
 
     // map to hemisphere
     float x = r * cos(phi);
     float y = r * sin(phi);
     float z = sqrt(max(0.0, 1.0 - u.x));
 
-    // create tangent space
-    vec3 up = abs(N.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    // create tangent space - use a more robust method
+    vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 tangent = normalize(cross(up, N));
     vec3 bitangent = cross(N, tangent);
 
@@ -85,9 +93,9 @@ vec3 sampleGGX(vec2 u, vec3 N, float roughness) {
     float a = roughness * roughness;
     float a2 = a * a;
 
-    float phi = 2.0 * 3.14159265359 * u.x;
+    float phi = 2.0 * PI * u.x;
     float cosTheta = sqrt((1.0 - u.y) / (1.0 + (a2 - 1.0) * u.y));
-    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
 
     // spherical to cartesian (tangent space)
     vec3 H = vec3(
@@ -96,13 +104,18 @@ vec3 sampleGGX(vec2 u, vec3 N, float roughness) {
         cosTheta
     );
 
-    // create tangent space
-    vec3 up = abs(N.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    // create tangent space - use a more robust method
+    vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 tangent = normalize(cross(up, N));
     vec3 bitangent = cross(N, tangent);
 
     // transform to world space
     return normalize(tangent * H.x + bitangent * H.y + N * H.z);
+}
+
+// Schlick Fresnel approximation
+vec3 fresnelSchlick(float cosTheta, vec3 F0) {
+    return F0 + (1.0 - F0) * pow(max(1.0 - cosTheta, 0.0), 5.0);
 }
 
 vec3 getSkyColor(vec3 dir) {
@@ -112,12 +125,15 @@ vec3 getSkyColor(vec3 dir) {
     vec3 skyTop = vec3(0.4, 0.6, 0.9);
     vec3 skyColor = mix(skyBottom, skyTop, t);
 
-    // sun
+    // sun disk
     vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
     float sunDot = max(dot(dir, sunDir), 0.0);
     vec3 sunColor = vec3(1.0, 0.95, 0.8) * pow(sunDot, 128.0) * 5.0;
 
-    return skyColor + sunColor;
+    // sun glow
+    vec3 sunGlow = vec3(1.0, 0.9, 0.7) * pow(sunDot, 8.0) * 0.3;
+
+    return skyColor + sunColor + sunGlow;
 }
 
 void main() {
@@ -138,19 +154,15 @@ void main() {
         vec2 uv = pixelCenter / pixelSize;
         vec2 d = uv * 2.0 - 1.0;
 
-        // compute ray direction
-        mat4 invView = inverse(frame.view);
-        mat4 invProj = inverse(frame.proj);
-
-        vec4 target = invProj * vec4(d.x, d.y, 1.0, 1.0);
-        vec3 rayDir = normalize((invView * vec4(normalize(target.xyz), 0.0)).xyz);
+        vec4 target = frame.invProj * vec4(d.x, d.y, 1.0, 1.0);
+        vec3 rayDir = normalize((frame.invView * vec4(normalize(target.xyz), 0.0)).xyz);
         vec3 rayOrigin = frame.camPos;
 
         // path tracing state
         vec3 radiance = vec3(0.0);
         vec3 throughput = vec3(1.0);
 
-        const uint MAX_BOUNCES = 4u; // TODO push constant data such as this, allowing for random MAX
+        const uint MAX_BOUNCES = 1u; // TODO push constant data such as this, allowing for random MAX
 
         for (uint bounce = 0u; bounce < MAX_BOUNCES; bounce++) {
             // init payload
@@ -202,18 +214,19 @@ void main() {
             vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
             float NdotL = max(dot(N, sunDir), 0.0);
 
-            // TODO shadows (this basically does nothing for now - just does direct lighting)
+            // TODO shadows (this just does direct lighting for now)
             if (NdotL > 0.0) {
-                RayPayload shadowPayload;
-                shadowPayload.hitT = -1.0;
-
+                // simple direct lighting contribution
                 vec3 sunRadiance = vec3(3.0, 2.9, 2.7);
-                radiance += throughput * albedo * sunRadiance * NdotL / 3.14159265359;
+
+                vec3 diffuseColor = albedo * (1.0 - metallic);
+                radiance += throughput * diffuseColor * sunRadiance * NdotL * INV_PI;
             }
 
             // russian roulette
-            if (bounce > 2u) {
+            if (bounce > 1u) {
                 float p = max(max(throughput.r, throughput.g), throughput.b);
+                p = min(p, 0.95);
                 if (randomFloat(rng) > p) {
                     break;
                 }
@@ -223,32 +236,49 @@ void main() {
             // sample next direction based on material
             vec2 u = randomVec2(rng);
 
+            // fresnel-weighted material selection
+            vec3 F0 = mix(vec3(0.04), albedo, metallic);
+            vec3 V = -rayDir;
+            float NdotV = max(dot(N, V), 0.0);
+            vec3 F = fresnelSchlick(NdotV, F0);
+
+            // probability of specular vs diffuse based on Fresnel
+            float specularWeight = (F.r + F.g + F.b) / 3.0;
+            specularWeight = mix(specularWeight, 1.0, metallic); // (metals are always specular)
+
             // simple material model (blends between diffuse and specular based on metallic)
             if (randomFloat(rng) < metallic) {
-                // GGX specular
-                vec3 H = sampleGGX(u, N, roughness);
+                // specular
+                vec3 H = sampleGGX(u, N, max(roughness, 0.04));
                 vec3 newDir = reflect(rayDir, H);
 
                 if (dot(newDir, N) <= 0.0) {
                     break;  // invalid reflection
                 }
 
-                // specular throughput (simplified Fresnel)
-                vec3 F0 = mix(vec3(0.04), albedo, metallic);
-                float HdotV = max(dot(H, -rayDir), 0.0);
-                vec3 F = F0 + (1.0 - F0) * pow(1.0 - HdotV, 5.0);
+                float HdotV = max(dot(H, V), 0.0);
+                vec3 Fh = fresnelSchlick(HdotV, F0);
 
-                throughput *= F;
+                // Simplified specular throughput
+                throughput *= Fh / max(specularWeight, 0.001);
                 rayDir = newDir;
-            } else {
+            }
+            else {
                 // diffuse (cosine-weighted)
                 vec3 newDir = sampleCosineHemisphere(u, N);
-                throughput *= albedo;  // Diffuse BRDF = albedo/pi, PDF = cos/pi, they cancel
+                vec3 diffuseColor = albedo * (1.0 - metallic);
+                throughput *= diffuseColor / max(1.0 - specularWeight, 0.001);
                 rayDir = newDir;
             }
 
+            // prevent throughput from exploding
+            float maxThroughput = max(max(throughput.r, throughput.g), throughput.b);
+            if (maxThroughput > 10.0) {
+                throughput *= 10.0 / maxThroughput;
+            }
+
             // update ray origin (offset to avoid self-intersection)
-            rayOrigin = hitPos + N * 0.001;
+            rayOrigin = hitPos + N * 0.002;
         }
 
         accumulatedColor += radiance;
@@ -257,11 +287,18 @@ void main() {
     // average samples
     vec3 color = accumulatedColor / float(samplesPerPixel);
 
+    // clamp to prevent infinite propagation - this should fix black spots?
+    color = clamp(color, vec3(0.0), vec3(100.0));
+
     // temporal accumulation
     if (frame.frameCount > 0u) {
         vec4 prevColor = imageLoad(outputImage, ivec2(pixelCoord));
-        float blend = 1.0 / float(frame.frameCount + 1u);
-        color = mix(prevColor.rgb, color, blend);
+
+        // only blend if previous color is valid
+        if (!any(isnan(prevColor.rgb)) && !any(isinf(prevColor.rgb))) {
+            float blend = 1.0 / float(frame.frameCount + 1u);
+            color = mix(prevColor.rgb, color, blend);
+        }
     }
 
     // store result

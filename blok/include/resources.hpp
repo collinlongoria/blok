@@ -58,8 +58,12 @@ struct alignas(16) FrameUBO {
     // Cam
     glm::mat4 view{};
     glm::mat4 proj{};
-    glm::vec3 camPos{};
 
+    // this is an optimization that will allow the gpu to avoid calculating this for every pixel
+    glm::mat4 invView{};
+    glm::mat4 invProj{};
+
+    glm::vec3 camPos{};
     float delta_time = 0.0f;
 
     // Pathtracing
