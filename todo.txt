@@ -4,7 +4,7 @@ Refactor SVO rebuild into compute shader
 SVO storing material index for PBR + color
 obj loader and voxelizer
 noise gen for world
-make push constant for raytracing that allows for random depth and such
+
 incorporate Julia's imgui
 shadow payload
 optimize lighting (do this after PBR is implemented)

@@ -446,6 +446,7 @@ void TemporalReprojection::fillFrameUBO(
     const glm::mat4& proj,
     const glm::vec3& camPos,
     float deltaTime,
+    int depth,
     uint32_t frameCount,
     uint32_t screenWidth,
     uint32_t screenHeight
@@ -463,7 +464,7 @@ void TemporalReprojection::fillFrameUBO(
     ubo.delta_time = deltaTime;
 
     ubo.prevCamPos = hasPreviousFrame ? prevCamPos : camPos;
-    ubo.padding0 = 0.0f;
+    ubo.depth = depth;
 
     ubo.frame_count = frameCount;
     ubo.sample_count = 1;  // Typically 1 sample per pixel when using temporal accumulation

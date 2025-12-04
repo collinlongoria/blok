@@ -39,7 +39,7 @@ layout(binding = 9) uniform FrameUBO {
     float deltaTime;
 
     vec3 prevCamPos;
-    float padding0;
+    uint depth;
 
     uint frameCount;
     uint sampleCount;

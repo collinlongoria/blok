@@ -93,7 +93,7 @@ void App::init() {
             m_renderer = std::make_unique<Renderer>(1280, 720);
             auto gw = m_renderer->getWindow();
             glfwSetCursorPosCallback(gw, mouse_callback);
-           // glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+            glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
             VoxFile vox;
             std::string err;

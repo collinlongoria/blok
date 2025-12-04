@@ -92,7 +92,7 @@ struct alignas(16) FrameUBO {
     glm::vec3 camPos{};
     float delta_time = 0.0f;
     glm::vec3 prevCamPos{};
-    float padding0 = 0.f;
+    int depth = 1; // randomly set each frame between 1 and 4
 
     // Pathtracing
     uint32_t frame_count = 0; // increment each frame
