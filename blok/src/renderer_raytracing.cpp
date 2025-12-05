@@ -321,8 +321,15 @@ void RayTracing::createDescriptorSetLayout() {
     am.descriptorType = vk::DescriptorType::eStorageImage;
     am.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
 
-    std::array<vk::DescriptorSetLayoutBinding, 8> bindings =
-    { tlas, svoBuf, chunkBuf, frameUBO, outImg, wp, nr, am };
+    // 8 = Motion Vectors
+    vk::DescriptorSetLayoutBinding mv{};
+    mv.binding = 8;
+    mv.descriptorCount = 1;
+    mv.descriptorType = vk::DescriptorType::eStorageImage;
+    mv.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
+
+    std::array<vk::DescriptorSetLayoutBinding, 9> bindings =
+    { tlas, svoBuf, chunkBuf, frameUBO, outImg, wp, nr, am, mv };
 
     vk::DescriptorSetLayoutCreateInfo ci{};
     ci.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -339,7 +346,7 @@ void RayTracing::allocateDescriptorSet() {
 
 void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu, uint32_t frameIndex)
 {
-    auto& gbuffer = r->m_temporal.gbuffer;
+    auto& gbuffer = r->m_denoiser.gbuffer;
     vk::DescriptorSet currentSet = rtSets[frameIndex];
 
     // Acceleration structure
@@ -440,8 +447,19 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu, uint32_t frameIndex
     amWrite.descriptorType = vk::DescriptorType::eStorageImage;
     amWrite.setImageInfo(amInfo);
 
-    std::array<vk::WriteDescriptorSet, 8> writes =
-    { asWrite, svoWrite, chunkWrite, frameWrite, imgWrite, wpWrite, nrWrite, amWrite };
+    vk::DescriptorImageInfo motionInfo{
+        nullptr,
+        r->m_denoiser.gbuffer.motionVectors.view,
+        vk::ImageLayout::eGeneral
+    };
+    vk::WriteDescriptorSet motionWrite{};
+    motionWrite.dstSet = currentSet;
+    motionWrite.dstBinding = 8;
+    motionWrite.descriptorType = vk::DescriptorType::eStorageImage;
+    motionWrite.setImageInfo(motionInfo);
+
+    std::array<vk::WriteDescriptorSet,9> writes =
+    { asWrite, svoWrite, chunkWrite, frameWrite, imgWrite, wpWrite, nrWrite, amWrite, motionWrite };
 
     r->m_device.updateDescriptorSets(writes, {});
 }
