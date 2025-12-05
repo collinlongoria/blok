@@ -16,7 +16,7 @@
 #include "camera.hpp"
 #include "descriptors.hpp"
 #include "renderer_raytracing.hpp"
-#include "renderer_temporal_reprojection.hpp"
+#include "renderer_denoising.hpp"
 #include "resources.hpp"
 #include "shader_manager.hpp"
 
@@ -192,9 +192,9 @@ private:
     vk::PhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProps{};
     RayTracing m_raytracer;
     uint32_t m_frameCount = 0;
-    TemporalReprojection m_temporal;
+    Denoiser m_denoiser;
     friend class RayTracing;
-    friend class TemporalReprojection;
+    friend class Denoiser;
 };
 
 }

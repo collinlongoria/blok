@@ -44,10 +44,17 @@ struct GBuffer {
     Image worldPosition; // RGBA32F
     Image normalRoughness; // RGBA16F
     Image albedoMetallic; // RGBA8
+    Image motionVectors; // RG16F
 
     // History buffers
     Image historyColor[2];
-    Image historyMoments[2];
+    Image historyMoments[2]; // RG32F
+    Image historyLength[2]; // R16F
+
+    Image variance; // R32F
+
+    Image filterPing; // RGBA32F
+    Image filterPong; // RGBA32F
 
     uint32_t historyIndex = 0;
 
@@ -55,8 +62,17 @@ struct GBuffer {
     Image& previousHistory() { return historyColor[1 - historyIndex]; }
     Image& currentMoments() { return historyMoments[historyIndex]; }
     Image& previousMoments() { return historyMoments[1 - historyIndex]; }
+    Image& currentHistoryLength() { return historyLength[historyIndex]; }
+    Image& previousHistoryLength() { return historyLength[1 - historyIndex]; }
 
     void swapHistory() { historyIndex = 1 - historyIndex; }
+};
+
+struct AtrousPC {
+    int stepSize;
+    float phiColor;
+    float phiNormal;
+    float phiDepth;
 };
 
 struct FrameResources {
@@ -91,6 +107,7 @@ struct alignas(16) FrameUBO {
 
     glm::vec3 camPos{};
     float delta_time = 0.0f;
+
     glm::vec3 prevCamPos{};
     int depth = 1; // randomly set each frame between 1 and 4
 
@@ -101,15 +118,22 @@ struct alignas(16) FrameUBO {
     uint32_t screen_height = 0;
 
     // temporal settings
-    float temporalAlpha = 0.f; // base blend factor
-    float momentAlpha = 0.f; // blend factor for moments
-    float varianceClipGamma = 0.f; // for variance clipping
-    float depthThreshold = 0.f; // depth rejection threshold
+    float temporalAlpha = 0.05f; // base blend factor
+    float momentAlpha = 0.2f; // blend factor for moments
+    float varianceClipGamma = 1.0f; // for variance clipping
+    float depthThreshold = 0.02f; // depth rejection threshold
 
-    float normalThreshold = 0.f; // normal rejection threshold
-    float padding1 = 0.f;
-    float padding2 = 0.f;
-    float padding3 = 0.f;
+    // spatial parameters
+    float normalThreshold = 0.9f; // normal rejection threshold
+    float phiColor = 4.0f; // color edge-stopping sensitivity
+    float phiNormal = 128.0f; // normal edge-stopping sensitivity
+    float phiDepth = 1.0f; // depth edge-stopping sensitivity
+
+    // atrous filter params
+    int atrousIteration = 0; // the current iteration, to be clear
+    int stepSize = 1; // current step size
+    float varianceBoost = 1.0f;
+    int minHistoryLength = 4;
 };
 
 }

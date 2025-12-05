@@ -22,7 +22,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityF
 }
 
 Renderer::Renderer(int width, int height)
-    : m_width(width), m_height(height), m_shaderManager(m_device), m_raytracer(this), m_temporal(this) {
+    : m_width(width), m_height(height), m_shaderManager(m_device), m_raytracer(this), m_denoiser(this) {
     VULKAN_HPP_DEFAULT_DISPATCHER.init();
 
     createWindow();
@@ -63,7 +63,7 @@ Renderer::Renderer(int width, int height)
     m_raytracer.createPipeline();
     m_raytracer.createSBT();
 
-    m_temporal.init(m_swapExtent.width, m_swapExtent.height);
+    m_denoiser.init(m_swapExtent.width, m_swapExtent.height);
 
     createGui();
 }
@@ -103,7 +103,7 @@ Renderer::~Renderer() {
     if (m_raytracer.rtPipeline.hitSBT.handle) { vmaDestroyBuffer(m_allocator, m_raytracer.rtPipeline.hitSBT.handle, m_raytracer.rtPipeline.hitSBT.alloc); }
     if (m_raytracer.rtPipeline.missSBT.handle) { vmaDestroyBuffer(m_allocator, m_raytracer.rtPipeline.missSBT.handle, m_raytracer.rtPipeline.missSBT.alloc); }
 
-    m_temporal.cleanup();
+    m_denoiser.cleanup();
 
     m_descAlloc.destroyPools(m_device);
 
@@ -566,7 +566,7 @@ void Renderer::recreateSwapChain() {
     createImageResources();
 
     // resize temporal buffers too
-    m_temporal.resize(m_swapExtent.width, m_swapExtent.height);
+    m_denoiser.resize(m_swapExtent.width, m_swapExtent.height);
 }
 
 std::vector<const char *> Renderer::getRequiredExtensions() {

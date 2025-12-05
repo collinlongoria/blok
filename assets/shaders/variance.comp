@@ -1,0 +1,127 @@
+/*
+* File: variance.comp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/5/2025
+*/
+
+#version 460
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+// Inputs
+layout(binding = 0, rgba32f) uniform readonly image2D inColor;
+layout(binding = 1, rg32f)   uniform readonly image2D inMoments;
+layout(binding = 2, r16f)    uniform readonly image2D inHistoryLength;
+
+// Output
+layout(binding = 3, r32f) uniform writeonly image2D outVariance;
+
+// Frame data
+layout(binding = 4) uniform FrameUBO {
+    // Current frame
+    mat4 view;
+    mat4 proj;
+    mat4 invView;
+    mat4 invProj;
+
+    // Previous frame
+    mat4 prevView;
+    mat4 prevProj;
+    mat4 prevViewProj;
+
+    vec3 camPos;
+    float deltaTime;
+
+    vec3 prevCamPos;
+    uint depth;
+
+    uint frameCount;
+    uint sampleCount;
+    uint screenWidth;
+    uint screenHeight;
+
+    float temporalAlpha;
+    float momentAlpha;
+    float varianceClipGamma;
+    float depthThreshold;
+
+    float normalThreshold;
+    float phiColor;
+    float phiNormal;
+    float phiDepth;
+
+    int atrousIteration;
+    int stepSize;
+    float varianceBoost;
+    int minHistoryLength;
+} frame;
+
+float luminance(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+// Compute spatial variance in 3x3 neighborhood
+float computeSpatialVariance(ivec2 coord) {
+    float m1 = 0.0;  // First moment (mean)
+    float m2 = 0.0;  // Second moment (mean of squares)
+    float count = 0.0;
+
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            ivec2 sampleCoord = coord + ivec2(dx, dy);
+            sampleCoord = clamp(sampleCoord, ivec2(0), ivec2(frame.screenWidth - 1, frame.screenHeight - 1));
+
+            vec3 color = imageLoad(inColor, sampleCoord).rgb;
+            float lum = luminance(color);
+
+            m1 += lum;
+            m2 += lum * lum;
+            count += 1.0;
+        }
+    }
+
+    float mean = m1 / count;
+    float variance = max(m2 / count - mean * mean, 0.0);
+
+    return variance;
+}
+
+void main() {
+    ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
+
+    // Bounds check
+    if (coord.x >= int(frame.screenWidth) || coord.y >= int(frame.screenHeight)) {
+        return;
+    }
+
+    // Load temporal moments
+    vec2 moments = imageLoad(inMoments, coord).rg;
+    float historyLength = imageLoad(inHistoryLength, coord).r;
+
+    // Compute temporal variance
+    float temporalVariance = max(moments.y - moments.x * moments.x, 0.0);
+
+    // Compute spatial variance for comparison and fallback
+    float spatialVariance = computeSpatialVariance(coord);
+
+    // Blend between temporal and spatial variance based on history length
+    // Short history = more spatial, long history = more temporal
+    float historyWeight = clamp((historyLength - 1.0) / float(frame.minHistoryLength), 0.0, 1.0);
+
+    // For very short history, use spatial variance entirely
+    // For longer history, trust temporal variance more
+    float variance = mix(spatialVariance, temporalVariance, historyWeight);
+
+    // Apply variance boost for undersampled regions
+    // This makes the filter more aggressive for noisy areas
+    if (historyLength < float(frame.minHistoryLength)) {
+        variance *= frame.varianceBoost;
+    }
+
+    // Ensure minimum variance to prevent division issues in the filter
+    variance = max(variance, 1e-10);
+
+    // Output variance
+    imageStore(outVariance, coord, vec4(variance, 0.0, 0.0, 0.0));
+}

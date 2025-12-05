@@ -38,14 +38,20 @@ layout(binding = 3, set = 0) uniform FrameUBO {
     float depthThreshold;
 
     float normalThreshold;
-    float padding1;
-    float padding2;
-    float padding3;
+    float phiColor;
+    float phiNormal;
+    float phiDepth;
+
+    int atrousIteration;
+    int stepSize;
+    float varianceBoost;
+    int minHistoryLength;
 } frame;
 layout(binding = 4, set = 0, rgba32f) uniform image2D outColor;
 layout(binding = 5, set = 0, rgba32f) uniform image2D outWorldPosition;
 layout(binding = 6, set = 0, rgba16f) uniform image2D outNormalRoughness;
 layout(binding = 7, set = 0, rgba8)   uniform image2D outAlbedoMetallic;
+layout(binding = 8, set = 0, rg16f)   uniform image2D outMotionVectors;
 
 // Ray payload for path tracing
 struct RayPayload {
@@ -160,9 +166,17 @@ vec3 getSkyColor(vec3 dir) {
     return skyColor + sunColor + sunGlow;
 }
 
+vec2 computeMotionVector(vec3 worldPos, vec2 currentUV) {
+    vec4 prevClip = frame.prevViewProj * vec4(worldPos, 1.0);
+    vec3 prevNDC = prevClip.xyz / prevClip.w;
+    vec2 prevUV = prevNDC.xy * 0.5 + 0.5;
+    return currentUV - prevUV;
+}
+
 void main() {
     const uvec2 pixelCoord = gl_LaunchIDEXT.xy;
     const vec2 pixelSize = vec2(gl_LaunchSizeEXT.xy);
+    vec2 currentUV = (vec2(pixelCoord) + 0.5) / pixelSize;
 
     // Initialize G-buffer outputs for this pixel
     vec3 firstHitPos = vec3(0.0);
@@ -195,7 +209,7 @@ void main() {
         vec3 radiance = vec3(0.0);
         vec3 throughput = vec3(1.0);
 
-        for (uint bounce = 0u; bounce < frame.depth; bounce++) {
+        for (uint bounce = 0u; bounce < 4u; bounce++) {
             // init payload
             payload.color = vec3(0.0);
             payload.throughput = throughput;
@@ -352,4 +366,11 @@ void main() {
     // Albedo + metallic
     // Pack into RGBA8 [0, 255]
     imageStore(outAlbedoMetallic, ivec2(pixelCoord), vec4(firstHitAlbedo, firstHitMetallic));
+
+    // Motion vectors
+    vec2 motionVector = vec2(0.0);
+    if (hadFirstHit && firstHitDepth < 9999.0) {
+        motionVector = computeMotionVector(firstHitPos, currentUV);
+    }
+    imageStore(outMotionVectors, ivec2(pixelCoord), vec4(motionVector, 0.0, 0.0));
 }

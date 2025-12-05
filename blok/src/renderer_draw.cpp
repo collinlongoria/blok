@@ -58,7 +58,7 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     depth = std::min(depth, 4);
 
     FrameUBO fubo{};
-    m_temporal.fillFrameUBO(
+    m_denoiser.fillFrameUBO(
         fubo,
         c.view(),
         c.projection(aspect, nearPlane, farPlane),
@@ -67,7 +67,8 @@ void Renderer::drawFrame(const Camera& c, float dt) {
         depth,
         m_frameCount,
         m_swapExtent.width,
-        m_swapExtent.height
+        m_swapExtent.height,
+        0
     );
 
     if (c.cameraChanged) {
@@ -119,10 +120,11 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     sw.currentLayout = m_swapImageLayouts[imageIndex];
 
     // Transition G-buffer images to General for ray tracing write
-    it.ensure(m_temporal.gbuffer.color, Role::General);
-    it.ensure(m_temporal.gbuffer.worldPosition, Role::General);
-    it.ensure(m_temporal.gbuffer.normalRoughness, Role::General);
-    it.ensure(m_temporal.gbuffer.albedoMetallic, Role::General);
+    it.ensure(m_denoiser.gbuffer.color, Role::General);
+    it.ensure(m_denoiser.gbuffer.worldPosition, Role::General);
+    it.ensure(m_denoiser.gbuffer.normalRoughness, Role::General);
+    it.ensure(m_denoiser.gbuffer.albedoMetallic, Role::General);
+    it.ensure(m_denoiser.gbuffer.motionVectors, Role::General);
 
     if (m_world) {
         m_raytracer.updateDescriptorSet(*m_world, m_frameIndex);
@@ -142,17 +144,9 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     rtToComputeDep.pMemoryBarriers = &rtToComputeBarrier;
     fr.cmd.pipelineBarrier2(rtToComputeDep);
 
-    // Transition history buffers for temporal reprojection
-    // Previous history: read-only for sampling
-    // Current history: general for writing output
-    it.ensure(m_temporal.gbuffer.previousHistory(), Role::ShaderReadOnly);
-    it.ensure(m_temporal.gbuffer.previousMoments(), Role::General);  // Read as storage image
-    it.ensure(m_temporal.gbuffer.currentHistory(), Role::General);
-    it.ensure(m_temporal.gbuffer.currentMoments(), Role::General);
-
     // Run temporal reprojection compute shader
-    m_temporal.updateDescriptorSet(m_frameIndex);
-    m_temporal.dispatch(fr.cmd, m_swapExtent.width, m_swapExtent.height, m_frameIndex);
+    m_denoiser.updateDescriptorSets(m_frameIndex);
+    m_denoiser.denoise(fr.cmd, m_swapExtent.width, m_swapExtent.height, m_frameIndex);
 
     // Memory barrier: compute shader writes -> transfer reads
     vk::MemoryBarrier2 computeToTransferBarrier{};
@@ -166,11 +160,12 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     computeToTransferDep.pMemoryBarriers = &computeToTransferBarrier;
     fr.cmd.pipelineBarrier2(computeToTransferDep);
 
-    // Transition for blit
-    it.ensure(m_temporal.gbuffer.currentHistory(), Role::TransferSrc);
+    // Get and Transition for blit
+    Image& denoisedOutput = m_denoiser.getOutputImage();
+    it.ensure(denoisedOutput, Role::TransferSrc);
     it.ensure(sw, Role::TransferDst);
 
-    // Blit temporal output to swapchain
+    // Blit denoised output to swapchain
     vk::ImageBlit blit{};
     blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
     blit.srcSubresource.mipLevel   = 0;
@@ -178,8 +173,8 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     blit.srcSubresource.layerCount     = 1;
     blit.srcOffsets[0] = vk::Offset3D{0, 0, 0};
     blit.srcOffsets[1] = vk::Offset3D{
-        static_cast<int>(m_temporal.gbuffer.currentHistory().width),
-        static_cast<int>(m_temporal.gbuffer.currentHistory().height),
+        static_cast<int>(denoisedOutput.width),
+        static_cast<int>(denoisedOutput.height),
         1
     };
 
@@ -195,11 +190,12 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     };
 
     fr.cmd.blitImage(
-        m_temporal.gbuffer.currentHistory().handle, vk::ImageLayout::eTransferSrcOptimal,
+        denoisedOutput.handle, vk::ImageLayout::eTransferSrcOptimal,
         sw.handle, vk::ImageLayout::eTransferDstOptimal,
         1, &blit, vk::Filter::eLinear
     );
 
+    // Transition swapchain image for gui rendering
     it.ensure(sw, Role::ColorAttachment);
 /*
     const std::array<float,4> clear{0.0f,0.0f,0.0f,1.0f};
@@ -265,9 +261,15 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     else if (pres != vk::Result::eSuccess)
         throw std::runtime_error("presentKHR failed");
 
-    // After submit, update previous frame data
-    m_temporal.updatePreviousFrameData(c.view(), c.projection(aspect, nearPlane, farPlane), c.position);
-    m_temporal.swapHistoryBuffers();
+    // Store current frame's camera data for next frame's reprojection
+    m_denoiser.updatePreviousFrameData(
+        c.view(),
+        c.projection(aspect, nearPlane, farPlane),
+        c.position
+    );
+
+    // Swap history buffers (current becomes previous for next frame)
+    m_denoiser.swapHistoryBuffers();
 }
 
 void Renderer::cmdBeginRendering(vk::CommandBuffer cmd, vk::ImageView colorView, vk::ImageView depthView, vk::Extent2D extent, const std::array<float, 4> &clearColor, float clearDepth, uint32_t clearStencil) {

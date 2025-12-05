@@ -13,24 +13,31 @@ layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 layout(binding = 0, rgba32f) uniform readonly image2D inColor;
 layout(binding = 1, rgba32f) uniform readonly image2D inWorldPosition;
 layout(binding = 2, rgba16f) uniform readonly image2D inNormalRoughness;
+layout(binding = 3, rg16f)   uniform readonly image2D inMotionVectors;
 
 // History inputs (previous frame)
-layout(binding = 3) uniform sampler2D historyColor;   // Filtered sampling for history
-layout(binding = 4, rgba32f) uniform readonly image2D historyWorldPosition;
-layout(binding = 5, rgba16f) uniform readonly image2D historyNormalRoughness;
-layout(binding = 6, rg32f) uniform readonly image2D historyMoments;
+layout(binding = 4) uniform sampler2D prevHistoryColor;
+layout(binding = 5, rg32f)  uniform readonly image2D prevMoments;
+layout(binding = 6, r16f)   uniform readonly image2D prevHistoryLength;
+
+// Previous frame geometry (for validation)
+layout(binding = 7, rgba32f) uniform readonly image2D prevWorldPosition;
+layout(binding = 8, rgba16f) uniform readonly image2D prevNormalRoughness;
 
 // Outputs
-layout(binding = 7, rgba32f) uniform writeonly image2D outColor;
-layout(binding = 8, rg32f) uniform writeonly image2D outMoments;
+layout(binding = 9, rgba32f)  uniform writeonly image2D outColor;
+layout(binding = 10, rg32f)   uniform writeonly image2D outMoments;
+layout(binding = 11, r16f)    uniform writeonly image2D outHistoryLength;
 
 // Frame data
-layout(binding = 9) uniform FrameUBO {
+layout(binding = 12) uniform FrameUBO {
+    // Current frame
     mat4 view;
     mat4 proj;
     mat4 invView;
     mat4 invProj;
 
+    // Previous frame
     mat4 prevView;
     mat4 prevProj;
     mat4 prevViewProj;
@@ -52,10 +59,50 @@ layout(binding = 9) uniform FrameUBO {
     float depthThreshold;
 
     float normalThreshold;
-    float padding1;
-    float padding2;
-    float padding3;
+    float phiColor;
+    float phiNormal;
+    float phiDepth;
+
+    int atrousIteration;
+    int stepSize;
+    float varianceBoost;
+    int minHistoryLength;
 } frame;
+
+float luminance(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+vec3 RGBToYCoCg(vec3 rgb) {
+    return vec3(
+         0.25 * rgb.r + 0.5 * rgb.g + 0.25 * rgb.b,
+         0.5  * rgb.r                - 0.5  * rgb.b,
+        -0.25 * rgb.r + 0.5 * rgb.g - 0.25 * rgb.b
+    );
+}
+
+vec3 YCoCgToRGB(vec3 ycocg) {
+    return vec3(
+        ycocg.x + ycocg.y - ycocg.z,
+        ycocg.x           + ycocg.z,
+        ycocg.x - ycocg.y - ycocg.z
+    );
+}
+
+vec3 clipToAABB(vec3 historyColor, vec3 currentMin, vec3 currentMax) {
+    vec3 center = 0.5 * (currentMin + currentMax);
+    vec3 extents = 0.5 * (currentMax - currentMin);
+
+    vec3 offset = historyColor - center;
+    vec3 unitOffset = offset / max(extents, vec3(0.0001));
+
+    float maxComponent = max(max(abs(unitOffset.x), abs(unitOffset.y)), abs(unitOffset.z));
+
+    if (maxComponent > 1.0) {
+        return center + offset / maxComponent;
+    }
+    return historyColor;
+}
 
 // Convert world position to previous frame's screen UV
 vec2 worldToPrevUV(vec3 worldPos) {
@@ -69,56 +116,16 @@ bool isValidUV(vec2 uv) {
     return uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0;
 }
 
-// Compute luminance
-float luminance(vec3 color) {
-    return dot(color, vec3(0.299, 0.587, 0.114));
-}
-
-// YCoCg color space conversion (better for temporal filtering)
-vec3 RGBToYCoCg(vec3 rgb) {
-    return vec3(
-        0.25 * rgb.r + 0.5 * rgb.g + 0.25 * rgb.b,
-        0.5 * rgb.r - 0.5 * rgb.b,
-        -0.25 * rgb.r + 0.5 * rgb.g - 0.25 * rgb.b
-    );
-}
-
-vec3 YCoCgToRGB(vec3 ycocg) {
-    return vec3(
-        ycocg.x + ycocg.y - ycocg.z,
-        ycocg.x + ycocg.z,
-        ycocg.x - ycocg.y - ycocg.z
-    );
-}
-
-vec3 clipToAABB(vec3 color, vec3 minColor, vec3 maxColor) {
-    vec3 center = 0.5 * (minColor + maxColor);
-    vec3 extents = 0.5 * (maxColor - minColor);
-
-    vec3 offset = color - center;
-    vec3 ts = abs(extents) / max(abs(offset), vec3(0.0001));
-    float t = min(min(ts.x, ts.y), ts.z);
-
-    if (t < 1.0) {
-        return center + offset * t;
-    }
-    return color;
-}
-
 // Gather neighborhood statistics for variance clipping
-void gatherNeighborhood(ivec2 coord, out vec3 minColor, out vec3 maxColor, out vec3 mean) {
+void computeNeighborhoodStatistics(ivec2 coord, out vec3 mean, out vec3 stdDev, out vec3 minC, out vec3 maxC) {
     vec3 m1 = vec3(0.0);  // First moment
     vec3 m2 = vec3(0.0);  // Second moment
-
-    // 3x3 neighborhood (can expand to 5x5 for better stability)
-    const int radius = 1;
     float count = 0.0;
 
-    for (int dy = -radius; dy <= radius; dy++) {
-        for (int dx = -radius; dx <= radius; dx++) {
+    // 3x3 neighborhood
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
             ivec2 sampleCoord = coord + ivec2(dx, dy);
-
-            // Clamp to screen bounds
             sampleCoord = clamp(sampleCoord, ivec2(0), ivec2(frame.screenWidth - 1, frame.screenHeight - 1));
 
             vec3 sampleColor = imageLoad(inColor, sampleCoord).rgb;
@@ -131,13 +138,13 @@ void gatherNeighborhood(ivec2 coord, out vec3 minColor, out vec3 maxColor, out v
     }
 
     mean = m1 / count;
-    vec3 variance = (m2 / count) - (mean * mean);
-    vec3 stdDev = sqrt(max(variance, vec3(0.0)));
+    vec3 variance = max(m2 / count - mean * mean, vec3(0.0));
+    stdDev = sqrt(variance);
 
-    // Expand AABB by gamma * stddev
+    // Compute AABB with gamma expansion
     float gamma = frame.varianceClipGamma;
-    minColor = mean - gamma * stdDev;
-    maxColor = mean + gamma * stdDev;
+    minC = mean - gamma * stdDev;
+    maxC = mean + gamma * stdDev;
 }
 
 void main() {
@@ -149,108 +156,133 @@ void main() {
     }
 
     // Load current frame data
-    vec4 currentColorData = imageLoad(inColor, coord);
+    vec3 currentColor = imageLoad(inColor, coord).rgb;
     vec4 worldPosData = imageLoad(inWorldPosition, coord);
     vec4 normalRoughnessData = imageLoad(inNormalRoughness, coord);
 
-    vec3 currentColor = currentColorData.rgb;
     vec3 worldPos = worldPosData.xyz;
     float depth = worldPosData.w;
     vec3 normal = normalRoughnessData.xyz;
     float roughness = normalRoughnessData.w;
 
-    // Reprojection
-    // Find where this pixel was in the previous frame
-    vec2 prevUV = worldToPrevUV(worldPos);
+    // Load motion vectors
+    vec2 motionVector = imageLoad(inMotionVectors, coord).rg;
 
-    // Default output (no history available)
+    // Compute reprojected UV
+    // Method 1: Use motion vectors if available
+    // Method 2: Reproject world position through previous view-projection matrix
+    vec2 currentUV = (vec2(coord) + 0.5) / vec2(frame.screenWidth, frame.screenHeight);
+    vec2 prevUV;
+
+    if (length(motionVector) > 0.0001) {
+        // Use motion vector
+        prevUV = currentUV - motionVector;
+    } else {
+        // Reproject using world position
+        prevUV = worldToPrevUV(worldPos);
+    }
+
+    // Initialize outputs
     vec3 outputColor = currentColor;
-    float historyWeight = 0.0;
+    vec2 outputMoments = vec2(luminance(currentColor), luminance(currentColor) * luminance(currentColor));
+    float outputHistoryLength = 1.0;
 
     // Check if reprojection is valid
     bool validReprojection = isValidUV(prevUV) && frame.frameCount > 0;
 
     if (validReprojection) {
-        // Sample history at reprojected location
-        vec3 historyColorSample = texture(historyColor, prevUV).rgb;
+        // Sample history with bilinear interpolation
+        vec3 historyColor = texture(prevHistoryColor, prevUV).rgb;
 
-        // Load history geometry for validation
-        ivec2 historyCoord = ivec2(prevUV * vec2(frame.screenWidth, frame.screenHeight));
-        historyCoord = clamp(historyCoord, ivec2(0), ivec2(frame.screenWidth - 1, frame.screenHeight - 1));
+        // Load previous frame geometry for validation
+        ivec2 prevCoord = ivec2(prevUV * vec2(frame.screenWidth, frame.screenHeight));
+        prevCoord = clamp(prevCoord, ivec2(0), ivec2(frame.screenWidth - 1, frame.screenHeight - 1));
 
-        vec4 historyWorldPosData = imageLoad(historyWorldPosition, historyCoord);
-        vec4 historyNormalData = imageLoad(historyNormalRoughness, historyCoord);
+        vec4 prevWorldPosData = imageLoad(prevWorldPosition, prevCoord);
+        vec4 prevNormalData = imageLoad(prevNormalRoughness, prevCoord);
 
-        vec3 historyWorldPos = historyWorldPosData.xyz;
-        float historyDepth = historyWorldPosData.w;
-        vec3 historyNormal = historyNormalData.xyz;
+        vec3 prevWorldPos = prevWorldPosData.xyz;
+        float prevDepth = prevWorldPosData.w;
+        vec3 prevNormal = prevNormalData.xyz;
 
-        // Geometry validation
-        // Depth test: reject if depths are too different
-        // Compare the expected depth at this world position vs history depth
-        float depthDiff = abs(depth - historyDepth) / max(depth, 0.001);
+        // ============ Geometry Validation ============
+        // Depth consistency check
+        float depthDiff = abs(depth - prevDepth) / max(depth, 0.001);
         bool depthValid = depthDiff < frame.depthThreshold;
 
-        // Normal test: reject if normals are too different (disocclusion)
-        float normalDot = dot(normal, historyNormal);
+        // Normal consistency check
+        float normalDot = dot(normal, prevNormal);
         bool normalValid = normalDot > frame.normalThreshold;
 
         // Combined validity
         bool geometryValid = depthValid && normalValid;
 
-        // Variance clipping
         if (geometryValid) {
-            vec3 minColor, maxColor, mean;
-            gatherNeighborhood(coord, minColor, maxColor, mean);
+            // Load previous moments and history length
+            vec2 prevMomentsData = imageLoad(prevMoments, prevCoord).rg;
+            float prevHistLen = imageLoad(prevHistoryLength, prevCoord).r;
 
-            // Clip history color to neighborhood AABB in YCoCg space
-            vec3 historyYCoCg = RGBToYCoCg(historyColorSample);
-            vec3 clippedYCoCg = clipToAABB(historyYCoCg, minColor, maxColor);
+            // ============ Variance Clipping ============
+            vec3 mean, stdDev, minC, maxC;
+            computeNeighborhoodStatistics(coord, mean, stdDev, minC, maxC);
+
+            // Clip history color in YCoCg space
+            vec3 historyYCoCg = RGBToYCoCg(historyColor);
+            vec3 clippedYCoCg = clipToAABB(historyYCoCg, minC, maxC);
             vec3 clippedHistory = YCoCgToRGB(clippedYCoCg);
 
-            // Compute blend weight
-            // Use more history (lower alpha) for smoother areas
-            // Use less history (higher alpha) for high-variance areas
-            float lum = luminance(currentColor);
-            float historyLum = luminance(clippedHistory);
+            // Clamp to valid range
+            clippedHistory = max(clippedHistory, vec3(0.0));
 
-            // Adaptive alpha based on luminance difference
-            float lumDiff = abs(lum - historyLum) / max(lum + historyLum, 0.001);
-            float adaptiveAlpha = mix(frame.temporalAlpha, 1.0, lumDiff * lumDiff);
+            // ============ Temporal Blending ============
+            // Increase alpha (use more current frame) when:
+            // - History length is short (not enough samples yet)
+            // - Large color difference (possible disocclusion)
 
-            // Also increase alpha (use more current frame) for rough surfaces
-            // as they have higher variance naturally
-            adaptiveAlpha = mix(adaptiveAlpha, adaptiveAlpha * 1.5, roughness);
-            adaptiveAlpha = clamp(adaptiveAlpha, frame.temporalAlpha, 1.0);
+            float historyLen = prevHistLen + 1.0;
 
-            // Blend
-            outputColor = mix(clippedHistory, currentColor, adaptiveAlpha);
-            historyWeight = 1.0 - adaptiveAlpha;
-        } else {
-            // Invalid reprojection - use current color only
+            // Adaptive alpha based on history length
+            float alpha = max(frame.temporalAlpha, 1.0 / historyLen);
+
+            // Additional luminance-based adjustment
+            float lumCurrent = luminance(currentColor);
+            float lumHistory = luminance(clippedHistory);
+            float lumDiff = abs(lumCurrent - lumHistory) / max(lumCurrent + lumHistory, 0.001);
+
+            // Increase alpha for high luminance differences
+            alpha = mix(alpha, 1.0, lumDiff * 0.5);
+            alpha = clamp(alpha, frame.temporalAlpha, 1.0);
+
+            // Blend colors
+            outputColor = mix(clippedHistory, currentColor, alpha);
+
+            // ============ Moment Accumulation ============
+            float lum = luminance(currentColor);   // IMPORTANT: use currentColor, not outputColor
+            vec2 currentMoments = vec2(lum, lum * lum);
+
+            // Online estimator: one new sample per frame
+            float momentBlendAlpha = 1.0 / historyLen;
+            outputMoments = mix(prevMomentsData, currentMoments, momentBlendAlpha);
+
+            // Update history length (cap at some maximum to prevent numerical issues)
+            outputHistoryLength = min(historyLen, 64.0);
+        }
+        else {
+            // Invalid reprojection - reset history
             outputColor = currentColor;
-            historyWeight = 0.0;
+
+            float lum = luminance(currentColor);
+            outputMoments = vec2(lum, lum * lum);
+            outputHistoryLength = 1.0;
         }
     }
 
-    // Update moments for variance estimation (used by denoiser)
+    // Clamp outputs to prevent NaN/Inf
+    outputColor = clamp(outputColor, vec3(0.0), vec3(1000.0));
+    outputMoments = clamp(outputMoments, vec2(0.0), vec2(1000000.0));
 
-    float lum = luminance(outputColor);
-    vec2 newMoments = vec2(lum, lum * lum);
-
-    if (validReprojection && historyWeight > 0.0) {
-        // Blend moments with history
-        ivec2 historyCoord = ivec2(prevUV * vec2(frame.screenWidth, frame.screenHeight));
-        historyCoord = clamp(historyCoord, ivec2(0), ivec2(frame.screenWidth - 1, frame.screenHeight - 1));
-        vec2 prevMoments = imageLoad(historyMoments, historyCoord).rg;
-
-        newMoments = mix(prevMoments, newMoments, frame.momentAlpha);
-    }
-
-    // Clamp to prevent NaN/Inf
-    outputColor = clamp(outputColor, vec3(0.0), vec3(100.0));
-
-    // Output
+    // Write outputs
     imageStore(outColor, coord, vec4(outputColor, 1.0));
-    imageStore(outMoments, coord, vec4(newMoments, 0.0, 0.0));
+    imageStore(outMoments, coord, vec4(outputMoments, 0.0, 0.0));
+    imageStore(outHistoryLength, coord, vec4(outputHistoryLength, 0.0, 0.0, 0.0));
 }
