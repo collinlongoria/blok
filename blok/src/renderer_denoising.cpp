@@ -126,7 +126,8 @@ void Denoiser::createGBuffer(uint32_t width, uint32_t height) {
         width, height,
         vk::Format::eR32G32B32A32Sfloat,
         vk::ImageUsageFlagBits::eStorage |
-        vk::ImageUsageFlagBits::eSampled,
+        vk::ImageUsageFlagBits::eSampled |
+        vk::ImageUsageFlagBits::eTransferSrc,
         vk::ImageTiling::eOptimal,
         vk::SampleCountFlagBits::e1,
         1, 1,
@@ -138,7 +139,8 @@ void Denoiser::createGBuffer(uint32_t width, uint32_t height) {
         width, height,
         vk::Format::eR16G16B16A16Sfloat,
         vk::ImageUsageFlagBits::eStorage |
-        vk::ImageUsageFlagBits::eSampled,
+        vk::ImageUsageFlagBits::eSampled |
+        vk::ImageUsageFlagBits::eTransferSrc,
         vk::ImageTiling::eOptimal,
         vk::SampleCountFlagBits::e1,
         1, 1,
@@ -170,6 +172,34 @@ void Denoiser::createGBuffer(uint32_t width, uint32_t height) {
     );
 
     // Double-buffered history
+    for (int i = 0; i < 2; i++) {
+        gbuffer.worldPositionHistory[i] = renderer->createImage(
+            width, height,
+            vk::Format::eR32G32B32A32Sfloat,
+            vk::ImageUsageFlagBits::eStorage |
+            vk::ImageUsageFlagBits::eSampled |
+            vk::ImageUsageFlagBits::eTransferDst,  // Destination for copy
+            vk::ImageTiling::eOptimal,
+            vk::SampleCountFlagBits::e1,
+            1, 1,
+            VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
+        );
+        gbuffer.worldPositionHistory[i].currentLayout = vk::ImageLayout::eUndefined;
+
+        gbuffer.normalRoughnessHistory[i] = renderer->createImage(
+            width, height,
+            vk::Format::eR16G16B16A16Sfloat,
+            vk::ImageUsageFlagBits::eStorage |
+            vk::ImageUsageFlagBits::eSampled |
+            vk::ImageUsageFlagBits::eTransferDst,  // Destination for copy
+            vk::ImageTiling::eOptimal,
+            vk::SampleCountFlagBits::e1,
+            1, 1,
+            VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
+        );
+        gbuffer.normalRoughnessHistory[i].currentLayout = vk::ImageLayout::eUndefined;
+    }
+
     for (int i = 0; i < 2; i++) {
         gbuffer.historyColor[i] = renderer->createImage(
             width, height,
@@ -263,6 +293,12 @@ void Denoiser::destroyGBuffer() {
     destroyImage(gbuffer.albedoMetallic);
     destroyImage(gbuffer.motionVectors);
 
+    // ADD: Destroy geometry history
+    for (int i = 0; i < 2; i++) {
+        destroyImage(gbuffer.worldPositionHistory[i]);
+        destroyImage(gbuffer.normalRoughnessHistory[i]);
+    }
+
     for (int i = 0; i < 2; i++) {
         destroyImage(gbuffer.historyColor[i]);
         destroyImage(gbuffer.historyMoments[i]);
@@ -347,6 +383,10 @@ void Denoiser::createDescriptorSetLayouts() {
         {3, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute},
         // 4: Frame UBO
         {4, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eCompute},
+        // 5: World Position
+        {5, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute},
+        // 6: Normal / Roughness
+        {6, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eCompute}
     };
 
     vk::DescriptorSetLayoutCreateInfo varianceCi{};
@@ -382,8 +422,10 @@ void Denoiser::allocateDescriptorSets() {
         pipeline.varianceSets[i] = renderer->m_descAlloc.allocate(
             renderer->m_device, pipeline.varianceSetLayout);
 
-        pipeline.atrousSets[i] = renderer->m_descAlloc.allocate(
-            renderer->m_device, pipeline.atrousSetLayout);
+        for (int iter = 0; iter < DenoiserPipeline::MAX_ATROUS_ITERATIONS; ++iter) {
+            pipeline.atrousSets[i][iter] = renderer->m_descAlloc.allocate(
+                renderer->m_device, pipeline.atrousSetLayout);
+        }
     }
 }
 
@@ -407,9 +449,9 @@ void Denoiser::updateDescriptorSets(uint32_t frameIndex) {
         vk::DescriptorImageInfo prevMomentsInfo{nullptr, gbuffer.previousMoments().view, vk::ImageLayout::eGeneral};
         vk::DescriptorImageInfo prevHistLenInfo{nullptr, gbuffer.previousHistoryLength().view, vk::ImageLayout::eGeneral};
 
-        // TODO double-buffer the G-buffer too
-        vk::DescriptorImageInfo prevWorldPosInfo{nullptr, gbuffer.worldPosition.view, vk::ImageLayout::eGeneral};
-        vk::DescriptorImageInfo prevNormalInfo{nullptr, gbuffer.normalRoughness.view, vk::ImageLayout::eGeneral};
+        // FIXED: Use double-buffered geometry history instead of current frame
+        vk::DescriptorImageInfo prevWorldPosInfo{nullptr, gbuffer.previousWorldPosition().view, vk::ImageLayout::eGeneral};
+        vk::DescriptorImageInfo prevNormalInfo{nullptr, gbuffer.previousNormalRoughness().view, vk::ImageLayout::eGeneral};
 
         // Outputs
         vk::DescriptorImageInfo outColorInfo{nullptr, gbuffer.currentHistory().view, vk::ImageLayout::eGeneral};
@@ -447,47 +489,69 @@ void Denoiser::updateDescriptorSets(uint32_t frameIndex) {
         vk::DescriptorImageInfo momentsInfo{nullptr, gbuffer.currentMoments().view, vk::ImageLayout::eGeneral};
         vk::DescriptorImageInfo histLenInfo{nullptr, gbuffer.currentHistoryLength().view, vk::ImageLayout::eGeneral};
         vk::DescriptorImageInfo varianceInfo{nullptr, gbuffer.variance.view, vk::ImageLayout::eGeneral};
+        vk::DescriptorImageInfo worldPosInfo{nullptr, gbuffer.worldPosition.view, vk::ImageLayout::eGeneral};
+        vk::DescriptorImageInfo normalInfo{nullptr, gbuffer.normalRoughness.view, vk::ImageLayout::eGeneral};
 
         auto& fr = renderer->m_frames[frameIndex];
         vk::DescriptorBufferInfo uboInfo{fr.frameUBO.handle, 0, sizeof(FrameUBO)};
 
-        std::array<vk::WriteDescriptorSet, 5> writes{};
+        std::array<vk::WriteDescriptorSet, 7> writes{};
         writes[0] = {set, 0, 0, 1, vk::DescriptorType::eStorageImage, &colorInfo};
         writes[1] = {set, 1, 0, 1, vk::DescriptorType::eStorageImage, &momentsInfo};
         writes[2] = {set, 2, 0, 1, vk::DescriptorType::eStorageImage, &histLenInfo};
         writes[3] = {set, 3, 0, 1, vk::DescriptorType::eStorageImage, &varianceInfo};
         writes[4] = {set, 4, 0, 1, vk::DescriptorType::eUniformBuffer, nullptr, &uboInfo};
+        writes[5] = {set, 5, 0, 1, vk::DescriptorType::eStorageImage, &worldPosInfo};
+        writes[6] = {set, 6, 0, 1, vk::DescriptorType::eStorageImage, &normalInfo};
 
         renderer->m_device.updateDescriptorSets(writes, {});
     }
 
     // Atrous Filter Descriptor Set
     {
-        vk::DescriptorSet set = pipeline.atrousSets[frameIndex];
-
-        // read from currentHistory write to filterPing
-        vk::DescriptorImageInfo inputInfo{
-            pipeline.linearSampler,
-            gbuffer.currentHistory().view,
-            vk::ImageLayout::eGeneral
-        };
-        vk::DescriptorImageInfo varianceInfo{nullptr, gbuffer.variance.view, vk::ImageLayout::eGeneral};
-        vk::DescriptorImageInfo worldPosInfo{nullptr, gbuffer.worldPosition.view, vk::ImageLayout::eGeneral};
-        vk::DescriptorImageInfo normalInfo{nullptr, gbuffer.normalRoughness.view, vk::ImageLayout::eGeneral};
-        vk::DescriptorImageInfo outputInfo{nullptr, gbuffer.filterPing.view, vk::ImageLayout::eGeneral};
-
         auto& fr = renderer->m_frames[frameIndex];
         vk::DescriptorBufferInfo uboInfo{fr.frameUBO.handle, 0, sizeof(FrameUBO)};
 
-        std::array<vk::WriteDescriptorSet, 6> writes{};
-        writes[0] = {set, 0, 0, 1, vk::DescriptorType::eCombinedImageSampler, &inputInfo};
-        writes[1] = {set, 1, 0, 1, vk::DescriptorType::eStorageImage, &varianceInfo};
-        writes[2] = {set, 2, 0, 1, vk::DescriptorType::eStorageImage, &worldPosInfo};
-        writes[3] = {set, 3, 0, 1, vk::DescriptorType::eStorageImage, &normalInfo};
-        writes[4] = {set, 4, 0, 1, vk::DescriptorType::eStorageImage, &outputInfo};
-        writes[5] = {set, 5, 0, 1, vk::DescriptorType::eUniformBuffer, nullptr, &uboInfo};
+        // Common descriptors for all iterations
+        vk::DescriptorImageInfo varianceInfo{nullptr, gbuffer.variance.view, vk::ImageLayout::eGeneral};
+        vk::DescriptorImageInfo worldPosInfo{nullptr, gbuffer.worldPosition.view, vk::ImageLayout::eGeneral};
+        vk::DescriptorImageInfo normalInfo{nullptr, gbuffer.normalRoughness.view, vk::ImageLayout::eGeneral};
 
-        renderer->m_device.updateDescriptorSets(writes, {});
+        for (int iter = 0; iter < DenoiserPipeline::MAX_ATROUS_ITERATIONS; ++iter) {
+            vk::DescriptorSet set = pipeline.atrousSets[frameIndex][iter];
+
+            // Determine input/output based on iteration
+            Image* inputImage;
+            Image* outputImage;
+
+            if (iter == 0) {
+                inputImage = &gbuffer.currentHistory();
+                outputImage = &gbuffer.filterPing;
+            } else if (iter % 2 == 1) {
+                inputImage = &gbuffer.filterPing;
+                outputImage = &gbuffer.filterPong;
+            } else {
+                inputImage = &gbuffer.filterPong;
+                outputImage = &gbuffer.filterPing;
+            }
+
+            vk::DescriptorImageInfo inputInfo{
+                pipeline.linearSampler,
+                inputImage->view,
+                vk::ImageLayout::eGeneral
+            };
+            vk::DescriptorImageInfo outputInfo{nullptr, outputImage->view, vk::ImageLayout::eGeneral};
+
+            std::array<vk::WriteDescriptorSet, 6> writes{};
+            writes[0] = {set, 0, 0, 1, vk::DescriptorType::eCombinedImageSampler, &inputInfo};
+            writes[1] = {set, 1, 0, 1, vk::DescriptorType::eStorageImage, &varianceInfo};
+            writes[2] = {set, 2, 0, 1, vk::DescriptorType::eStorageImage, &worldPosInfo};
+            writes[3] = {set, 3, 0, 1, vk::DescriptorType::eStorageImage, &normalInfo};
+            writes[4] = {set, 4, 0, 1, vk::DescriptorType::eStorageImage, &outputInfo};
+            writes[5] = {set, 5, 0, 1, vk::DescriptorType::eUniformBuffer, nullptr, &uboInfo};
+
+            renderer->m_device.updateDescriptorSets(writes, {});
+        }
     }
 }
 
@@ -616,7 +680,7 @@ void Denoiser::fillFrameUBO(
     ubo.depth = depth;
 
     ubo.frame_count = frameCount;
-    ubo.sample_count = 1;  // Typically 1 sample per pixel when using temporal accumulation
+    ubo.sample_count = 4;
     ubo.screen_width = screenWidth;
     ubo.screen_height = screenHeight;
 
@@ -648,6 +712,11 @@ Image& Denoiser::getOutputImage() {
 }
 
 void Denoiser::denoise(vk::CommandBuffer cmd, uint32_t width, uint32_t height, uint32_t frameIndex) {
+    // i won't ever let this happen, but just in case
+    if (settings.atrousIterations > DenoiserPipeline::MAX_ATROUS_ITERATIONS) {
+        settings.atrousIterations = DenoiserPipeline::MAX_ATROUS_ITERATIONS;
+    }
+
     ImageTransitions it{cmd};
 
     // Temporal Accumulation
@@ -732,39 +801,12 @@ void Denoiser::dispatchVarianceEstimation(vk::CommandBuffer cmd, uint32_t width,
 void Denoiser::dispatchAtrousFilter(vk::CommandBuffer cmd, uint32_t width, uint32_t height, uint32_t frameIndex, int iteration) {
     cmd.bindPipeline(vk::PipelineBindPoint::eCompute, pipeline.atrousPipeline);
 
-    Image* inputImage;
-    Image* outputImage;
-
-    if (iteration == 0) {
-        inputImage = &gbuffer.currentHistory();
-        outputImage = &gbuffer.filterPing;
-    } else if (iteration % 2 == 1) {
-        inputImage = &gbuffer.filterPing;
-        outputImage = &gbuffer.filterPong;
-    } else {
-        inputImage = &gbuffer.filterPong;
-        outputImage = &gbuffer.filterPing;
-    }
-
-    // Update descriptor set for this iteration
-    vk::DescriptorImageInfo inputInfo{
-        pipeline.linearSampler,
-        inputImage->view,
-        vk::ImageLayout::eGeneral
-    };
-    vk::DescriptorImageInfo outputInfo{nullptr, outputImage->view, vk::ImageLayout::eGeneral};
-
-    std::array<vk::WriteDescriptorSet, 2> writes{};
-    writes[0] = {pipeline.atrousSets[frameIndex], 0, 0, 1, vk::DescriptorType::eCombinedImageSampler, &inputInfo};
-    writes[1] = {pipeline.atrousSets[frameIndex], 4, 0, 1, vk::DescriptorType::eStorageImage, &outputInfo};
-
-    renderer->m_device.updateDescriptorSets(writes, {});
-
+    // Use pre-configured descriptor set for this iteration
     cmd.bindDescriptorSets(
         vk::PipelineBindPoint::eCompute,
         pipeline.atrousPipelineLayout,
         0,
-        pipeline.atrousSets[frameIndex],
+        pipeline.atrousSets[frameIndex][iteration],
         {}
     );
 
@@ -786,6 +828,36 @@ void Denoiser::dispatchAtrousFilter(vk::CommandBuffer cmd, uint32_t width, uint3
     uint32_t groupsX = (width + 7) / 8;
     uint32_t groupsY = (height + 7) / 8;
     cmd.dispatch(groupsX, groupsY, 1);
+}
+
+void Denoiser::copyCurrentGeometryToHistory(vk::CommandBuffer cmd) {
+    // Copy current world position to history buffer (which will become "previous" after swap)
+    vk::ImageCopy copyRegion{};
+    copyRegion.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+    copyRegion.srcSubresource.mipLevel = 0;
+    copyRegion.srcSubresource.baseArrayLayer = 0;
+    copyRegion.srcSubresource.layerCount = 1;
+    copyRegion.dstSubresource = copyRegion.srcSubresource;
+    copyRegion.extent.width = gbuffer.worldPosition.width;
+    copyRegion.extent.height = gbuffer.worldPosition.height;
+    copyRegion.extent.depth = 1;
+
+    // Copy world position
+    cmd.copyImage(
+        gbuffer.worldPosition.handle, vk::ImageLayout::eTransferSrcOptimal,
+        gbuffer.currentWorldPosition().handle, vk::ImageLayout::eTransferDstOptimal,
+        1, &copyRegion
+    );
+
+    // Copy normal/roughness
+    copyRegion.extent.width = gbuffer.normalRoughness.width;
+    copyRegion.extent.height = gbuffer.normalRoughness.height;
+
+    cmd.copyImage(
+        gbuffer.normalRoughness.handle, vk::ImageLayout::eTransferSrcOptimal,
+        gbuffer.currentNormalRoughness().handle, vk::ImageLayout::eTransferDstOptimal,
+        1, &copyRegion
+    );
 }
 
 void Denoiser::swapHistoryBuffers() {

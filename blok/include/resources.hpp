@@ -46,6 +46,10 @@ struct GBuffer {
     Image albedoMetallic; // RGBA8
     Image motionVectors; // RG16F
 
+    // Geometry Validation
+    Image worldPositionHistory[2];
+    Image normalRoughnessHistory[2];
+
     // History buffers
     Image historyColor[2];
     Image historyMoments[2]; // RG32F
@@ -64,6 +68,10 @@ struct GBuffer {
     Image& previousMoments() { return historyMoments[1 - historyIndex]; }
     Image& currentHistoryLength() { return historyLength[historyIndex]; }
     Image& previousHistoryLength() { return historyLength[1 - historyIndex]; }
+    Image& currentWorldPosition() { return worldPositionHistory[historyIndex]; }
+    Image& previousWorldPosition() { return worldPositionHistory[1 - historyIndex]; }
+    Image& currentNormalRoughness() { return normalRoughnessHistory[historyIndex]; }
+    Image& previousNormalRoughness() { return normalRoughnessHistory[1 - historyIndex]; }
 
     void swapHistory() { historyIndex = 1 - historyIndex; }
 };

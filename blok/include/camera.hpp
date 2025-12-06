@@ -41,6 +41,11 @@ public:
     }
 
     [[nodiscard]]
+    inline glm::vec3 worldUp() const {
+        return {0.0f, 1.0f, 0.0f};
+    }
+
+    [[nodiscard]]
     inline glm::mat4 view() const {
         const glm::vec3 f = forward();
         return glm::lookAt(position, position + f, up());
@@ -59,6 +64,8 @@ public:
         if (key == 'S') position -= forward() * speed;
         if (key == 'A') position -= right() * speed;
         if (key == 'D') position += right() * speed;
+        if (key == 'P') position += worldUp() * speed;
+        if (key == 'C') position -= worldUp() * speed;
 
         cameraChanged = true;
     }
