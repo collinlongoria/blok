@@ -71,11 +71,10 @@ void Renderer::drawFrame(const Camera& c, float dt) {
         0
     );
 
+    m_frameCount++;
+
     if (c.cameraChanged) {
-        m_frameCount = 0;
         c.cameraChanged = false;
-    } else {
-        m_frameCount++;
     }
 
     uploadToBuffer(&fubo, sizeof(FrameUBO), fr.frameUBO, 0);
@@ -144,21 +143,47 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     rtToComputeDep.pMemoryBarriers = &rtToComputeBarrier;
     fr.cmd.pipelineBarrier2(rtToComputeDep);
 
+    // Before denoising - ensure history images are in correct layout
+    it.ensure(m_denoiser.gbuffer.previousWorldPosition(), Role::General);
+    it.ensure(m_denoiser.gbuffer.previousNormalRoughness(), Role::General);
+
     // Run temporal reprojection compute shader
     m_denoiser.updateDescriptorSets(m_frameIndex);
     m_denoiser.denoise(fr.cmd, m_swapExtent.width, m_swapExtent.height, m_frameIndex);
 
     // Memory barrier: compute shader writes -> transfer reads
+    // Memory barrier: compute shader writes -> transfer reads
     vk::MemoryBarrier2 computeToTransferBarrier{};
     computeToTransferBarrier.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader;
     computeToTransferBarrier.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
     computeToTransferBarrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
-    computeToTransferBarrier.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
+    computeToTransferBarrier.dstAccessMask = vk::AccessFlagBits2::eTransferRead | vk::AccessFlagBits2::eTransferWrite;
 
     vk::DependencyInfo computeToTransferDep{};
     computeToTransferDep.memoryBarrierCount = 1;
     computeToTransferDep.pMemoryBarriers = &computeToTransferBarrier;
     fr.cmd.pipelineBarrier2(computeToTransferDep);
+
+    // Transition images for copy
+    it.ensure(m_denoiser.gbuffer.worldPosition, Role::TransferSrc);
+    it.ensure(m_denoiser.gbuffer.normalRoughness, Role::TransferSrc);
+    it.ensure(m_denoiser.gbuffer.currentWorldPosition(), Role::TransferDst);
+    it.ensure(m_denoiser.gbuffer.currentNormalRoughness(), Role::TransferDst);
+
+    // Copy current frame's geometry to history (will become "previous" after swap)
+    m_denoiser.copyCurrentGeometryToHistory(fr.cmd);
+
+    // Memory barrier: transfer -> next frame's compute read
+    vk::MemoryBarrier2 transferToComputeBarrier{};
+    transferToComputeBarrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    transferToComputeBarrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+    transferToComputeBarrier.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader;
+    transferToComputeBarrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+
+    vk::DependencyInfo transferToComputeDep{};
+    transferToComputeDep.memoryBarrierCount = 1;
+    transferToComputeDep.pMemoryBarriers = &transferToComputeBarrier;
+    fr.cmd.pipelineBarrier2(transferToComputeDep);
 
     // Get and Transition for blit
     Image& denoisedOutput = m_denoiser.getOutputImage();

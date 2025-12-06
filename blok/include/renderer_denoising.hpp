@@ -15,6 +15,7 @@ class Renderer;
 
 struct DenoiserPipeline {
     static constexpr uint32_t MAX_FRAMES_IN_FLIGHT = 2;
+    static constexpr int MAX_ATROUS_ITERATIONS = 5;
 
     // temporal accumulation pass
     vk::DescriptorSetLayout temporalSetLayout;
@@ -30,7 +31,7 @@ struct DenoiserPipeline {
 
     // Atrous wavelet filter pass
     vk::DescriptorSetLayout atrousSetLayout;
-    std::array<vk::DescriptorSet, MAX_FRAMES_IN_FLIGHT> atrousSets;
+    std::array<std::array<vk::DescriptorSet, MAX_ATROUS_ITERATIONS>, MAX_FRAMES_IN_FLIGHT> atrousSets;
     vk::PipelineLayout atrousPipelineLayout;
     vk::Pipeline atrousPipeline;
 
@@ -55,23 +56,23 @@ public:
     // TODO imgui panel to edit these
     struct Settings {
         // Temporal accumulation
-        float temporalAlpha = 0.12f;
-        float momentAlpha = 0.4f;
-        float varianceClipGamma = 1.0f;
+        float temporalAlpha = 0.05f;
+        float momentAlpha = 0.2f;
+        float varianceClipGamma = 1.5f;
 
         // Geometry rejection thresholds
-        float depthThreshold = 0.01f;
-        float normalThreshold = 0.98f;
+        float depthThreshold = 0.1f;
+        float normalThreshold = 0.85f;
 
         // Atrous filter parameters
-        float phiColor = 3.0f;
-        float phiNormal = 32.0f;
-        float phiDepth = 0.5f;
-        int atrousIterations = 3;
+        float phiColor = 1.0f;
+        float phiNormal = 128.0f;
+        float phiDepth = 0.3f;
+        int atrousIterations = 4;
 
         // Variance estimation
-        float varianceBoost = 2.0f;
-        int minHistoryLength = 4;
+        float varianceBoost = 1.5f;
+        int minHistoryLength = 8;
     } settings;
 
 public:
@@ -109,6 +110,8 @@ private:
     void dispatchTemporalAccumulation(vk::CommandBuffer cmd, uint32_t width, uint32_t height, uint32_t frameIndex);
     void dispatchVarianceEstimation(vk::CommandBuffer cmd, uint32_t width, uint32_t height, uint32_t frameIndex);
     void dispatchAtrousFilter(vk::CommandBuffer cmd, uint32_t width, uint32_t height, uint32_t frameIndex, int iteration);
+
+    void copyCurrentGeometryToHistory(vk::CommandBuffer cmd);
 
     friend class Renderer;
 };

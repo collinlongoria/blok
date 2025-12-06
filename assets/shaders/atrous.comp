@@ -9,6 +9,7 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
+// CHANGED: Use image instead of sampler to avoid bilinear blur across voxel edges
 layout(binding = 0) uniform sampler2D inColor;
 
 layout(binding = 1, r32f)    uniform readonly image2D inVariance;
@@ -18,38 +19,29 @@ layout(binding = 3, rgba16f) uniform readonly image2D inNormalRoughness;
 layout(binding = 4, rgba32f) uniform writeonly image2D outColor;
 
 layout(binding = 5) uniform FrameUBO {
-    // Current frame
     mat4 view;
     mat4 proj;
     mat4 invView;
     mat4 invProj;
-
-    // Previous frame
     mat4 prevView;
     mat4 prevProj;
     mat4 prevViewProj;
-
     vec3 camPos;
     float deltaTime;
-
     vec3 prevCamPos;
     uint depth;
-
     uint frameCount;
     uint sampleCount;
     uint screenWidth;
     uint screenHeight;
-
     float temporalAlpha;
     float momentAlpha;
     float varianceClipGamma;
     float depthThreshold;
-
     float normalThreshold;
     float phiColor;
     float phiNormal;
     float phiDepth;
-
     int atrousIteration;
     int stepSize;
     float varianceBoost;
@@ -63,11 +55,9 @@ layout(push_constant) uniform PushConstants {
     float phiDepth;
 } pc;
 
-// 5x5 Gaussian kernel weights (separable, but we use 2D for simplicity)
-// These are the à-trous B3-spline weights
+// 5x5 à-trous kernel weights
 const float kernel[3] = float[3](1.0, 2.0/3.0, 1.0/6.0);
 
-// Full 5x5 kernel offsets (relative to center)
 const ivec2 offsets[25] = ivec2[25](
     ivec2(-2, -2), ivec2(-1, -2), ivec2(0, -2), ivec2(1, -2), ivec2(2, -2),
     ivec2(-2, -1), ivec2(-1, -1), ivec2(0, -1), ivec2(1, -1), ivec2(2, -1),
@@ -80,62 +70,81 @@ float luminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
 }
 
-// Compute Gaussian spatial weight from kernel
 float computeKernelWeight(ivec2 offset) {
-    // Convert to kernel indices
     int kx = abs(offset.x);
     int ky = abs(offset.y);
-
     if (kx > 2 || ky > 2) return 0.0;
-
-    // h[i] * h[j] for separable kernel
     return kernel[kx] * kernel[ky];
 }
 
-// Edge-stopping function for color (variance-guided)
+// IMPROVED: Better variance-guided color weight
 float computeColorWeight(vec3 centerColor, vec3 sampleColor, float variance) {
-    // Luminance difference
-    float lumCenter = luminance(centerColor);
-    float lumSample = luminance(sampleColor);
-    float lumDiff = abs(lumCenter - lumSample);
+    vec3 diff = centerColor - sampleColor;
+    float colorDistSq = dot(diff, diff);
 
-    // Variance-guided sigma: higher variance = more permissive
-    // This is the key insight from SVGF
-    float sigma = pc.phiColor * sqrt(max(variance, 1e-10));
+    // Variance-guided sigma
+    // Add base sigma to prevent over-filtering when variance is very low
+    float baseSigma = 0.01;
+    float varianceSigma = pc.phiColor * sqrt(max(variance, 0.0));
+    float sigma = baseSigma + varianceSigma;
 
-    // Gaussian weight
-    return exp(-lumDiff * lumDiff / max(sigma * sigma, 1e-10));
+    return exp(-colorDistSq / (2.0 * sigma * sigma + 1e-6));
 }
 
-// Edge-stopping function for normals
+// IMPROVED: Sharper normal falloff for voxels
 float computeNormalWeight(vec3 centerNormal, vec3 sampleNormal) {
     float dotProduct = max(dot(centerNormal, sampleNormal), 0.0);
 
-    // Power function for sharper falloff
-    return pow(dotProduct, pc.phiNormal);
+    // For voxels with axis-aligned normals:
+    // - Same face: dot = 1.0 -> weight = 1.0
+    // - Adjacent face (90°): dot = 0.0 -> weight = 0.0
+    // - Opposite face: dot = -1.0 -> weight = 0.0
+
+    // Use a threshold instead of power for hard edges
+    // Normals within ~25° get full weight, then sharp falloff
+    float threshold = 0.9; // cos(25°) ≈ 0.906
+    if (dotProduct < threshold) {
+        return 0.0;
+    }
+
+    // Smooth falloff above threshold
+    float t = (dotProduct - threshold) / (1.0 - threshold);
+    return t * t; // Quadratic falloff in the valid range
 }
 
-// Edge-stopping function for depth/position
-float computeDepthWeight(float centerDepth, float sampleDepth, vec3 centerNormal, ivec2 offset) {
-    // Plane-based depth comparison
-    // Project the offset onto the normal to get expected depth change
+// IMPROVED: Plane-aware depth weight for voxels
+float computeDepthWeight(vec3 centerWorldPos, vec3 sampleWorldPos, vec3 centerNormal, float centerDepth, float sampleDepth) {
+    // For voxels, we care about whether we're on the same surface
+
+    // Method 1: Simple depth difference (good for axis-aligned views)
     float depthDiff = abs(centerDepth - sampleDepth);
 
-    // Scale by step size (larger steps = more tolerance)
-    float sigma = pc.phiDepth * float(pc.stepSize);
+    // Method 2: Plane distance (better for angled views)
+    vec3 posDiff = sampleWorldPos - centerWorldPos;
+    float planeDistance = abs(dot(posDiff, centerNormal));
 
-    return exp(-depthDiff * depthDiff / max(sigma * sigma, 1e-10));
+    // Combine both - use whichever is more restrictive
+    float effectiveDistance = max(depthDiff * 0.1, planeDistance);
+
+    // Threshold based on step size (larger steps = more tolerance)
+    float sigma = pc.phiDepth * float(pc.stepSize) + 0.1;
+
+    // Hard cutoff for voxel edges
+    if (effectiveDistance > sigma * 2.0) {
+        return 0.0;
+    }
+
+    return exp(-effectiveDistance * effectiveDistance / (sigma * sigma + 1e-6));
 }
 
 void main() {
     ivec2 coord = ivec2(gl_GlobalInvocationID.xy);
 
-    // Bounds check
     if (coord.x >= int(frame.screenWidth) || coord.y >= int(frame.screenHeight)) {
         return;
     }
 
-    // Load center pixel data
+    // Load center pixel data - USE POINT SAMPLING for voxels
     vec2 centerUV = (vec2(coord) + 0.5) / vec2(frame.screenWidth, frame.screenHeight);
     vec3 centerColor = texture(inColor, centerUV).rgb;
 
@@ -147,9 +156,8 @@ void main() {
     float centerDepth = centerWorldPosData.w;
     vec3 centerNormal = normalize(centerNormalData.xyz);
 
-    // Check for sky pixels (very large depth)
+    // Sky check
     if (centerDepth > 9000.0) {
-        // Sky - no filtering needed
         imageStore(outColor, coord, vec4(centerColor, 1.0));
         return;
     }
@@ -158,19 +166,15 @@ void main() {
     vec3 sumColor = vec3(0.0);
     float sumWeight = 0.0;
 
-    // Apply 5x5 kernel with step size
     for (int i = 0; i < 25; i++) {
         ivec2 offset = offsets[i] * pc.stepSize;
         ivec2 sampleCoord = coord + offset;
-
-        // Clamp to screen bounds
         sampleCoord = clamp(sampleCoord, ivec2(0), ivec2(frame.screenWidth - 1, frame.screenHeight - 1));
 
-        // Sample color with bilinear filtering
+        // POINT SAMPLE - no bilinear interpolation across voxel edges
         vec2 sampleUV = (vec2(sampleCoord) + 0.5) / vec2(frame.screenWidth, frame.screenHeight);
         vec3 sampleColor = texture(inColor, sampleUV).rgb;
 
-        // Load sample geometry
         vec4 sampleWorldPosData = imageLoad(inWorldPosition, sampleCoord);
         vec4 sampleNormalData = imageLoad(inNormalRoughness, sampleCoord);
 
@@ -178,45 +182,35 @@ void main() {
         float sampleDepth = sampleWorldPosData.w;
         vec3 sampleNormal = normalize(sampleNormalData.xyz);
 
-        // Skip sky pixels in samples
+        // Skip sky
         if (sampleDepth > 9000.0) {
             continue;
         }
 
-        // Compute Edge-Stopping Weights
-
-        // Spatial Gaussian weight
+        // Compute weights
         float kernelWeight = computeKernelWeight(offsets[i]);
-
-        // Color weight (variance-guided)
         float colorWeight = computeColorWeight(centerColor, sampleColor, centerVariance);
-
-        // Normal weight
         float normalWeight = computeNormalWeight(centerNormal, sampleNormal);
+        float depthWeight = computeDepthWeight(centerWorldPos, sampleWorldPos, centerNormal, centerDepth, sampleDepth);
 
-        // Depth weight
-        float depthWeight = computeDepthWeight(centerDepth, sampleDepth, centerNormal, offset);
-
-        // Combined weight
         float weight = kernelWeight * colorWeight * normalWeight * depthWeight;
 
-        // Accumulate
+        // Minimum weight threshold to avoid near-zero contributions
+        if (weight < 0.001) {
+            continue;
+        }
+
         sumColor += sampleColor * weight;
         sumWeight += weight;
     }
 
-    // Normalize
     vec3 outputColor;
-    if (sumWeight > 1e-10) {
+    if (sumWeight > 0.01) {
         outputColor = sumColor / sumWeight;
     } else {
-        // Fallback to center color if all weights are zero
         outputColor = centerColor;
     }
 
-    // Clamp to valid range
     outputColor = max(outputColor, vec3(0.0));
-
-    // Write output
     imageStore(outColor, coord, vec4(outputColor, 1.0));
 }
