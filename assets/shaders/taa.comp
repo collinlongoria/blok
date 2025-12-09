@@ -1,0 +1,221 @@
+/*
+* File: taa.comp
+* Project: blok
+* Author: Collin Longoria
+* Created on: 12/8/2025
+*/
+
+#version 460
+#extension GL_EXT_scalar_block_layout : enable
+
+layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
+
+layout(binding = 0, rgba32f) uniform image2D currentColor;
+layout(binding = 1) uniform sampler2D previousHistory;
+layout(binding = 2, rg16f) uniform image2D motionVectors;
+layout(binding = 3, rgba32f) uniform image2D depthBuffer;  // worldPosition.w = depth
+layout(binding = 4, rgba32f) uniform image2D outputColor;
+layout(binding = 5, rgba32f) uniform image2D outputHistory;
+
+layout(binding = 6, scalar)  uniform FrameUBO {
+    // Current frame
+    mat4 view;
+    mat4 proj;
+    mat4 invView;
+    mat4 invProj;
+
+    // Previous frame
+    mat4 prevView;
+    mat4 prevProj;
+    mat4 prevViewProj;
+
+    vec3 camPos;
+    float deltaTime;
+
+    vec3 prevCamPos;
+    uint depth;
+
+    uint frameCount;
+    uint sampleCount;
+    uint screenWidth;
+    uint screenHeight;
+
+    float temporalAlpha;
+    float momentAlpha;
+    float varianceClipGamma;
+    float depthThreshold;
+
+    float normalThreshold;
+    float phiColor;
+    float phiNormal;
+    float phiDepth;
+
+    int atrousIteration;
+    int stepSize;
+    float varianceBoost;
+    int minHistoryLength;
+
+    vec2 jitterOffset;
+    vec2 _padding;
+} ubo;
+
+layout(push_constant) uniform PushConstants {
+    float jitterX;
+    float jitterY;
+    float feedbackMin;
+    float feedbackMax;
+} pc;
+
+// converts RGB to YCoCg color space
+vec3 RGBToYCoCg(vec3 rgb) {
+    return vec3(
+        0.25 * rgb.r + 0.5 * rgb.g + 0.25 * rgb.b,
+        0.5 * rgb.r - 0.5 * rgb.b,
+        -0.25 * rgb.r + 0.5 * rgb.g - 0.25 * rgb.b
+    );
+}
+
+// reverse previous function
+vec3 YCoCgToRGB(vec3 ycocg) {
+    float y = ycocg.x;
+    float co = ycocg.y;
+    float cg = ycocg.z;
+    return vec3(
+        y + co - cg,
+        y + cg,
+        y - co - cg
+    );
+}
+
+// clip color to AABB in ycocg space
+vec3 clipToAABB(vec3 color, vec3 minColor, vec3 maxColor) {
+    vec3 center = 0.5 * (maxColor + minColor);
+    vec3 extents = 0.5 * (maxColor - minColor);
+    
+    vec3 offset = color - center;
+    vec3 ts = abs(extents) / max(abs(offset), vec3(0.0001));
+    float t = clamp(min(min(ts.x, ts.y), ts.z), 0.0, 1.0);
+    
+    return center + offset * t;
+}
+
+// variance clipping
+vec3 varianceClip(vec3 historyColor, vec3 currentColor, vec3 neighborhoodMin, vec3 neighborhoodMax, vec3 mean, vec3 stdDev) {
+    // shrink the AABB based on variance for better ghosting rejection
+    float gamma = 1.5;  // try values 1.0 to 1.5, idk whats best for jitter
+    vec3 minC = mean - gamma * stdDev;
+    vec3 maxC = mean + gamma * stdDev;
+    
+    // Intersect with neighborhood AABB
+    minC = max(minC, neighborhoodMin);
+    maxC = min(maxC, neighborhoodMax);
+    
+    return clipToAABB(historyColor, minC, maxC);
+}
+
+void main() {
+    ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 screenSize = ivec2(ubo.screenWidth, ubo.screenHeight);
+    
+    if (pixelCoord.x >= screenSize.x || pixelCoord.y >= screenSize.y) {
+        return;
+    }
+    
+    vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(screenSize);
+    
+    // load current frame color
+    // remove jitter offset for sampling
+    vec4 currentSample = imageLoad(currentColor, pixelCoord);
+    vec3 current = currentSample.rgb;
+    
+    // get motion vector
+    vec2 motion = imageLoad(motionVectors, pixelCoord).xy;
+    
+    // calculate previous frame UV
+    vec2 prevUV = uv - motion;
+    
+    // check if previous uv is valid
+    bool validHistory = prevUV.x >= 0.0 && prevUV.x <= 1.0 && 
+                        prevUV.y >= 0.0 && prevUV.y <= 1.0;
+    
+    // sample history with bilinear filtering
+    vec3 history = texture(previousHistory, prevUV).rgb;
+    
+    // gather neighborhood samples for variance clipping
+    vec3 neighborhoodMin = vec3(1e10);
+    vec3 neighborhoodMax = vec3(-1e10);
+    vec3 neighborhoodSum = vec3(0.0);
+    vec3 neighborhoodSumSq = vec3(0.0);
+    
+    // sample in YCoCg space for better clamping
+    for (int dy = -1; dy <= 1; dy++) {
+        for (int dx = -1; dx <= 1; dx++) {
+            ivec2 sampleCoord = pixelCoord + ivec2(dx, dy);
+            sampleCoord = clamp(sampleCoord, ivec2(0), screenSize - 1);
+            
+            vec3 sample_rgb = imageLoad(currentColor, sampleCoord).rgb;
+            vec3 sample_ycocg = RGBToYCoCg(sample_rgb);
+            
+            neighborhoodMin = min(neighborhoodMin, sample_ycocg);
+            neighborhoodMax = max(neighborhoodMax, sample_ycocg);
+            neighborhoodSum += sample_ycocg;
+            neighborhoodSumSq += sample_ycocg * sample_ycocg;
+        }
+    }
+    
+    // calculate mean and standard deviation
+    vec3 mean = neighborhoodSum / 9.0;
+    vec3 variance = (neighborhoodSumSq / 9.0) - (mean * mean);
+    vec3 stdDev = sqrt(max(variance, vec3(0.0)));
+    
+    // convert history to ycocg
+    vec3 historyYCoCg = RGBToYCoCg(history);
+    vec3 currentYCoCg = RGBToYCoCg(current);
+    
+    // variance clip the history
+    vec3 clippedHistoryYCoCg = varianceClip(
+        historyYCoCg,
+        currentYCoCg,
+        neighborhoodMin,
+        neighborhoodMax,
+        mean,
+        stdDev
+    );
+    
+    // convert back to rgb
+    vec3 clippedHistory = YCoCgToRGB(clippedHistoryYCoCg);
+    
+    // calculate velocity magnitude for feedback adjustment
+    float velocityLength = length(motion * vec2(screenSize));
+    
+    // adjust feedback based on velocity
+    float velocityFactor = clamp(velocityLength / 10.0, 0.0, 1.0);
+    float feedback = mix(pc.feedbackMax, pc.feedbackMin, velocityFactor);
+    
+    // reduce feedback for invalid history
+    if (!validHistory || ubo.frameCount == 0) {
+        feedback = 0.0;
+    }
+    
+    // calculate distance from clipped history to original history
+    // if there was significant clipping, reduce feedback
+    float clipDist = length(clippedHistoryYCoCg - historyYCoCg);
+    feedback *= 1.0 - clamp(clipDist * 2.0, 0.0, 0.5);
+    
+    // blend current and history
+    vec3 result = mix(current, clippedHistory, feedback);
+    
+    // apply sharpening to counteract TAA blur
+    vec3 blurred = mean;
+    vec3 sharpened = current + 0.1 * (current - YCoCgToRGB(blurred));
+    
+    // Use sharpened version for the output but not for history
+    // (to prevent sharpening artifacts from accumulating)
+    vec3 outputResult = mix(sharpened, clippedHistory, feedback);
+    
+    // write output
+    imageStore(outputColor, pixelCoord, vec4(outputResult, currentSample.a));
+    
+    // write to history buffer (use unsharpened result to prevent artifacts)
+    imageStore(outputHistory, pixelCoord, vec4(result, 1.0));
+}

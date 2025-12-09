@@ -98,7 +98,7 @@ struct FrameResources {
     vk::DeviceSize uboHead = 0;
 };
 
-// TODO check if i can use alignas instead of padding
+// TODO I can offload a chunk of this to a PC for the raygen shader
 struct alignas(16) FrameUBO {
     // Cam
     glm::mat4 view{};
@@ -117,7 +117,7 @@ struct alignas(16) FrameUBO {
     float delta_time = 0.0f;
 
     glm::vec3 prevCamPos{};
-    int depth = 1; // randomly set each frame between 1 and 4
+    int depth = 1; // TODO not used anymore, replaced with sample_count
 
     // Pathtracing
     uint32_t frame_count = 0; // increment each frame
@@ -142,6 +142,10 @@ struct alignas(16) FrameUBO {
     int stepSize = 1; // current step size
     float varianceBoost = 1.0f;
     int minHistoryLength = 4;
+
+    // TAA variables (used in raygen)
+    glm::vec2 jitterOffset;
+    glm::vec2 _padding;
 };
 
 }

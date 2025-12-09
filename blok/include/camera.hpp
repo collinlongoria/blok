@@ -14,8 +14,8 @@ namespace blok {
 
 struct Camera {
 public:
-    glm::vec3 position{0.0f, 0.0f, 1.0f};
-    float yaw   = -90.0f;
+    glm::vec3 position{0.0f, 10.0f, -5.0f};
+    float yaw   = 0.0f;
     float pitch = 0.0f;
     float fov   = 60.0f;
 
@@ -64,8 +64,8 @@ public:
         if (key == 'S') position -= forward() * speed;
         if (key == 'A') position -= right() * speed;
         if (key == 'D') position += right() * speed;
-        if (key == 'P') position += worldUp() * speed;
-        if (key == 'C') position -= worldUp() * speed;
+        if (key == 'X') position += worldUp() * speed;
+        if (key == 'Z') position -= worldUp() * speed;
 
         cameraChanged = true;
     }

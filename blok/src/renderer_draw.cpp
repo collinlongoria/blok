@@ -21,6 +21,7 @@ void framebufferResizeCallback(GLFWwindow* window, int width, int height) {
 void Renderer::render(const Camera& c, float dt) {
     beginFrame();
     renderPerformanceData();
+    renderOptionsPanel();
     drawFrame(c, dt);
     endFrame();
 }
@@ -57,11 +58,17 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     while (static_cast<float>(rand()) / RAND_MAX < 0.7) depth++;
     depth = std::min(depth, 4);
 
+    // Get base projection
+    glm::mat4 baseProj = c.projection(aspect, nearPlane, farPlane);
+
+    // Apply TAA jitter to projection
+    glm::mat4 jitteredProj = m_postProcess.getJitteredProjection(baseProj, m_swapExtent.width, m_swapExtent.height);
+
     FrameUBO fubo{};
     m_denoiser.fillFrameUBO(
         fubo,
         c.view(),
-        c.projection(aspect, nearPlane, farPlane),
+        jitteredProj,
         c.position,
         dt,
         depth,
@@ -70,6 +77,8 @@ void Renderer::drawFrame(const Camera& c, float dt) {
         m_swapExtent.height,
         0
     );
+    glm::vec2 jitter = m_postProcess.getJitterOffset();
+    fubo.jitterOffset = jitter;
 
     m_frameCount++;
 
@@ -152,7 +161,6 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     m_denoiser.denoise(fr.cmd, m_swapExtent.width, m_swapExtent.height, m_frameIndex);
 
     // Memory barrier: compute shader writes -> transfer reads
-    // Memory barrier: compute shader writes -> transfer reads
     vk::MemoryBarrier2 computeToTransferBarrier{};
     computeToTransferBarrier.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader;
     computeToTransferBarrier.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
@@ -173,24 +181,40 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     // Copy current frame's geometry to history (will become "previous" after swap)
     m_denoiser.copyCurrentGeometryToHistory(fr.cmd);
 
-    // Memory barrier: transfer -> next frame's compute read
+    // Memory barrier: transfer -> compute for post-processing
     vk::MemoryBarrier2 transferToComputeBarrier{};
     transferToComputeBarrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
     transferToComputeBarrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
     transferToComputeBarrier.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader;
-    transferToComputeBarrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+    transferToComputeBarrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite;
 
     vk::DependencyInfo transferToComputeDep{};
     transferToComputeDep.memoryBarrierCount = 1;
     transferToComputeDep.pMemoryBarriers = &transferToComputeBarrier;
     fr.cmd.pipelineBarrier2(transferToComputeDep);
 
-    // Get and Transition for blit
+    // ==================== POST-PROCESSING (TAA + Tonemap + Sharpen) ====================
     Image& denoisedOutput = m_denoiser.getOutputImage();
-    it.ensure(denoisedOutput, Role::TransferSrc);
+    m_postProcess.process(fr.cmd, denoisedOutput, m_swapExtent.width, m_swapExtent.height, m_frameIndex);
+
+    // Memory barrier: post-process compute -> transfer for blit
+    vk::MemoryBarrier2 postToTransferBarrier{};
+    postToTransferBarrier.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader;
+    postToTransferBarrier.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
+    postToTransferBarrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    postToTransferBarrier.dstAccessMask = vk::AccessFlagBits2::eTransferRead;
+
+    vk::DependencyInfo postToTransferDep{};
+    postToTransferDep.memoryBarrierCount = 1;
+    postToTransferDep.pMemoryBarriers = &postToTransferBarrier;
+    fr.cmd.pipelineBarrier2(postToTransferDep);
+
+    // Get final post-processed output for blit
+    Image& finalOutput = m_postProcess.getOutputImage();
+    it.ensure(finalOutput, Role::TransferSrc);
     it.ensure(sw, Role::TransferDst);
 
-    // Blit denoised output to swapchain
+    // Blit post-processed output to swapchain
     vk::ImageBlit blit{};
     blit.srcSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
     blit.srcSubresource.mipLevel   = 0;
@@ -198,8 +222,8 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     blit.srcSubresource.layerCount     = 1;
     blit.srcOffsets[0] = vk::Offset3D{0, 0, 0};
     blit.srcOffsets[1] = vk::Offset3D{
-        static_cast<int>(denoisedOutput.width),
-        static_cast<int>(denoisedOutput.height),
+        static_cast<int>(finalOutput.width),
+        static_cast<int>(finalOutput.height),
         1
     };
 
@@ -215,7 +239,7 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     };
 
     fr.cmd.blitImage(
-        denoisedOutput.handle, vk::ImageLayout::eTransferSrcOptimal,
+        finalOutput.handle, vk::ImageLayout::eTransferSrcOptimal,
         sw.handle, vk::ImageLayout::eTransferDstOptimal,
         1, &blit, vk::Filter::eLinear
     );
@@ -257,7 +281,7 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     it.ensure(sw, Role::Present);
     m_swapImageLayouts[imageIndex] = sw.currentLayout;
 
-    fr.cmd.end(); // TODO: this would make sense to be inside of cmdEndRendering, but the above assure must take place first.
+    fr.cmd.end();
 
     // submit
     vk::PipelineStageFlags waitStage = vk::PipelineStageFlagBits::eColorAttachmentOutput;
@@ -289,12 +313,19 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     // Store current frame's camera data for next frame's reprojection
     m_denoiser.updatePreviousFrameData(
         c.view(),
-        c.projection(aspect, nearPlane, farPlane),
+        baseProj,  // Use NON-jittered projection for reprojection
         c.position
+    );
+
+    // Store previous frame data for TAA
+    m_postProcess.updatePreviousFrameData(
+        c.view(),
+        baseProj  // Use NON-jittered projection
     );
 
     // Swap history buffers (current becomes previous for next frame)
     m_denoiser.swapHistoryBuffers();
+    m_postProcess.swapHistoryBuffers();
 }
 
 void Renderer::cmdBeginRendering(vk::CommandBuffer cmd, vk::ImageView colorView, vk::ImageView depthView, vk::Extent2D extent, const std::array<float, 4> &clearColor, float clearDepth, uint32_t clearStencil) {

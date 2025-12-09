@@ -17,6 +17,7 @@
 #include "descriptors.hpp"
 #include "renderer_raytracing.hpp"
 #include "renderer_denoising.hpp"
+#include "renderer_postprocess.hpp"
 #include "resources.hpp"
 #include "shader_manager.hpp"
 
@@ -97,6 +98,7 @@ private:
     void createGui();
     void destroyGui();
     void renderPerformanceData();
+    void renderOptionsPanel();
 
     // Upload
     Buffer createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, VmaAllocationCreateFlags allocFlags, VmaMemoryUsage memUsage = VMA_MEMORY_USAGE_AUTO, bool mapped = false);
@@ -193,8 +195,10 @@ private:
     RayTracing m_raytracer;
     uint32_t m_frameCount = 0;
     Denoiser m_denoiser;
+    PostProcess m_postProcess;
     friend class RayTracing;
     friend class Denoiser;
+    friend class PostProcess;
 };
 
 }
