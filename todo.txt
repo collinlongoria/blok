@@ -1,11 +1,7 @@
 TODO (Collin)
 
 // NEXT 2 weeks:
-SVGF spatial denoising
-tone mapping
-exposure control
-bloom
-TAA
+bloom?
 motion blur?
 
 // NEXT 2 weeks:

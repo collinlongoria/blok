@@ -24,6 +24,7 @@
 #include "ui.hpp"
 #include "camera.hpp"
 #include "chunk_manager.hpp"
+#include "imgui_impl_glfw.h"
 #include "scene.hpp"
 #include "vox_loader.hpp"
 
@@ -39,6 +40,7 @@ static float lastY = 300.0f;
 static bool firstMouse = true;
 
 void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
+    ImGui_ImplGlfw_CursorPosCallback(window, xpos, ypos);
     if (firstMouse) {
         lastX = (float)xpos;
         lastY = (float)ypos;
@@ -133,8 +135,6 @@ void App::update() {
             if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) g_camera.processKeyboard('S', dt);
             if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) g_camera.processKeyboard('A', dt);
             if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) g_camera.processKeyboard('D', dt);
-            if (glfwGetKey(win, GLFW_KEY_X) == GLFW_PRESS) g_camera.processKeyboard('C', dt);
-            if (glfwGetKey(win, GLFW_KEY_Z) == GLFW_PRESS) g_camera.processKeyboard('P', dt);
 
             if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(win, true);
 
@@ -165,6 +165,8 @@ void App::update() {
             if (glfwGetKey(win, GLFW_KEY_S) == GLFW_PRESS) g_camera.processKeyboard('S', dt);
             if (glfwGetKey(win, GLFW_KEY_A) == GLFW_PRESS) g_camera.processKeyboard('A', dt);
             if (glfwGetKey(win, GLFW_KEY_D) == GLFW_PRESS) g_camera.processKeyboard('D', dt);
+            if (glfwGetKey(win, GLFW_KEY_X) == GLFW_PRESS) g_camera.processKeyboard('X', dt);
+            if (glfwGetKey(win, GLFW_KEY_Z) == GLFW_PRESS) g_camera.processKeyboard('Z', dt);
 
             if (glfwGetKey(win, GLFW_KEY_ESCAPE) == GLFW_PRESS) glfwSetWindowShouldClose(win, true);
 

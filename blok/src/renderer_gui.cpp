@@ -175,4 +175,47 @@ void Renderer::renderPerformanceData() {
     ImGui::End();
 }
 
+void Renderer::renderOptionsPanel() {
+    if (ImGui::CollapsingHeader("Post-Processing")) {
+        ImGui::Indent();
+        if (ImGui::CollapsingHeader("Temporal Anti-Aliasing", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Checkbox("Enable TAA", &m_postProcess.settings.enableTAA);
+            if (m_postProcess.settings.enableTAA) {
+                ImGui::SliderFloat("Feedback Min", &m_postProcess.settings.feedbackMin, 0.0f, 1.0f);
+                ImGui::SliderFloat("Feedback Max", &m_postProcess.settings.feedbackMax, 0.0f, 1.0f);
+            }
+        }
+
+        if (ImGui::CollapsingHeader("Tonemapping", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Checkbox("Enable Tonemapping", &m_postProcess.settings.enableTonemapping);
+
+            if (m_postProcess.settings.enableTonemapping) {
+                ImGui::SliderFloat("Exposure", &m_postProcess.settings.exposure, 0.1f, 4.0f);
+                ImGui::SliderFloat("Saturation Boost", &m_postProcess.settings.saturationBoost, 0.5f, 2.0f);
+                ImGui::SliderFloat("White Point", &m_postProcess.settings.whitePoint, 1.0f, 20.0f);
+
+                const char* operators[] = {
+                    "Reinhard Extended",
+                    "ACES (Hill)",
+                    "AgX",
+                    "Neutral (Soft Clip)",
+                    "Khronos PBR Neutral"
+                };
+                int currentOp = static_cast<int>(m_postProcess.settings.tonemapOperator);
+                if (ImGui::Combo("Tonemap Operator", &currentOp, operators, IM_ARRAYSIZE(operators))) {
+                    m_postProcess.settings.tonemapOperator = static_cast<TonemapOperator>(currentOp);
+                }
+            }
+        }
+
+        if (ImGui::CollapsingHeader("Sharpening", ImGuiTreeNodeFlags_DefaultOpen)) {
+            ImGui::Checkbox("Enable Sharpening", &m_postProcess.settings.enableSharpening);
+
+            if (m_postProcess.settings.enableSharpening) {
+                ImGui::SliderFloat("Sharpen Strength", &m_postProcess.settings.sharpenStrength, 0.0f, 1.0f);
+            }
+        }
+    }
+}
+
 }
