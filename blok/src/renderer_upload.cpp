@@ -274,6 +274,43 @@ void Renderer::uploadSvoBuffers(WorldSvoGpu &gpuWorld) {
     uploadToBuffer(gpuWorld.globalChunks.data(), chunkBytes, gpuWorld.chunkBuffer);
 
     std::cout << "SVO Uploaded: " << gpuWorld.globalNodes.size() << " nodes, " << gpuWorld.globalChunks.size() << " chunks.\n";
+
+    uploadMaterialBuffer(gpuWorld);
+}
+
+void Renderer::uploadMaterialBuffer(WorldSvoGpu& gpuWorld) {
+    // Pack materials from the library
+    gpuWorld.materials = m_materialLib.packForGpu();
+
+    // Ensure we have at least one material (the default)
+    if (gpuWorld.materials.empty()) {
+        // Add default material
+        Material defaultMat;
+        defaultMat.albedo = glm::vec3(0.8f);
+        defaultMat.roughness = 0.5f;
+        gpuWorld.materials.push_back(MaterialGpu::pack(defaultMat));
+    }
+
+    vk::DeviceSize materialSize = gpuWorld.materials.size() * sizeof(MaterialGpu);
+
+    // Cleanup old buffer if exists
+    if (gpuWorld.materialBuffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.materialBuffer.handle, gpuWorld.materialBuffer.alloc);
+        gpuWorld.materialBuffer = {};
+    }
+
+    // Create new buffer
+    gpuWorld.materialBuffer = createBuffer(
+        materialSize,
+        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        0, VMA_MEMORY_USAGE_AUTO
+    );
+
+    // Upload data
+    uploadToBuffer(gpuWorld.materials.data(), materialSize, gpuWorld.materialBuffer);
+
+    std::cout << "Uploaded material buffer: " << gpuWorld.materials.size()
+              << " materials (" << materialSize << " bytes)\n";
 }
 
 }

@@ -1,21 +1,22 @@
 TODO (Collin)
 
 // NEXT 2 weeks:
-bloom?
-motion blur?
+SVO storing material index for PBR + color (systems for blok types)
+glass and refraction
+shadow payload
 
 // NEXT 2 weeks:
-SVO storing material index for PBR + color
-implement a list of lights, multiple lights, and emissives
+implement a list of lights, multiple lights
 noise gen for world
 
 // NEXT 2 weeks:
-Refactor SVO rebuild into compute shader
+Refactor SVO rebuild into compute shader?
 obj loader and voxelizer
 
 // LONG term:
-shadow payload
 create non-pathtraced pipeline (raytraced, not using acceleration extension)
+bloom?
+motion blur?
 
 // KNOWN ISSUES:
 most of the tonemaps I tried are ugly/useless. may clean it up and remove them

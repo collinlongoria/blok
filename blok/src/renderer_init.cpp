@@ -161,6 +161,11 @@ void Renderer::cleanupWorld(WorldSvoGpu& gpuWorld) {
         vmaDestroyBuffer(m_allocator, gpuWorld.chunkBuffer.handle, gpuWorld.chunkBuffer.alloc);
         gpuWorld.chunkBuffer = {};
     }
+
+    if (gpuWorld.materialBuffer.handle && gpuWorld.materialBuffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.materialBuffer.handle, gpuWorld.materialBuffer.alloc);
+        gpuWorld.materialBuffer = {};
+    }
 }
 
 void Renderer::createWindow() {

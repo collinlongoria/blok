@@ -231,7 +231,7 @@ void main() {
             payload.throughput = throughput;
             payload.hitT = -1.0;
             payload.rngState = rng;
-            payload.roughness = 0.5; // arbitrary defaults btw
+            payload.roughness = 0.5;
             payload.metallic = 0.0;
 
             // call trace ray
@@ -281,6 +281,11 @@ void main() {
             // ensure normal faces ray
             if (dot(N, rayDir) > 0.0) {
                 N = -N;
+            }
+
+            // emissives
+            if (length(payload.color) > 0.0) {
+                radiance += throughput * payload.color;
             }
 
             // direct lighting

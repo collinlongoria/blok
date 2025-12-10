@@ -328,8 +328,15 @@ void RayTracing::createDescriptorSetLayout() {
     mv.descriptorType = vk::DescriptorType::eStorageImage;
     mv.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
 
-    std::array<vk::DescriptorSetLayoutBinding, 9> bindings =
-    { tlas, svoBuf, chunkBuf, frameUBO, outImg, wp, nr, am, mv };
+    // 9 = Material Buffer
+    vk::DescriptorSetLayoutBinding mb{};
+    mb.binding = 9;
+    mb.descriptorCount = 1;
+    mb.descriptorType = vk::DescriptorType::eStorageBuffer;
+    mb.stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR;
+
+    std::array<vk::DescriptorSetLayoutBinding, 10> bindings =
+    { tlas, svoBuf, chunkBuf, frameUBO, outImg, wp, nr, am, mv, mb };
 
     vk::DescriptorSetLayoutCreateInfo ci{};
     ci.bindingCount = static_cast<uint32_t>(bindings.size());
@@ -458,8 +465,21 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu, uint32_t frameIndex
     motionWrite.descriptorType = vk::DescriptorType::eStorageImage;
     motionWrite.setImageInfo(motionInfo);
 
-    std::array<vk::WriteDescriptorSet,9> writes =
-    { asWrite, svoWrite, chunkWrite, frameWrite, imgWrite, wpWrite, nrWrite, amWrite, motionWrite };
+    // Material buffer
+    vk::DescriptorBufferInfo materialInfo{};
+    materialInfo.buffer = r->m_world->materialBuffer.handle;
+    materialInfo.offset = 0;
+    materialInfo.range = VK_WHOLE_SIZE;
+
+    vk::WriteDescriptorSet materialWrite{};
+    materialWrite.dstSet = currentSet;
+    materialWrite.dstBinding = 9;
+    materialWrite.descriptorType = vk::DescriptorType::eStorageBuffer;
+    materialWrite.descriptorCount = 1;
+    materialWrite.pBufferInfo = &materialInfo;
+
+    std::array<vk::WriteDescriptorSet,10> writes =
+    { asWrite, svoWrite, chunkWrite, frameWrite, imgWrite, wpWrite, nrWrite, amWrite, motionWrite, materialWrite };
 
     r->m_device.updateDescriptorSets(writes, {});
 }

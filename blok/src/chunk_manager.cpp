@@ -69,23 +69,7 @@ Chunk *ChunkManager::getOrCreateChunk(const ChunkCoord &cc) {
     return ch;
 }
 
-void ChunkManager::setBrushColor(uint8_t r, uint8_t g, uint8_t b) {
-    brushR = r;
-    brushG = g;
-    brushB = b;
-}
-
-uint32_t ChunkManager::getBrushColorPacked() const {
-    return (static_cast<uint32_t>(brushR) << 16) |
-           (static_cast<uint32_t>(brushG) << 8) |
-           (static_cast<uint32_t>(brushB) << 0);
-}
-
-void ChunkManager::setVoxel(const glm::vec3& worldPos, float density) {
-    setVoxel(worldPos, brushR, brushG, brushB, density);
-}
-
-void ChunkManager::setVoxel(const glm::vec3& worldPos, uint8_t r, uint8_t g, uint8_t b, float density) {
+void ChunkManager::setVoxel(const glm::vec3& worldPos, uint32_t materialId, float density) {
     glm::ivec3 gv = worldToGlobalVoxel(worldPos);
     ChunkCoord cc = globalVoxelToChunk(gv);
     glm::ivec3 lv = globalVoxelToLocal(gv, cc);
@@ -94,14 +78,22 @@ void ChunkManager::setVoxel(const glm::vec3& worldPos, uint8_t r, uint8_t g, uin
 
     size_t idx = localIndex(lv.x, lv.y, lv.z);
     ch->density[idx] = density;
-
-    // Store the color so it survives rebuild
-    uint32_t color = (static_cast<uint32_t>(r) << 16) |
-                     (static_cast<uint32_t>(g) << 8) |
-                     (static_cast<uint32_t>(b) << 0);
-    ch->colors[idx] = color;
+    ch->materialIds[idx] = materialId;
 
     ch->dirty = true;
+}
+
+void ChunkManager::setVoxel(const glm::vec3& worldPos, uint8_t r, uint8_t g, uint8_t b, float density) {
+    uint32_t materialId;
+    if (materialLib) {
+        materialId = materialLib->getOrCreateFromColor(r, g, b);
+    } else {
+        // pack color directly as materialId
+        materialId = (static_cast<uint32_t>(r) << 16) |
+                     (static_cast<uint32_t>(g) << 8) |
+                     (static_cast<uint32_t>(b) << 0);
+    }
+    setVoxelMaterial(worldPos, materialId, density);
 }
 
 // helper to rebuild svo
@@ -115,8 +107,8 @@ void buildSvoFromDensity(Chunk* ch, uint32_t C) {
                 size_t idx = x + y*C + z*C*C;
                 float d = ch->density[idx];
                 if (d > 0.0f) {
-                    uint32_t color = ch->colors[idx];  // Use stored color
-                    ch->svo.insertVoxel(x, y, z, color, d);
+                    uint32_t materialId = ch->materialIds[idx];
+                    ch->svo.insertVoxel(x, y, z, materialId, d);
                 }
             }
 }
@@ -179,6 +171,40 @@ void packChunksToGpuSvo(const ChunkManager& mgr, WorldSvoGpu& gpuWorld) {
         nodeOffset += meta.nodeCount;
         chunkIndex++;
     }
+}
+
+void ChunkManager::setVoxelMaterial(const glm::vec3& worldPos, uint32_t materialId, float density) {
+    glm::ivec3 gv = worldToGlobalVoxel(worldPos);
+    ChunkCoord cc = globalVoxelToChunk(gv);
+    glm::ivec3 lv = globalVoxelToLocal(gv, cc);
+
+    Chunk* ch = getOrCreateChunk(cc);
+
+    size_t idx = localIndex(lv.x, lv.y, lv.z);
+    ch->density[idx] = density;
+    ch->materialIds[idx] = materialId;
+
+    ch->dirty = true;
+}
+
+uint32_t ChunkManager::getVoxelMaterial(const glm::vec3& worldPos) const {
+    glm::ivec3 gv = worldToGlobalVoxel(worldPos);
+    ChunkCoord cc = globalVoxelToChunk(gv);
+
+    auto it = chunks.find(cc);
+    if (it == chunks.end()) {
+        return 0; // Not found
+    }
+
+    glm::ivec3 lv = globalVoxelToLocal(gv, cc);
+    size_t idx = localIndex(lv.x, lv.y, lv.z);
+
+    const Chunk* ch = it->second;
+    if (ch->density[idx] <= 0.0f) {
+        return 0; // Empty
+    }
+
+    return ch->materialIds[idx];
 }
 
 }

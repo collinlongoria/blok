@@ -13,7 +13,7 @@ static SvoNode makeEmptyNode() {
     SvoNode n{};
     n.childMask = 0u;
     n.firstChild = INVALID_NODE_INDEX;
-    n.color = 0u;
+    n.materialId = 0u;
     n.occupancy = 0.0f;
     return n;
 }
@@ -56,7 +56,7 @@ static uint32_t ensureChildren(std::vector<SvoNode>& nodes, uint32_t nodeIndex) 
     return firstChild;
 }
 
-void SvoTree::insertVoxel(uint32_t x, uint32_t y, uint32_t z, uint32_t color, float density) {
+void SvoTree::insertVoxel(uint32_t x, uint32_t y, uint32_t z, uint32_t materialId, float density) {
     if (density <= 0.0f)
         return; // TODO: ignoring empty writes for now
 
@@ -88,7 +88,7 @@ void SvoTree::insertVoxel(uint32_t x, uint32_t y, uint32_t z, uint32_t color, fl
 
     // nodeIndex is now leaf node
     SvoNode& leaf = nodes[nodeIndex];
-    leaf.color = color;
+    leaf.materialId = materialId;
     leaf.occupancy = density;
 
     // propogate childMask bits up along the path

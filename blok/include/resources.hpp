@@ -9,6 +9,7 @@
 #include "vulkan_context.hpp"
 #include <vk_mem_alloc.h>
 
+#include "material.hpp"
 #include "svo.hpp"
 
 namespace blok {
@@ -179,6 +180,9 @@ struct WorldSvoGpu {
 
     Buffer svoBuffer{};
     Buffer chunkBuffer{};
+
+    std::vector<MaterialGpu> materials;
+    Buffer materialBuffer{};
 
     AccelerationStructure blas{};
     AccelerationStructure tlas{};

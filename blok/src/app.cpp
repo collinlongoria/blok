@@ -97,12 +97,22 @@ void App::init() {
             glfwSetCursorPosCallback(gw, mouse_callback);
             glfwSetInputMode(gw, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
 
+            blok::MaterialLibrary& matLib = m_renderer->getMaterialLibrary();
+            g_mgr.setMaterialLibrary(&matLib);
+
             VoxFile vox;
             std::string err;
-            if (loadVoxFile("assets/models/chr_knight.vox", vox, err)) {
-                importVoxToChunks(vox, g_mgr, glm::vec3(0, 0, 0), 0);
-                uint8_t r, g, b;
-                vox.getPaletteRGB(1, r, g, b);
+            bool success = blok::loadAndImportVox(
+                "assets/models/Truck 01.vox",
+                g_mgr,
+                &matLib,
+                glm::vec3(0, 0, 0),
+                0,
+                &err
+            );
+
+            if (!success) {
+                std::cerr << "Failed to load VOX: " << err << "\n";
             }
 
             // Prepare GPU world SVO
