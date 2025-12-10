@@ -68,11 +68,85 @@ static bool readBytes(std::ifstream& file, void* buffer, size_t count) {
     return file.good();
 }
 
+static std::string readString(std::ifstream& file) {
+    int32_t len;
+    if (!readValue(file, len) || len <= 0 || len > 1024) return "";
+    std::string str(len, '\0');
+    readBytes(file, str.data(), len);
+    return str;
+}
+
+static std::unordered_map<std::string, std::string> readDict(std::ifstream& file) {
+    std::unordered_map<std::string, std::string> dict;
+    int32_t numPairs;
+    if (!readValue(file, numPairs)) return dict;
+
+    for (int32_t i = 0; i < numPairs; ++i) {
+        std::string key = readString(file);
+        std::string value = readString(file);
+        if (!key.empty()) {
+            dict[key] = value;
+        }
+    }
+    return dict;
+}
+
 struct VoxChunkHeader {
     char id[4];
     int32_t contentSize;
     int32_t childrenSize;
 };
+
+static MaterialType parseVoxMaterialType(const std::string& typeStr) {
+    if (typeStr == "_diffuse") return MaterialType::Diffuse;
+    if (typeStr == "_metal") return MaterialType::Metallic;
+    if (typeStr == "_glass") return MaterialType::Glass;
+    if (typeStr == "_emit") return MaterialType::Emissive;
+    return MaterialType::Diffuse;
+}
+
+static float parseFloat(const std::string& str, float defaultVal = 0.0f) {
+    try {
+        return std::stof(str);
+    } catch (...) {
+        return defaultVal;
+    }
+}
+
+Material VoxFile::getMaterial(uint8_t paletteIndex) const {
+    Material mat;
+
+    // Get color from palette
+    uint8_t r, g, b, a;
+    getPaletteRGBA(paletteIndex, r, g, b, a);
+    mat.albedo = glm::vec3(r / 255.0f, g / 255.0f, b / 255.0f);
+    mat.alpha = a / 255.0f;
+
+    // Apply material properties if available
+    const VoxMaterial& voxMat = materials[paletteIndex];
+    if (voxMat.hasProperties) {
+        mat.type = voxMat.type;
+        mat.roughness = voxMat.roughness;
+        mat.metallic = voxMat.metallic;
+        mat.ior = voxMat.ior;
+        mat.specular = voxMat.specular;
+        mat.alpha = voxMat.alpha;
+
+        if (voxMat.type == MaterialType::Emissive) {
+            mat.emission = mat.albedo;
+            mat.emissionPower = voxMat.emission > 0 ? voxMat.emission : voxMat.flux;
+            if (mat.emissionPower <= 0) mat.emissionPower = 5.0f; // Default
+        }
+    } else {
+        // Default material based on color (simple heuristic)
+        mat.type = MaterialType::Diffuse;
+        mat.roughness = 0.5f;
+        mat.metallic = 0.0f;
+    }
+
+    mat.voxPaletteIndex = static_cast<int16_t>(paletteIndex);
+    return mat;
+}
 
 bool loadVoxFile(const std::string &filepath, VoxFile &outVox, std::string &errorMsg) {
     std::ifstream file(filepath, std::ios::binary);
@@ -191,6 +265,68 @@ bool loadVoxFile(const std::string &filepath, VoxFile &outVox, std::string &erro
             uint32_t unused;
             readValue(file, unused);
         }
+        else if (std::memcmp(chunkHeader.id, "MATL", 4) == 0) {
+            // Material properties - NEW
+            int32_t materialId;
+            if (!readValue(file, materialId)) {
+                file.seekg(chunkEnd);
+                continue;
+            }
+
+            auto props = readDict(file);
+
+            if (materialId >= 0 && materialId < 256) {
+                VoxMaterial& mat = outVox.materials[materialId];
+                mat.hasProperties = true;
+
+                // Parse type
+                auto typeIt = props.find("_type");
+                if (typeIt != props.end()) {
+                    mat.type = parseVoxMaterialType(typeIt->second);
+                }
+
+                // Parse properties
+                auto roughIt = props.find("_rough");
+                if (roughIt != props.end()) {
+                    mat.roughness = parseFloat(roughIt->second, 0.5f);
+                }
+
+                auto metalIt = props.find("_metal");
+                if (metalIt != props.end()) {
+                    mat.metallic = parseFloat(metalIt->second, 0.0f);
+                }
+
+                auto iorIt = props.find("_ior");
+                if (iorIt != props.end()) {
+                    mat.ior = parseFloat(iorIt->second, 1.5f);
+                }
+
+                auto emitIt = props.find("_emit");
+                if (emitIt != props.end()) {
+                    mat.emission = parseFloat(emitIt->second, 0.0f);
+                }
+
+                auto fluxIt = props.find("_flux");
+                if (fluxIt != props.end()) {
+                    mat.flux = parseFloat(fluxIt->second, 0.0f);
+                }
+
+                auto alphaIt = props.find("_alpha");
+                if (alphaIt != props.end()) {
+                    mat.alpha = parseFloat(alphaIt->second, 1.0f);
+                }
+
+                auto specIt = props.find("_sp");
+                if (specIt != props.end()) {
+                    mat.specular = parseFloat(specIt->second, 0.5f);
+                }
+
+                auto glowIt = props.find("_g");
+                if (glowIt != props.end()) {
+                    mat.glow = parseFloat(glowIt->second, 0.0f);
+                }
+            }
+        }
 
         // Seek to end of chunk
         file.seekg(chunkEnd);
@@ -219,8 +355,36 @@ bool loadVoxFile(const std::string &filepath, VoxFile &outVox, std::string &erro
                   << " (" << m.voxels.size() << " voxels)\n";
     }
 
+    int matCount = 0;
+    for (int i = 0; i < 256; ++i) {
+        if (outVox.materials[i].hasProperties) matCount++;
+    }
+    if (matCount > 0) {
+        std::cout << "  Materials with properties: " << matCount << "\n";
+    }
+
     return true;
 
+}
+
+void importVoxMaterials(
+    const VoxFile& vox,
+    MaterialLibrary& matLib,
+    std::array<uint32_t, 256>& paletteToMaterial
+) {
+    // Create materials for each palette entry
+    for (int i = 1; i < 256; ++i) { // Index 0 is empty
+        Material mat = vox.getMaterial(static_cast<uint8_t>(i));
+
+        char nameBuf[32];
+        snprintf(nameBuf, sizeof(nameBuf), "vox_mat_%d", i);
+        mat.name = nameBuf;
+
+        uint32_t matId = matLib.addMaterial(mat);
+        paletteToMaterial[i] = matId;
+        matLib.setVoxPaletteMapping(static_cast<uint8_t>(i), matId);
+    }
+    paletteToMaterial[0] = 0; // Empty maps to default
 }
 
 uint32_t importVoxToChunks(
@@ -237,20 +401,27 @@ uint32_t importVoxToChunks(
     const VoxModel& model = vox.models[modelIndex];
     uint32_t count = 0;
 
+    // Check if we have material library access via chunk manager
+    MaterialLibrary* matLib = chunkMgr.materialLib;
+
     for (const auto& v : model.voxels) {
         // VOX uses Y-up, Z-forward coordinate system
         glm::vec3 worldPos = worldOffset + glm::vec3(
             static_cast<float>(v.x),
-            static_cast<float>(v.z),
-            static_cast<float>(v.y)
+            static_cast<float>(v.z),  // VOX Z -> our Y (up)
+            static_cast<float>(v.y)   // VOX Y -> our Z (forward)
         );
 
-        // Get color from palette
-        uint8_t r, g, b;
-        vox.getPaletteRGB(v.colorIndex, r, g, b);
-
-        // Insert into chunk manager
-        chunkMgr.setVoxel(worldPos, r, g, b, 1.0f);
+        if (matLib) {
+            // Use material system
+            uint32_t materialId = matLib->getMaterialFromVoxPalette(v.colorIndex);
+            chunkMgr.setVoxelMaterial(worldPos, materialId, 1.0f);
+        } else {
+            // Fallback: use color directly
+            uint8_t r, g, b;
+            vox.getPaletteRGB(v.colorIndex, r, g, b);
+            chunkMgr.setVoxel(worldPos, r, g, b, 1.0f);
+        }
         count++;
     }
 
@@ -261,6 +432,7 @@ uint32_t importVoxToChunks(
 bool loadAndImportVox(
     const std::string& filepath,
     ChunkManager& chunkMgr,
+    MaterialLibrary* materialLib,
     const glm::vec3& worldOffset,
     uint32_t modelIndex,
     std::string* errorMsg
@@ -272,6 +444,15 @@ bool loadAndImportVox(
         if (errorMsg) *errorMsg = err;
         std::cerr << "Failed to load VOX: " << err << "\n";
         return false;
+    }
+
+    // Import materials if library provided
+    if (materialLib) {
+        std::array<uint32_t, 256> paletteMapping;
+        importVoxMaterials(vox, *materialLib, paletteMapping);
+
+        // Ensure chunk manager knows about the material library
+        chunkMgr.setMaterialLibrary(materialLib);
     }
 
     uint32_t count = importVoxToChunks(vox, chunkMgr, worldOffset, modelIndex);

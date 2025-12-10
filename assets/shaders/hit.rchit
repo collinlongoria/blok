@@ -25,45 +25,94 @@ layout(location = 0) rayPayloadInEXT RayPayload payload;
 // this is passed here from intersection shader
 struct HitAttribs {
     vec3 normal;
-    vec3 color;
+    uint materialId;
 };
 hitAttributeEXT HitAttribs hitAttribs;
 
-// TODO need actual material system
-void deriveMaterialFromColor(vec3 color, out float roughness, out float metallic) {
-    // THIS FUNCTION IS A PLACE HOLDER! DO NOT BOTHER EDITING
-    float luminance = dot(color, vec3(0.299, 0.587, 0.114));
-    float saturation = length(color - vec3(luminance));
+struct MaterialGpu {
+    vec3 albedo;
+    uint packedFlags;
+    vec3 emission;
+    float ior;
+};
 
-    metallic = clamp(1.0 - saturation * 2.0, 0.0, 0.3);
+// Material type constants
+const uint MAT_TYPE_DIFFUSE = 0u;
+const uint MAT_TYPE_METALLIC   = 1u;
+const uint MAT_TYPE_GLASS   = 2u;
+const uint MAT_TYPE_EMISSIVE    = 3u;
 
-    roughness = clamp(0.4 + (1.0 - luminance) * 0.3, 0.1, 0.9);
+layout(binding = 9, set = 0) readonly buffer MaterialBuffer {
+    MaterialGpu materials[];
+};
 
-    if (color.r > 0.7 && color.g > 0.5 && color.g < 0.8 && color.b < 0.3) {
-        metallic = 0.9;
-        roughness = 0.3;
+// Unpack material properties from packed flags
+void unpackMaterial(MaterialGpu mat,
+                    out vec3 albedo,
+                    out float roughness,
+                    out float metallic,
+                    out uint matType,
+                    out float alpha,
+                    out float specular,
+                    out vec3 emission,
+                    out float ior) {
+    albedo = mat.albedo;
+    emission = mat.emission;
+    ior = mat.ior;
+
+    // Unpack flags
+    metallic  = float((mat.packedFlags >> 24) & 0xFFu) / 255.0;
+    roughness = float((mat.packedFlags >> 16) & 0xFFu) / 255.0;
+    matType   = (mat.packedFlags >> 12) & 0xFu;
+    alpha     = float((mat.packedFlags >> 8) & 0xFu) / 15.0;
+    specular  = float(mat.packedFlags & 0xFFu) / 255.0;
+
+    // Clamp roughness to minimum for stability
+    roughness = max(roughness, 0.04);
+}
+
+// Simple material lookup with basic PBR properties
+void getMaterialProperties(uint materialId,
+                           out vec3 albedo,
+                           out float roughness,
+                           out float metallic,
+                           out vec3 emission) {
+    // Bounds check with fallback to default material
+    MaterialGpu mat = materials[min(materialId, 65535u)];
+
+    uint matType;
+    float alpha, specular, ior;
+    unpackMaterial(mat, albedo, roughness, metallic, matType, alpha, specular, emission, ior);
+
+    // Handle emissive materials - add emission to payload
+    if (matType == MAT_TYPE_EMISSIVE) {
+        // Emission is pre-multiplied in the buffer
+        // emission is already set from unpack
+    } else {
+        emission = vec3(0.0);
     }
-    else if (luminance > 0.8 && saturation < 0.1) {
-        metallic = 0.7;
-        roughness = 0.2;
-    }
-    else if (luminance < 0.2) {
-        metallic = 0.0;
-        roughness = 0.8;
+
+    // Handle glass materials
+    if (matType == MAT_TYPE_GLASS) {
+        // For now, treat glass as mostly transparent diffuse
+        albedo *= alpha;
+        roughness = max(roughness, 0.1);
     }
 }
 
 void main() {
     // get surface data from intersection shader
-    vec3 albedo = hitAttribs.color;
     vec3 normal = normalize(hitAttribs.normal);
+    uint materialId = hitAttribs.materialId;
 
     // compute hit position
     vec3 hitPos = gl_WorldRayOriginEXT + gl_WorldRayDirectionEXT * gl_HitTEXT;
 
-    // derive material properties
+    // look up material properties from buffer
+    vec3 albedo;
     float roughness, metallic;
-    deriveMaterialFromColor(albedo, roughness, metallic);
+    vec3 emission;
+    getMaterialProperties(materialId, albedo, roughness, metallic, emission);
 
     // populate payload data
     payload.normal = normal;
@@ -72,4 +121,9 @@ void main() {
     payload.roughness = roughness;
     payload.metallic = metallic;
     payload.hitT = gl_HitTEXT;
+
+    // handle emissives
+    if (length(emission) > 0.0) {
+        payload.color = emission;  // direct emission contribution
+    }
 }

@@ -21,13 +21,13 @@ public:
 
     std::unordered_map<ChunkCoord, Chunk*, ChunkCoordHash> chunks;
 
-    uint8_t brushR = 255;
-    uint8_t brushG = 255;
-    uint8_t brushB = 255;
+    MaterialLibrary* materialLib = nullptr;
 
 public:
     ChunkManager(uint32_t C, float voxelSize);
     ~ChunkManager();
+
+    void setMaterialLibrary(MaterialLibrary* lib) { materialLib = lib; }
 
     glm::ivec3 worldToGlobalVoxel(const glm::vec3& p) const;
     ChunkCoord globalVoxelToChunk(const glm::ivec3& gv) const;
@@ -36,11 +36,15 @@ public:
 
     Chunk* getOrCreateChunk(const ChunkCoord& cc);
 
-    void setBrushColor(uint8_t r, uint8_t g, uint8_t b);
-    uint32_t getBrushColorPacked() const;
+    void setVoxel(const glm::vec3& worldPos, uint32_t materialId, float density = 1.0f);
 
-    void setVoxel(const glm::vec3& worldPos, float density = 1.0f);
+    // set from color, will create material if needed
     void setVoxel(const glm::vec3& worldPos, uint8_t r, uint8_t g, uint8_t b, float density = 1.0f);
+
+    void setVoxelMaterial(const glm::vec3& worldPos, uint32_t materialId, float density = 1.0f);
+
+    // will return 0 if material empty or not found
+    uint32_t getVoxelMaterial(const glm::vec3& worldPos) const;
 
 };
 

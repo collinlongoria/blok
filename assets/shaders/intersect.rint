@@ -11,7 +11,7 @@
 struct SvoNode {
     uint childMask;
     uint firstChild;
-    uint color;
+    uint materialId;
     float occupancy;
 };
 
@@ -36,7 +36,7 @@ layout(binding = 2, set = 0) readonly buffer ChunkBuffer {
 
 struct HitAttribs {
     vec3 normal;
-    vec3 color;
+    uint materialId;
 };
 hitAttributeEXT HitAttribs hitAttribs;
 
@@ -176,7 +176,7 @@ void main() {
     float bestT = gl_RayTmaxEXT;
     bool foundHit = false;
     vec3 bestNormal;
-    vec3 bestColor;
+    uint bestMaterialId;
 
     uint iter = 0u;
 
@@ -278,11 +278,7 @@ void main() {
                     bestT = hitT;
                     foundHit = true;
                     bestNormal = computeNormal(leafHitFace, rayDir);
-                    bestColor = vec3(
-                        float((leaf.color >> 16) & 0xFFu) / 255.0,
-                        float((leaf.color >> 8) & 0xFFu) / 255.0,
-                        float(leaf.color & 0xFFu) / 255.0
-                    );
+                    bestMaterialId = leaf.materialId;
                 }
             }
             continue;  // don't push leaves
@@ -301,7 +297,7 @@ void main() {
 
     if (foundHit) {
         hitAttribs.normal = bestNormal;
-        hitAttribs.color = bestColor;
+        hitAttribs.materialId = bestMaterialId;
         reportIntersectionEXT(bestT, 0);
     }
 }

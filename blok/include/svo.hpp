@@ -23,7 +23,7 @@ static constexpr uint32_t INVALID_NODE_INDEX = 0xFFFFFFFFu;
 struct alignas(16) SvoNode {
     uint32_t childMask; // bits 0-7 tell which children are empty
     uint32_t firstChild; // index of first child in nodes[], or INVALID
-    uint32_t color; // packed RGBA8, TODO: switch to material ID
+    uint32_t materialId; // index into material buffer
     float    occupancy; // 0 = empty, >0 = filled
 };
 
@@ -39,7 +39,7 @@ struct SvoTree {
     void clear(); // clears to the single empty root
 
     // insert a single filled voxel
-    void insertVoxel(uint32_t x, uint32_t y, uint32_t z, uint32_t color, float density = 1.0f);
+    void insertVoxel(uint32_t x, uint32_t y, uint32_t z, uint32_t materialId, float density = 1.0f);
 
     // find leaf node for the given voxel coordinate (if it exists and non-empty)
     [[nodiscard]] const SvoNode* findLeaf(uint32_t x, uint32_t y, uint32_t z) const;

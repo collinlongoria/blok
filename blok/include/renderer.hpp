@@ -71,6 +71,8 @@ public:
     }
     void cleanupWorld(WorldSvoGpu& gpuWorld);
 
+    MaterialLibrary& getMaterialLibrary() { return m_materialLib; }
+
     // gui
     void updatePerformanceData(float fps, float ms);
 
@@ -113,6 +115,7 @@ private:
     vk::Buffer uploadIndexBuffer(const uint32_t* data, uint32_t indexCount);
 
     void uploadSvoBuffers(WorldSvoGpu& gpuWorld);
+    void uploadMaterialBuffer(WorldSvoGpu& gpuWorld);
 
     // Rendering
     void beginFrame();
@@ -190,6 +193,7 @@ private:
     ShaderManager m_shaderManager;
 
     WorldSvoGpu* m_world = nullptr;
+    MaterialLibrary m_materialLib{};
 
     vk::PhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProps{};
     RayTracing m_raytracer;

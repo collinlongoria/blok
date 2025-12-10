@@ -33,12 +33,12 @@ struct ChunkCoordHash {
 struct Chunk {
     int32_t cx, cy, cz; // chunk index
     std::vector<float> density; // size C*C*C
-    std::vector<uint32_t> colors;
+    std::vector<uint32_t> materialIds;
     bool dirty;
     SvoTree svo;
 
     Chunk(int32_t cx_, int32_t cy_, int32_t cz_, uint32_t C, uint32_t maxDepth, const glm::vec3& origin, float voxelSize)
-        : cx(cx_), cy(cy_), cz(cz_), density(C*C*C, 0.0f), colors(C*C*C, 0xFFFFFFu), dirty(true), svo(maxDepth, origin, voxelSize) {}
+        : cx(cx_), cy(cy_), cz(cz_), density(C*C*C, 0.0f), materialIds(C*C*C, 0u), dirty(true), svo(maxDepth, origin, voxelSize) {}
 };
 
 }
