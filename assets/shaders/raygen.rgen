@@ -205,7 +205,7 @@ void main() {
         vec2 pixelCenter;
         if(sampleIdx == 0){
             // Primary sample: use pixel center
-            pixelCenter = vec2(pixelCoord) + vec2(0.5) + frame.jitterOffset;
+            pixelCenter = vec2(pixelCoord) + vec2(0.5);
         }
         else{
             // additional samples: add random jitter
