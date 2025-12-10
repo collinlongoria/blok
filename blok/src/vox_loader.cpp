@@ -5,6 +5,10 @@
 * Created on: 12/2/2025
 */
 
+/*
+ * Useful documentation: https://paulbourke.net/dataformats/vox/
+ */
+
 #include "vox_loader.hpp"
 
 #include <fstream>
@@ -16,6 +20,7 @@
 namespace blok {
 
 // Default MagicaVoxel palette (used if VOX file doesn't include one)
+// TODO this is in the file i believe, not sure if this is actually needed.
 static const uint32_t DEFAULT_PALETTE[256] = {
     0x00000000, 0xffffffff, 0xffccffff, 0xff99ffff, 0xff66ffff, 0xff33ffff, 0xff00ffff, 0xffffccff,
     0xffccccff, 0xff99ccff, 0xff66ccff, 0xff33ccff, 0xff00ccff, 0xffff99ff, 0xffcc99ff, 0xff9999ff,
@@ -177,17 +182,15 @@ bool loadVoxFile(const std::string &filepath, VoxFile &outVox, std::string &erro
         }
         else if (std::memcmp(chunkHeader.id, "RGBA", 4) == 0) {
             // Custom palette
-            // Note: palette indices 1-255 are stored, index 0 is unused
+            // index 0 is unused
             for (int i = 0; i < 255; ++i) {
                 uint32_t rgba;
                 readValue(file, rgba);
                 outVox.palette[i + 1] = rgba;
             }
-            // Skip the last entry (unused in the file)
             uint32_t unused;
             readValue(file, unused);
         }
-        // Skip other chunk types (PACK, nTRN, nGRP, nSHP, MATL, LAYR, etc.)
 
         // Seek to end of chunk
         file.seekg(chunkEnd);
@@ -198,7 +201,7 @@ bool loadVoxFile(const std::string &filepath, VoxFile &outVox, std::string &erro
         }
     }
 
-    // Don't forget the last model
+    // last model
     if (hasSize || !currentModel.voxels.empty()) {
         outVox.models.push_back(std::move(currentModel));
     }
@@ -236,12 +239,10 @@ uint32_t importVoxToChunks(
 
     for (const auto& v : model.voxels) {
         // VOX uses Y-up, Z-forward coordinate system
-        // Convert to your coordinate system if needed
-        // Here we assume a direct mapping (you may need to adjust)
         glm::vec3 worldPos = worldOffset + glm::vec3(
             static_cast<float>(v.x),
-            static_cast<float>(v.z),  // VOX Z -> our Y (up)
-            static_cast<float>(v.y)   // VOX Y -> our Z (forward)
+            static_cast<float>(v.z),
+            static_cast<float>(v.y)
         );
 
         // Get color from palette

@@ -34,7 +34,7 @@ using namespace blok;
 static Camera g_camera;
 static Scene  g_scene;
 static UI* g_ui;
-static ChunkManager g_mgr(128, 1.0f);
+static ChunkManager g_mgr(128, 0.1f);
 static float lastX = 400.0f;
 static float lastY = 300.0f;
 static bool firstMouse = true;
