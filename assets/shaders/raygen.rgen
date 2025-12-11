@@ -3,6 +3,7 @@
 * Project: blok
 * Author: Collin Longoria
 * Created on: 12/1/2025
+* Updated: Refactored for new payload and RNG
 */
 
 #version 460
@@ -50,6 +51,7 @@ layout(binding = 3, set = 0) uniform FrameUBO {
     vec2 jitterOffset;
     vec2 _padding;
 } frame;
+
 layout(binding = 4, set = 0, rgba32f) uniform image2D outColor;
 layout(binding = 5, set = 0, rgba32f) uniform image2D outWorldPosition;
 layout(binding = 6, set = 0, rgba16f) uniform image2D outNormalRoughness;
@@ -58,24 +60,22 @@ layout(binding = 8, set = 0, rg16f)   uniform image2D outMotionVectors;
 
 // Ray payload for path tracing
 struct RayPayload {
-    vec3 color;         // Accumulated radiance
-    vec3 throughput;    // Path throughput (for Russian Roulette)
-    vec3 normal;        // Surface normal at hit
-    vec3 hitPos;        // World position of hit
-    vec3 albedo;        // Surface albedo
-    float roughness;    // Surface roughness (for GGX)
-    float metallic;     // Metallic factor
-    float hitT;         // Hit distance (-1 if miss)
-    uint rngState;      // Random state
+    vec3 radiance;   // Emission
+    vec3 throughput; // Explicit throughput not strictly needed in payload if handled in rgen, but keeping struct
+    vec3 normal;
+    vec3 albedo;
+    float roughness;
+    float metallic;
+    float hitT;
 };
 
 layout(location = 0) rayPayloadEXT RayPayload payload;
+layout(location = 1) rayPayloadEXT bool isShadowed;
 
 const float PI = 3.14159265359;
 const float INV_PI = 0.31830988618;
 
-// PRNG
-// TODO move this to an include shader
+// --- RNG Helpers ---
 
 uint pcg(inout uint state) {
     uint oldState = state;
@@ -92,28 +92,24 @@ vec2 randomVec2(inout uint state) {
     return vec2(randomFloat(state), randomFloat(state));
 }
 
-uint initRNG(uvec2 pixel, uint frame, uint sampleIndex) {
-    uint seed = pixel.x + pixel.y * 65536u;
-    seed ^= frame * 747796405u;
-    seed ^= sampleIndex * 2891336453u;
-
+uint initRNG(uvec2 pixel, uint frameIndex, uint sampleIndex) {
+    uint seed = pixel.x + pixel.y * frame.screenWidth;
+    seed ^= frameIndex * 747796405u;
+    seed ^= sampleIndex * 1664525u;
     pcg(seed);
     pcg(seed);
     return seed;
 }
 
-// cosine-weighted hemisphere sampling (for diffuse)
+// --- Sampling Helpers ---
+
 vec3 sampleCosineHemisphere(vec2 u, vec3 N) {
-    // map to disk
     float r = sqrt(u.x);
     float phi = 2.0 * PI * u.y;
-
-    // map to hemisphere
     float x = r * cos(phi);
     float y = r * sin(phi);
     float z = sqrt(max(0.0, 1.0 - u.x));
 
-    // create tangent space
     vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 tangent = normalize(cross(up, N));
     vec3 bitangent = cross(N, tangent);
@@ -121,7 +117,6 @@ vec3 sampleCosineHemisphere(vec2 u, vec3 N) {
     return normalize(tangent * x + bitangent * y + N * z);
 }
 
-// GGX importance sampling for specular
 vec3 sampleGGX(vec2 u, vec3 N, float roughness) {
     float a = roughness * roughness;
     float a2 = a * a;
@@ -130,86 +125,67 @@ vec3 sampleGGX(vec2 u, vec3 N, float roughness) {
     float cosTheta = sqrt((1.0 - u.y) / (1.0 + (a2 - 1.0) * u.y));
     float sinTheta = sqrt(max(0.0, 1.0 - cosTheta * cosTheta));
 
-    // spherical to cartesian (tangent space)
-    vec3 H = vec3(
-        sinTheta * cos(phi),
-        sinTheta * sin(phi),
-        cosTheta
-    );
+    vec3 H = vec3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
 
-    // create tangent space
     vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
     vec3 tangent = normalize(cross(up, N));
     vec3 bitangent = cross(N, tangent);
 
-    // transform to world space
     return normalize(tangent * H.x + bitangent * H.y + N * H.z);
 }
 
-// Schlick Fresnel approximation
 vec3 fresnelSchlick(float cosTheta, vec3 F0) {
     return F0 + (1.0 - F0) * pow(max(1.0 - cosTheta, 0.0), 5.0);
 }
 
 vec3 getSkyColor(vec3 dir) {
-    // sky
     float t = 0.5 * (dir.y + 1.0);
     vec3 skyBottom = vec3(0.8, 0.85, 0.95);
     vec3 skyTop = vec3(0.4, 0.6, 0.9);
     vec3 skyColor = mix(skyBottom, skyTop, t);
 
-    // sun disk
     vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
     float sunDot = max(dot(dir, sunDir), 0.0);
     vec3 sunColor = vec3(1.0, 0.95, 0.8) * pow(sunDot, 128.0) * 5.0;
-
-    // sun glow
     vec3 sunGlow = vec3(1.0, 0.9, 0.7) * pow(sunDot, 8.0) * 0.3;
 
     return skyColor + sunColor + sunGlow;
 }
 
 vec2 computeMotionVector(vec3 worldPos, vec2 currentUV) {
-    // reproject to previous frame
     vec4 prevClip = frame.prevViewProj * vec4(worldPos, 1.0);
     vec3 prevNDC = prevClip.xyz / prevClip.w;
     vec2 prevUV = prevNDC.xy * 0.5 + 0.5;
-
-    // motion vector is the diff between curr and prev screen position
     return currentUV - prevUV;
 }
+
+// --- Main ---
 
 void main() {
     const uvec2 pixelCoord = gl_LaunchIDEXT.xy;
     const vec2 pixelSize = vec2(gl_LaunchSizeEXT.xy);
     vec2 currentUV = (vec2(pixelCoord) + 0.5) / pixelSize;
 
-    // Initialize G-buffer outputs for this pixel
+    // G-buffer accumulation variables
     vec3 firstHitPos = vec3(0.0);
-    vec3 firstHitNormal = vec3(0.0, 1.0, 0.0);
+    vec3 firstHitNormal = vec3(0.0);
     vec3 firstHitAlbedo = vec3(0.0);
-    float firstHitRoughness = 1.0;
+    float firstHitRoughness = 0.0;
     float firstHitMetallic = 0.0;
-    float firstHitDepth = -1.0;  // -1 means sky/miss
+    float firstHitDepth = 0.0;
     bool hadFirstHit = false;
 
-    // accumulate multiple samples
     vec3 accumulatedColor = vec3(0.0);
-    const uint samplesPerPixel = max(frame.sampleCount, 1u);
 
-    for (uint sampleIdx = 0u; sampleIdx < samplesPerPixel; sampleIdx++) {
-        // init random
+    for (uint sampleIdx = 0u; sampleIdx < frame.sampleCount; sampleIdx++) {
+        // Initialize RNG per sample
         uint rng = initRNG(pixelCoord, frame.frameCount, sampleIdx);
 
-        // jitter pixel sampling for anti-aliasing
+        // Jitter pixel sampling
         vec2 pixelCenter;
         if(sampleIdx == 0){
-            // Primary sample: use pixel center
             pixelCenter = vec2(pixelCoord) + vec2(0.5);
-        }
-        else{
-            // additional samples: add random jitter
-            // AA handled in proj matrix
+        } else {
             vec2 jitter = randomVec2(rng) - 0.5;
             pixelCenter = vec2(pixelCoord) + vec2(0.5) + jitter * 0.5;
         }
@@ -221,88 +197,94 @@ void main() {
         vec3 rayDir = normalize((frame.invView * vec4(normalize(target.xyz), 0.0)).xyz);
         vec3 rayOrigin = frame.camPos;
 
-        // path tracing state
         vec3 radiance = vec3(0.0);
         vec3 throughput = vec3(1.0);
 
-        for (uint bounce = 0u; bounce < 4u; bounce++) {
-            // init payload
-            payload.color = vec3(0.0);
-            payload.throughput = throughput;
+        for (uint bounce = 0u; bounce < 2u; bounce++) {
+            // Reset payload before trace
+            payload.radiance = vec3(0.0);
             payload.hitT = -1.0;
-            payload.rngState = rng;
-            payload.roughness = 0.5;
-            payload.metallic = 0.0;
 
-            // call trace ray
             traceRayEXT(
-                topLevelAS,             // acceleration structure
-                gl_RayFlagsOpaqueEXT,   // rayFlags
-                0xFF,                   // cullMask
-                0,                      // sbtRecordOffset for the hitgroups
-                0,                      // sbtRecordStride for the hitgroups
-                0,                      // missIndex
-                rayOrigin,              // ray origin
-                0.001,                  // ray min range
-                rayDir,                 // ray direction
-                10000.0,                // ray max range
-                0                       // payload (location = 0)
+                topLevelAS,
+                gl_RayFlagsOpaqueEXT,
+                0xFF,
+                0,
+                0,
+                0,
+                rayOrigin,
+                0.001,
+                rayDir,
+                10000.0,
+                0                       // payload location = 0
             );
 
-            // update the rng state from the payload
-            rng = payload.rngState;
-
-            // check for miss
+            // Check for miss
             if (payload.hitT < 0.0) {
                 radiance += throughput * getSkyColor(rayDir);
                 break;
             }
 
-            // Store first hit data for G-buffer (only on first bounce, first sample)
-            if (bounce == 0u && sampleIdx == 0u && !hadFirstHit) {
-                hadFirstHit = true;
-                firstHitPos = payload.hitPos;
-                firstHitNormal = payload.normal;
-                firstHitAlbedo = payload.albedo;
-                firstHitRoughness = payload.roughness;
-                firstHitMetallic = payload.metallic;
+            // Calculate hit position (not in payload)
+            vec3 hitPos = rayOrigin + rayDir * payload.hitT;
 
-                // Compute linear depth (distance from camera)
-                firstHitDepth = payload.hitT;
-            }
-
-            // hit, so get surface props
-            vec3 hitPos = payload.hitPos;
+            // Extract surface properties from payload
             vec3 N = payload.normal;
             vec3 albedo = payload.albedo;
             float roughness = payload.roughness;
             float metallic = payload.metallic;
 
-            // ensure normal faces ray
+            // Store G-buffer data (first bounce, first sample only)
+            if (bounce == 0u && sampleIdx == 0u && !hadFirstHit) {
+                hadFirstHit = true;
+                firstHitPos = hitPos;
+                firstHitNormal = N;
+                firstHitAlbedo = albedo;
+                firstHitRoughness = roughness;
+                firstHitMetallic = metallic;
+                firstHitDepth = payload.hitT;
+            }
+
+            // Ensure normal faces ray
             if (dot(N, rayDir) > 0.0) {
                 N = -N;
             }
 
-            // emissives
-            if (length(payload.color) > 0.0) {
-                radiance += throughput * payload.color;
+            // Emissive contribution (from payload.radiance)
+            if (length(payload.radiance) > 0.0) {
+                radiance += throughput * payload.radiance;
             }
 
-            // direct lighting
-            // TODO a list of lights that the shader can use
+            // Direct Lighting / Shadows
             vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
             float NdotL = max(dot(N, sunDir), 0.0);
 
-            // TODO shadows (this just does direct lighting for now)
-            if (NdotL > 0.0) {
-                // simple direct lighting contribution
-                vec3 sunRadiance = vec3(3.0, 2.9, 2.7);
+            if (NdotL > 0.0 && bounce == 0u) {
+                isShadowed = true; // Assume shadowed
+                vec3 shadowOrigin = hitPos + N * 0.001;
 
-                vec3 diffuseColor = albedo * (1.0 - metallic);
-                radiance += throughput * diffuseColor * sunRadiance * NdotL * INV_PI;
+                traceRayEXT(
+                    topLevelAS,
+                    gl_RayFlagsOpaqueEXT | gl_RayFlagsTerminateOnFirstHitEXT | gl_RayFlagsSkipClosestHitShaderEXT,
+                    0xFF,
+                    0,
+                    0,
+                    1,  // missIndex = 1 for shadow miss shader
+                    shadowOrigin,
+                    0.001,
+                    sunDir,
+                    1000.0,
+                    1   // payload location = 1 (bool isShadowed)
+                );
+
+                if (!isShadowed) {
+                    vec3 sunRadiance = vec3(3.0, 2.9, 2.7);
+                    vec3 diffuseColor = albedo * (1.0 - metallic);
+                    radiance += throughput * diffuseColor * sunRadiance * NdotL * INV_PI;
+                }
             }
 
-            // russian roulette
+            // Russian Roulette
             if (bounce > 1u) {
                 float p = max(max(throughput.r, throughput.g), throughput.b);
                 p = min(p, 0.95);
@@ -312,83 +294,70 @@ void main() {
                 throughput /= p;
             }
 
-            // sample next direction based on material
+            // Sample next direction
             vec2 u = randomVec2(rng);
 
-            // fresnel-weighted material selection
+            // Fresnel
             vec3 F0 = mix(vec3(0.04), albedo, metallic);
             vec3 V = -rayDir;
             float NdotV = max(dot(N, V), 0.0);
             vec3 F = fresnelSchlick(NdotV, F0);
 
-            // probability of specular vs diffuse based on Fresnel
             float specularWeight = (F.r + F.g + F.b) / 3.0;
-            specularWeight = mix(specularWeight, 1.0, metallic); // (metals are always specular)
+            specularWeight = mix(specularWeight, 1.0, metallic);
 
-            // simple material model (blends between diffuse and specular based on metallic)
             if (randomFloat(rng) < specularWeight) {
-                // specular
+                // Specular
                 vec3 H = sampleGGX(u, N, max(roughness, 0.04));
                 vec3 newDir = reflect(rayDir, H);
 
-                if (dot(newDir, N) <= 0.0) {
-                    break;  // invalid reflection
-                }
+                if (dot(newDir, N) <= 0.0) break;
 
                 float HdotV = max(dot(H, V), 0.0);
                 vec3 Fh = fresnelSchlick(HdotV, F0);
 
-                // Simplified specular throughput
                 throughput *= Fh / max(specularWeight, 0.001);
                 rayDir = newDir;
-            }
-            else {
-                // diffuse (cosine-weighted)
+            } else {
+                // Diffuse
                 vec3 newDir = sampleCosineHemisphere(u, N);
                 vec3 diffuseColor = albedo * (1.0 - metallic);
                 throughput *= diffuseColor / max(1.0 - specularWeight, 0.001);
                 rayDir = newDir;
             }
 
-            // prevent throughput from exploding
+            // Throughput clamping
             float maxThroughput = max(max(throughput.r, throughput.g), throughput.b);
             if (maxThroughput > 10.0) {
                 throughput *= 10.0 / maxThroughput;
             }
 
-            // update ray origin (offset to avoid self-intersection)
+            // Update ray origin
             rayOrigin = hitPos + N * 0.002;
         }
 
         accumulatedColor += radiance;
     }
 
-    // average samples
-    vec3 color = accumulatedColor / float(samplesPerPixel);
+    // Average samples
+    vec3 color = accumulatedColor / float(frame.sampleCount);
 
-    // clamp to prevent infinite propagation - this should fix black spots?
+    // Firefly clamp
     color = clamp(color, vec3(0.0), vec3(100.0));
 
-    // Raw noisy color
+    // Store outputs
     imageStore(outColor, ivec2(pixelCoord), vec4(color, 1.0));
 
-    // World position + linear depth
-    // If we missed (hit sky), store a large depth value
+    // Fill sky depth if we never hit anything
     if (!hadFirstHit) {
         firstHitDepth = 10000.0;
         firstHitPos = frame.camPos + normalize((frame.invView * vec4(0.0, 0.0, -1.0, 0.0)).xyz) * 10000.0;
     }
+
     imageStore(outWorldPosition, ivec2(pixelCoord), vec4(firstHitPos, firstHitDepth));
-
-    // Normal (encoded) + roughness
-    // Normals are in [-1, 1], we store them directly in 16F
     imageStore(outNormalRoughness, ivec2(pixelCoord), vec4(firstHitNormal, firstHitRoughness));
-
-    // Albedo + metallic
-    // Pack into RGBA8 [0, 255]
     imageStore(outAlbedoMetallic, ivec2(pixelCoord), vec4(firstHitAlbedo, firstHitMetallic));
 
-    // Motion vectors
     vec2 motionVector = vec2(0.0);
     if (hadFirstHit && firstHitDepth < 9999.0) {
         motionVector = computeMotionVector(firstHitPos, currentUV);

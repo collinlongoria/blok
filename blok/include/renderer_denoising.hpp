@@ -62,17 +62,17 @@ public:
 
         // Geometry rejection thresholds
         float depthThreshold = 0.1f;
-        float normalThreshold = 0.85f;
+        float normalThreshold = 0.95f;
 
         // Atrous filter parameters
-        float phiColor = 1.0f;
+        float phiColor = 0.5f;
         float phiNormal = 128.0f;
-        float phiDepth = 0.3f;
+        float phiDepth = 0.1f;
         int atrousIterations = 4;
 
         // Variance estimation
         float varianceBoost = 1.5f;
-        int minHistoryLength = 8;
+        int minHistoryLength = 4;
     } settings;
 
 public:
