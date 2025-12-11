@@ -66,6 +66,11 @@ const ivec2 offsets[25] = ivec2[25](
     ivec2(-2,  2), ivec2(-1,  2), ivec2(0,  2), ivec2(1,  2), ivec2(2,  2)
 );
 
+// exp() optimization
+float fastExp(float x) {
+    return 1.0 / (1.0 + x);
+}
+
 float luminance(vec3 color) {
     return dot(color, vec3(0.2126, 0.7152, 0.0722));
 }
@@ -77,7 +82,7 @@ float computeKernelWeight(ivec2 offset) {
     return kernel[kx] * kernel[ky];
 }
 
-// IMPROVED: Better variance-guided color weight
+// variance-guided color weight
 float computeColorWeight(vec3 centerColor, vec3 sampleColor, float variance) {
     vec3 diff = centerColor - sampleColor;
     float colorDistSq = dot(diff, diff);
@@ -88,10 +93,10 @@ float computeColorWeight(vec3 centerColor, vec3 sampleColor, float variance) {
     float varianceSigma = pc.phiColor * sqrt(max(variance, 0.0));
     float sigma = baseSigma + varianceSigma;
 
-    return exp(-colorDistSq / (2.0 * sigma * sigma + 1e-6));
+    return fastExp(colorDistSq / (2.0 * sigma * sigma + 1e-6));
 }
 
-// IMPROVED: Sharper normal falloff for voxels
+// Sharper normal falloff for voxels
 float computeNormalWeight(vec3 centerNormal, vec3 sampleNormal) {
     float dotProduct = max(dot(centerNormal, sampleNormal), 0.0);
 
@@ -134,7 +139,7 @@ float computeDepthWeight(vec3 centerWorldPos, vec3 sampleWorldPos, vec3 centerNo
         return 0.0;
     }
 
-    return exp(-effectiveDistance * effectiveDistance / (sigma * sigma + 1e-6));
+    return fastExp(effectiveDistance * effectiveDistance / (sigma * sigma + 1e-6));
 }
 
 void main() {

@@ -18,6 +18,9 @@ create non-pathtraced pipeline (raytraced, not using acceleration extension)
 bloom?
 motion blur?
 
+// THE BIGGEST NEED:
+One BLAS per chunk, multiple TLAS instances, and chunk LOD
+
 // KNOWN ISSUES:
 most of the tonemaps I tried are ugly/useless. may clean it up and remove them
 no way to disable camera movement

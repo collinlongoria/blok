@@ -131,128 +131,122 @@ vk::AccelerationStructureKHR Renderer::buildChunkBlas(WorldSvoGpu &gpuWorld) {
 }
 
 vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
-        uint32_t count = gpuWorld.globalChunks.size();
-        if (count == 0)
-            return {};
+    uint32_t chunkCount = gpuWorld.globalChunks.size();
+    if (chunkCount == 0)
+        return {};
 
-        // Build instance buffer
-        std::vector<vk::AccelerationStructureInstanceKHR> inst(count);
+    vk::AccelerationStructureInstanceKHR inst{};
+    inst.accelerationStructureReference =
+        m_device.getAccelerationStructureAddressKHR({ gpuWorld.blas.handle });
 
-        for (uint32_t i = 0; i < count; i++)
-        {
-            inst[i].accelerationStructureReference =
-                m_device.getAccelerationStructureAddressKHR(
-                    { gpuWorld.blas.handle });
+    inst.instanceCustomIndex = 0;  // Not used since gl_PrimitiveID gives us the AABB index
+    inst.mask = 0xFF;
+    inst.instanceShaderBindingTableRecordOffset = 0;
+    inst.flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
 
-            inst[i].instanceCustomIndex = i; // ChunkMeta index
-            inst[i].mask = 0xFF;
-            inst[i].instanceShaderBindingTableRecordOffset = 0;
-            inst[i].flags = VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
+    // Identity transform (AABBs are already in world space)
+    std::array<std::array<float, 4>, 3> t = {{
+        {1.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 1.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 1.0f, 0.0f}
+    }};
+    inst.transform = vk::TransformMatrixKHR{t};
 
-            // identity transform
-            std::array<std::array<float, 4>, 3> t = {
-                1,0,0,0,
-                0,1,0,0,
-                0,0,1,0
-            };
-            inst[i].transform = vk::TransformMatrixKHR{t};
-        }
+    // Cleanup old instance buffer if it exists
+    if (gpuWorld.tlasInstanceBuffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.tlasInstanceBuffer.handle, gpuWorld.tlasInstanceBuffer.alloc);
+        gpuWorld.tlasInstanceBuffer = {};
+    }
 
-        // cleanup old instance buffer if it exists
-        if (gpuWorld.tlasInstanceBuffer.handle) {
-            vmaDestroyBuffer(m_allocator, gpuWorld.tlasInstanceBuffer.handle, gpuWorld.tlasInstanceBuffer.alloc);
-            gpuWorld.tlasInstanceBuffer = {};
-        }
+    // Create instance buffer with just ONE instance
+    gpuWorld.tlasInstanceBuffer = createBuffer(
+        sizeof(vk::AccelerationStructureInstanceKHR),  // Just one instance!
+        vk::BufferUsageFlagBits::eTransferDst |
+        vk::BufferUsageFlagBits::eShaderDeviceAddress |
+        vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR,
+        0, VMA_MEMORY_USAGE_AUTO
+    );
+    uploadToBuffer(&inst, sizeof(inst), gpuWorld.tlasInstanceBuffer);
 
-        // create instance buffer (this is stored in gpu world)
-        gpuWorld.tlasInstanceBuffer = createBuffer(
-            sizeof(inst[0]) * count,
-            vk::BufferUsageFlagBits::eTransferDst |
-            vk::BufferUsageFlagBits::eShaderDeviceAddress |
-            vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR,
-            0, VMA_MEMORY_USAGE_AUTO
-        );
-    uploadToBuffer(inst.data(), sizeof(inst[0]) * count, gpuWorld.tlasInstanceBuffer);
+    vk::DeviceAddress instAddr = m_device.getBufferAddress({ gpuWorld.tlasInstanceBuffer.handle });
 
-        vk::DeviceAddress instAddr = m_device.getBufferAddress(
-            { gpuWorld.tlasInstanceBuffer.handle });
+    // Setup TLAS geometry
+    vk::AccelerationStructureGeometryInstancesDataKHR instances{};
+    instances.arrayOfPointers = VK_FALSE;
+    instances.data.deviceAddress = instAddr;
 
-        // Setup TLAS
-        vk::AccelerationStructureGeometryInstancesDataKHR instances{};
-        instances.arrayOfPointers = VK_FALSE;
-        instances.data.deviceAddress = instAddr;
+    vk::AccelerationStructureGeometryKHR geom{};
+    geom.geometryType = vk::GeometryTypeKHR::eInstances;
+    geom.geometry.setInstances(instances);
 
-        vk::AccelerationStructureGeometryKHR geom{};
-        geom.geometryType = vk::GeometryTypeKHR::eInstances;
-        geom.geometry.setInstances(instances);
+    vk::AccelerationStructureBuildRangeInfoKHR range{};
+    range.primitiveCount = 1;  // ONE instance!
 
-        vk::AccelerationStructureBuildRangeInfoKHR range{};
-        range.primitiveCount = count;
+    vk::AccelerationStructureBuildGeometryInfoKHR build{};
+    build.type = vk::AccelerationStructureTypeKHR::eTopLevel;
+    build.flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace;
+    build.setGeometries(geom);
+    build.mode = vk::BuildAccelerationStructureModeKHR::eBuild;
 
-        vk::AccelerationStructureBuildGeometryInfoKHR build{};
-        build.type = vk::AccelerationStructureTypeKHR::eTopLevel;
-        build.flags = vk::BuildAccelerationStructureFlagBitsKHR::ePreferFastTrace;
-        build.setGeometries(geom);
-        build.mode = vk::BuildAccelerationStructureModeKHR::eBuild;
+    auto sizes = m_device.getAccelerationStructureBuildSizesKHR(
+        vk::AccelerationStructureBuildTypeKHR::eDevice,
+        build,
+        range.primitiveCount
+    );
 
-        auto sizes = m_device.getAccelerationStructureBuildSizesKHR(
-            vk::AccelerationStructureBuildTypeKHR::eDevice,
-            build,
-            range.primitiveCount
-        );
+    // Cleanup old TLAS if it exists
+    if (gpuWorld.tlas.handle) {
+        m_device.destroyAccelerationStructureKHR(gpuWorld.tlas.handle);
+        gpuWorld.tlas.handle = nullptr;
+    }
+    if (gpuWorld.tlas.buffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.tlas.buffer.handle, gpuWorld.tlas.buffer.alloc);
+        gpuWorld.tlas.buffer = {};
+    }
 
-        // cleanup old TLAS if it exists
-        if (gpuWorld.tlas.handle) {
-            m_device.destroyAccelerationStructureKHR(gpuWorld.tlas.handle);
-            gpuWorld.tlas.handle = nullptr;
-        }
-        if (gpuWorld.tlas.buffer.handle) {
-            vmaDestroyBuffer(m_allocator, gpuWorld.tlas.buffer.handle, gpuWorld.tlas.buffer.alloc);
-            gpuWorld.tlas.buffer = {};
-        }
+    // Create TLAS buffer
+    gpuWorld.tlas.buffer = createBuffer(
+        sizes.accelerationStructureSize,
+        vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR |
+        vk::BufferUsageFlagBits::eShaderDeviceAddress,
+        0, VMA_MEMORY_USAGE_AUTO
+    );
 
-        gpuWorld.tlas.buffer = createBuffer(
-            sizes.accelerationStructureSize,
-            vk::BufferUsageFlagBits::eAccelerationStructureStorageKHR | vk::BufferUsageFlagBits::eShaderDeviceAddress,
-            0, VMA_MEMORY_USAGE_AUTO
-        );
+    vk::AccelerationStructureCreateInfoKHR ci{};
+    ci.buffer = gpuWorld.tlas.buffer.handle;
+    ci.size = sizes.accelerationStructureSize;
+    ci.type = vk::AccelerationStructureTypeKHR::eTopLevel;
 
-        vk::AccelerationStructureCreateInfoKHR ci{};
-        ci.buffer = gpuWorld.tlas.buffer.handle;
-        ci.size = sizes.accelerationStructureSize;
-        ci.type = vk::AccelerationStructureTypeKHR::eTopLevel;
+    gpuWorld.tlas.handle = m_device.createAccelerationStructureKHR(ci);
 
-        gpuWorld.tlas.handle = m_device.createAccelerationStructureKHR(ci);
+    // Scratch buffer
+    Buffer scratch = createBuffer(
+        sizes.buildScratchSize,
+        vk::BufferUsageFlagBits::eStorageBuffer |
+        vk::BufferUsageFlagBits::eShaderDeviceAddress,
+        0, VMA_MEMORY_USAGE_AUTO
+    );
 
-        // Scratch
-        Buffer scratch = createBuffer(
-            sizes.buildScratchSize,
-            vk::BufferUsageFlagBits::eStorageBuffer |
-            vk::BufferUsageFlagBits::eShaderDeviceAddress,
-            0, VMA_MEMORY_USAGE_AUTO
-        );
+    vk::DeviceAddress scratchAddr = m_device.getBufferAddress({ scratch.handle });
 
-        vk::DeviceAddress scratchAddr =
-            m_device.getBufferAddress({ scratch.handle });
+    build.dstAccelerationStructure = gpuWorld.tlas.handle;
+    build.scratchData.deviceAddress = scratchAddr;
 
-        build.dstAccelerationStructure = gpuWorld.tlas.handle;
-        build.scratchData.deviceAddress = scratchAddr;
+    // Build TLAS
+    m_uploadCmd.reset({});
+    m_uploadCmd.begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
 
-        // Build TLAS
-        m_uploadCmd.reset({});
-        m_uploadCmd.begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+    const vk::AccelerationStructureBuildRangeInfoKHR* pRange = &range;
+    m_uploadCmd.buildAccelerationStructuresKHR(build, pRange);
 
-        const vk::AccelerationStructureBuildRangeInfoKHR* pRange = &range;
-        m_uploadCmd.buildAccelerationStructuresKHR(build, pRange);
+    m_uploadCmd.end();
+    vk::SubmitInfo submitInfo({}, {}, m_uploadCmd, {});
+    m_graphicsQueue.submit(submitInfo, {});
+    m_graphicsQueue.waitIdle();
 
-        m_uploadCmd.end();
-        vk::SubmitInfo submitInfo({}, {}, m_uploadCmd, {});
-        m_graphicsQueue.submit(submitInfo, {});
-        m_graphicsQueue.waitIdle();
+    vmaDestroyBuffer(m_allocator, scratch.handle, scratch.alloc);
 
-        vmaDestroyBuffer(m_allocator, scratch.handle, scratch.alloc);
-
-        return gpuWorld.tlas.handle;
+    return gpuWorld.tlas.handle;
 }
 
 RayTracing::RayTracing(Renderer* r_)
@@ -492,6 +486,7 @@ void RayTracing::createPipeline() {
 
     vk::ShaderModule rgen = load("raygen.rgen", vk::ShaderStageFlagBits::eRaygenKHR).module;
     vk::ShaderModule miss = load("miss.rmiss", vk::ShaderStageFlagBits::eMissKHR).module;
+    vk::ShaderModule missShadow = load("shadow.rmiss", vk::ShaderStageFlagBits::eMissKHR).module;
     vk::ShaderModule isect = load("intersect.rint", vk::ShaderStageFlagBits::eIntersectionKHR).module;
     vk::ShaderModule chit = load("hit.rchit", vk::ShaderStageFlagBits::eClosestHitKHR).module;
 
@@ -499,6 +494,7 @@ void RayTracing::createPipeline() {
     std::vector<vk::PipelineShaderStageCreateInfo> stages = {
     { {}, vk::ShaderStageFlagBits::eRaygenKHR, rgen, "main" },
     { {}, vk::ShaderStageFlagBits::eMissKHR, miss, "main" },
+    { {}, vk::ShaderStageFlagBits::eMissKHR, missShadow, "main" },
     { {}, vk::ShaderStageFlagBits::eIntersectionKHR, isect, "main" },
     { {}, vk::ShaderStageFlagBits::eClosestHitKHR, chit, "main" }
     };
@@ -508,24 +504,52 @@ void RayTracing::createPipeline() {
 
     // group 0 = raygen
     groups.push_back(
-    vk::RayTracingShaderGroupCreateInfoKHR{}
-    .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
-    .setGeneralShader(0)
+        vk::RayTracingShaderGroupCreateInfoKHR{}
+        .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+        .setGeneralShader(0)
+        .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+        .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+        .setIntersectionShader(VK_SHADER_UNUSED_KHR)
     );
 
     // group 1 = miss
     groups.push_back(
-    vk::RayTracingShaderGroupCreateInfoKHR{}
-    .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
-    .setGeneralShader(1)
+        vk::RayTracingShaderGroupCreateInfoKHR{}
+        .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+        .setGeneralShader(1)
+        .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+        .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+        .setIntersectionShader(VK_SHADER_UNUSED_KHR)
     );
 
-    // group 2 = hit group (procedural)
+    // group 2: miss shadow
     groups.push_back(
-    vk::RayTracingShaderGroupCreateInfoKHR{}
-    .setType(vk::RayTracingShaderGroupTypeKHR::eProceduralHitGroup)
-    .setIntersectionShader(2)
-    .setClosestHitShader(3)
+        vk::RayTracingShaderGroupCreateInfoKHR{}
+        .setType(vk::RayTracingShaderGroupTypeKHR::eGeneral)
+        .setGeneralShader(2)
+        .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+        .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+        .setIntersectionShader(VK_SHADER_UNUSED_KHR)
+    );
+
+    // group 3 = hit group (regular)
+    groups.push_back(
+        vk::RayTracingShaderGroupCreateInfoKHR{}
+        .setType(vk::RayTracingShaderGroupTypeKHR::eProceduralHitGroup)
+        .setGeneralShader(VK_SHADER_UNUSED_KHR)
+        .setIntersectionShader(3)
+        .setClosestHitShader(4)
+        .setAnyHitShader(VK_SHADER_UNUSED_KHR)
+    );
+
+    // group 4: hit group for shadows
+    groups.push_back(
+        vk::RayTracingShaderGroupCreateInfoKHR{}
+        .setType(vk::RayTracingShaderGroupTypeKHR::eProceduralHitGroup)
+        .setGeneralShader(VK_SHADER_UNUSED_KHR)
+        .setIntersectionShader(3)
+        .setClosestHitShader(VK_SHADER_UNUSED_KHR)
+        .setAnyHitShader(VK_SHADER_UNUSED_KHR)
     );
 
     // Layout
@@ -553,6 +577,7 @@ void RayTracing::createPipeline() {
     r->m_device.destroyShaderModule(miss);
     r->m_device.destroyShaderModule(isect);
     r->m_device.destroyShaderModule(chit);
+    r->m_device.destroyShaderModule(missShadow);
 }
 
 void RayTracing::createSBT() {
@@ -562,7 +587,7 @@ void RayTracing::createSBT() {
     const uint32_t baseAlignment      = props.shaderGroupBaseAlignment;      // e.g. 64
     const uint32_t handleSizeAligned  = (handleSize + baseAlignment - 1) & ~(baseAlignment - 1);
 
-    const uint32_t groupCount = 3; // rgen, miss, hit
+    const uint32_t groupCount = 5; // rgen, miss, hit
 
     std::vector<uint8_t> handles(groupCount * handleSize);
 
@@ -575,10 +600,11 @@ void RayTracing::createSBT() {
 
     auto makeSBT = [&](Buffer& buf,
                        vk::StridedDeviceAddressRegionKHR& region,
-                       uint32_t index)
+                       uint32_t index,
+                       uint32_t count)
     {
         // SBT BUFFER SIZE MUST BE handleSizeAligned
-        const uint32_t sbtSize = handleSizeAligned;
+        const uint32_t sbtSize = handleSizeAligned * count;
 
         buf = r->createBuffer(
             sbtSize,
@@ -589,11 +615,22 @@ void RayTracing::createSBT() {
             VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
         );
 
+        // We must align the data we copy into the buffer as well
+        std::vector<uint8_t> alignedHandles(sbtSize);
+        for(uint32_t i = 0; i < count; i++) {
+            // Copy handle from the main vector to the aligned position
+            memcpy(
+                alignedHandles.data() + (i * handleSizeAligned),
+                handles.data() + ((index + i) * handleSize),
+                handleSize
+            );
+        }
+
         r->uploadToBuffer(
-            handles.data() + index * handleSize,
-            handleSize,
-            buf
-        );
+                    alignedHandles.data(),
+                    sbtSize,
+                    buf
+                );
 
         vk::DeviceAddress addr =
             r->m_device.getBufferAddress({ buf.handle });
@@ -605,14 +642,19 @@ void RayTracing::createSBT() {
 
         region = vk::StridedDeviceAddressRegionKHR{
             addr,
-            handleSizeAligned,
-            handleSizeAligned
+            handleSizeAligned,  // Stride (distance between records)
+            sbtSize             // Size (total size of the region) <--- FIXED
         };
     };
 
-    makeSBT(rtPipeline.rgenSBT, rtPipeline.rgenRegion, 0);
-    makeSBT(rtPipeline.missSBT, rtPipeline.missRegion, 1);
-    makeSBT(rtPipeline.hitSBT,  rtPipeline.hitRegion, 2);
+    // Raygen
+    makeSBT(rtPipeline.rgenSBT, rtPipeline.rgenRegion, 0, 1);
+
+    // Miss (Radiance Miss, Shadow Miss)
+    makeSBT(rtPipeline.missSBT, rtPipeline.missRegion, 1, 2);
+
+    //Hit (Radiance Hit, Shadow Hit)
+    makeSBT(rtPipeline.hitSBT,  rtPipeline.hitRegion,  3, 2);
 
     rtPipeline.callRegion = vk::StridedDeviceAddressRegionKHR{};
 }

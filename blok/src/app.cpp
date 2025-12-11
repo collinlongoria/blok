@@ -34,7 +34,7 @@ using namespace blok;
 static Camera g_camera;
 static Scene  g_scene;
 static UI* g_ui;
-static ChunkManager g_mgr(128, 0.1f);
+static ChunkManager g_mgr(128, 1.0f);
 static float lastX = 400.0f;
 static float lastY = 300.0f;
 static bool firstMouse = true;
@@ -103,7 +103,7 @@ void App::init() {
             VoxFile vox;
             std::string err;
             bool success = blok::loadAndImportVox(
-                "assets/models/Truck 01.vox",
+                "assets/models/menger.vox",
                 g_mgr,
                 &matLib,
                 glm::vec3(0, 0, 0),
