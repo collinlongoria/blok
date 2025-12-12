@@ -10,7 +10,6 @@
 
 struct RayPayload {
     vec3 radiance;
-    vec3 throughput;
     vec3 normal;
     vec3 albedo;
     float roughness;

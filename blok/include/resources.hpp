@@ -153,6 +153,7 @@ struct alignas(16) FrameUBO {
 
 namespace blok {
 
+// TODO note, deprecated essentially. but kept, as i might find a way to reuse it
 struct alignas(16) ChunkGpu {
     uint32_t nodeOffset; // index into global SVO node array
     uint32_t nodeCount;
@@ -165,6 +166,23 @@ struct alignas(16) ChunkGpu {
 };
 static_assert(sizeof(ChunkGpu) == 48, "expected 48 bytes");
 
+// Each sub-chunk represents a portion of a chunk's SVO
+struct alignas(16) SubChunkGpu {
+    // SVO navigation
+    uint32_t nodeOffset; // Offset into global node array (start of parent chunk's nodes)
+    uint32_t rootNodeIndex; // Index of sub-chunk's root node RELATIVE to nodeOffset
+    uint32_t nodeCount; // Total nodes in parent chunk (for bounds checking)
+    uint32_t startDepth; // Depth at which this sub-chunk starts (for LOD)
+
+    // World-space bounds of this sub-chunk
+    glm::vec3 worldMin;
+    float subChunkSize; // Size of this sub-chunk in world units
+
+    glm::vec3 worldMax;
+    float pad0;
+};
+static_assert(sizeof(SubChunkGpu) == 48, "expected 48 bytes");
+
 }
 
 namespace blok {
@@ -176,10 +194,10 @@ struct AccelerationStructure {
 
 struct WorldSvoGpu {
     std::vector<SvoNode> globalNodes;
-    std::vector<ChunkGpu> globalChunks;
+    std::vector<SubChunkGpu> globalSubChunks;
 
     Buffer svoBuffer{};
-    Buffer chunkBuffer{};
+    Buffer subChunkBuffer{};
 
     std::vector<MaterialGpu> materials;
     Buffer materialBuffer{};

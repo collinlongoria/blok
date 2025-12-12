@@ -15,23 +15,25 @@ struct SvoNode {
     float occupancy;
 };
 
-struct ChunkGpu {
-    uint nodeOffset;
-    uint nodeCount;
-    uint reserved0;
-    uint reserved1;
+struct SubChunkGpu {
+    uint nodeOffset;      // Offset into global node array
+    uint rootNodeIndex;   // Sub-chunk's root node (relative to nodeOffset)
+    uint nodeCount;       // Total nodes in parent chunk
+    uint startDepth;      // Depth at which sub-chunk starts
+
     vec3 worldMin;
-    float pad0;
+    float subChunkSize;
+
     vec3 worldMax;
-    float pad1;
+    float pad0;
 };
 
 layout(binding = 1, set = 0) readonly buffer SvoBuffer {
     SvoNode nodes[];
 };
 
-layout(binding = 2, set = 0) readonly buffer ChunkBuffer {
-    ChunkGpu chunks[];
+layout(binding = 2, set = 0) readonly buffer SubChunkBuffer {
+    SubChunkGpu subChunks[];
 };
 
 struct HitAttribs {
@@ -41,7 +43,8 @@ hitAttributeEXT HitAttribs hitAttribs;
 
 const uint MAX_STACK = 12u;
 const uint MAX_ITER = 128u;
-const uint MAX_DEPTH = 7u;
+const uint MAX_DEPTH = 7u; // Total SVO depth
+const uint SUB_CHUNK_DEPTH = 2u; // log2(SUB_CHUNK_DIVISIONS) - must match CPU!
 const float INV_EPS = 1e-8;
 
 vec2 intersectAABB(vec3 origin, vec3 invDir, vec3 boxMin, vec3 boxMax) {
@@ -69,7 +72,9 @@ uint getHitFace(vec3 hitPos, vec3 boxMin, vec3 boxMax) {
 }
 
 void main() {
-    ChunkGpu chunk = chunks[gl_PrimitiveID];
+    // Get sub-chunk data
+    SubChunkGpu sub = subChunks[gl_PrimitiveID];
+
     vec3 rayOrg = gl_WorldRayOriginEXT;
     vec3 rayDir = gl_WorldRayDirectionEXT;
 
@@ -79,27 +84,29 @@ void main() {
         abs(rayDir.z) > INV_EPS ? 1.0 / rayDir.z : sign(rayDir.z) * 1e30
     );
 
-    vec2 chunkT = intersectAABB(rayOrg, invDir, chunk.worldMin, chunk.worldMax);
-    if (chunkT.x > chunkT.y || chunkT.y < 0.0 || chunkT.x > gl_RayTmaxEXT) return;
+    // Test against sub-chunk AABB
+    vec2 subT = intersectAABB(rayOrg, invDir, sub.worldMin, sub.worldMax);
+    if (subT.x > subT.y || subT.y < 0.0 || subT.x > gl_RayTmaxEXT) return;
 
-    // Stack with depth tracking
+    // Stack for traversal
     uint sNode[MAX_STACK];
     vec3 sMin[MAX_STACK];
     float sSize[MAX_STACK];
     uint sDepth[MAX_STACK];
     uint sNextChild[MAX_STACK];
 
+    // Ray direction ordering
     uint orderMask = 0u;
     if (rayDir.x < 0.0) orderMask |= 1u;
     if (rayDir.y < 0.0) orderMask |= 2u;
     if (rayDir.z < 0.0) orderMask |= 4u;
 
-    // Push Root
+    // The sub-chunk root is at depth = startDepth in the original SVO
     uint stackPtr = 1u;
-    sNode[0] = chunk.nodeOffset;
-    sMin[0] = chunk.worldMin;
-    sSize[0] = chunk.worldMax.x - chunk.worldMin.x;
-    sDepth[0] = 0u;
+    sNode[0] = sub.nodeOffset + sub.rootNodeIndex;  // Absolute index into global nodes
+    sMin[0] = sub.worldMin;                          // Sub-chunk bounds
+    sSize[0] = sub.subChunkSize;                     // Sub-chunk size
+    sDepth[0] = sub.startDepth;                      // Start at sub-chunk depth
     sNextChild[0] = 0u;
 
     uint iter = 0u;
@@ -116,6 +123,12 @@ void main() {
         vec3 nodeMin = sMin[si];
         float size = sSize[si];
         uint depth = sDepth[si];
+
+        // Bounds check - use sub-chunk's parent chunk node count
+        if (idx >= sub.nodeOffset + sub.nodeCount) {
+            stackPtr--;
+            continue;
+        }
 
         SvoNode node = nodes[idx];
 
@@ -149,8 +162,11 @@ void main() {
             vec2 t = intersectAABB(rayOrg, invDir, childMin, childMax);
             if (t.x > t.y || t.y < 0.0 || t.x > gl_RayTmaxEXT) continue;
 
-            childNodeIndex = chunk.nodeOffset + node.firstChild + octant;
-            if (childNodeIndex >= chunk.nodeOffset + chunk.nodeCount) continue;
+            // Child index is relative to firstChild
+            childNodeIndex = sub.nodeOffset + node.firstChild + octant;
+
+            // Bounds check
+            if (childNodeIndex >= sub.nodeOffset + sub.nodeCount) continue;
 
             foundChild = true;
             break;
@@ -181,7 +197,7 @@ void main() {
             continue;
         }
 
-        // Push child
+        // Push child onto stack
         if (stackPtr < MAX_STACK) {
             sNode[stackPtr] = childNodeIndex;
             sMin[stackPtr] = childMin;

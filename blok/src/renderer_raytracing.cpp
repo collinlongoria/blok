@@ -6,25 +6,27 @@
 */
 #include "renderer_raytracing.hpp"
 
+#include <iostream>
+
 #include "renderer.hpp"
 
 namespace blok {
 
 vk::AccelerationStructureKHR Renderer::buildChunkBlas(WorldSvoGpu &gpuWorld) {
     // count primitives
-    uint32_t count = gpuWorld.globalChunks.size();
+    uint32_t count = gpuWorld.globalSubChunks.size();
     if (count == 0) return {};
 
     // build array of aabbs
     std::vector<vk::AabbPositionsKHR> aabbs(count);
     for (uint32_t i = 0; i < count; ++i) {
-        const auto& ch = gpuWorld.globalChunks[i];
-        aabbs[i].minX = ch.worldMin.x;
-        aabbs[i].minY = ch.worldMin.y;
-        aabbs[i].minZ = ch.worldMin.z;
-        aabbs[i].maxX = ch.worldMax.x;
-        aabbs[i].maxY = ch.worldMax.y;
-        aabbs[i].maxZ = ch.worldMax.z;
+        const auto& sub = gpuWorld.globalSubChunks[i];
+        aabbs[i].minX = sub.worldMin.x;
+        aabbs[i].minY = sub.worldMin.y;
+        aabbs[i].minZ = sub.worldMin.z;
+        aabbs[i].maxX = sub.worldMax.x;
+        aabbs[i].maxY = sub.worldMax.y;
+        aabbs[i].maxZ = sub.worldMax.z;
     }
 
     // clean up old AABB buffer if it exists
@@ -127,12 +129,14 @@ vk::AccelerationStructureKHR Renderer::buildChunkBlas(WorldSvoGpu &gpuWorld) {
 
     vmaDestroyBuffer(m_allocator, scratch.handle, scratch.alloc);
 
+    std::cout << "BLAS built with " << count << " sub-chunk AABBs\n";
+
     return gpuWorld.blas.handle;
 }
 
 vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
-    uint32_t chunkCount = gpuWorld.globalChunks.size();
-    if (chunkCount == 0)
+    uint32_t subChunkCount = gpuWorld.globalSubChunks.size();
+    if (subChunkCount == 0)
         return {};
 
     vk::AccelerationStructureInstanceKHR inst{};
@@ -158,9 +162,9 @@ vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
         gpuWorld.tlasInstanceBuffer = {};
     }
 
-    // Create instance buffer with just ONE instance
+    // Create instance buffer
     gpuWorld.tlasInstanceBuffer = createBuffer(
-        sizeof(vk::AccelerationStructureInstanceKHR),  // Just one instance!
+        sizeof(vk::AccelerationStructureInstanceKHR),
         vk::BufferUsageFlagBits::eTransferDst |
         vk::BufferUsageFlagBits::eShaderDeviceAddress |
         vk::BufferUsageFlagBits::eAccelerationStructureBuildInputReadOnlyKHR,
@@ -180,7 +184,7 @@ vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
     geom.geometry.setInstances(instances);
 
     vk::AccelerationStructureBuildRangeInfoKHR range{};
-    range.primitiveCount = 1;  // ONE instance!
+    range.primitiveCount = 1;
 
     vk::AccelerationStructureBuildGeometryInfoKHR build{};
     build.type = vk::AccelerationStructureTypeKHR::eTopLevel;
@@ -377,7 +381,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu, uint32_t frameIndex
 
     // Chunk SSBO
     vk::DescriptorBufferInfo chunkInfo{
-        gpu.chunkBuffer.handle,
+        gpu.subChunkBuffer.handle,
         0, VK_WHOLE_SIZE
     };
 

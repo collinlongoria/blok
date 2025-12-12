@@ -15,7 +15,7 @@ layout(binding = 1, rgba8) uniform image2D ldrOutput;
 layout(push_constant) uniform PushConstants {
     float exposure;
     float saturationBoost;
-    int tonemapOperator; // 0 = Reinhard, 1 = ACES, 2 = AgX, 3 = Neutral, 4 = Khronos PBR Neutral
+    int tonemapOperator; // 0 = Neutral (functionally OFF), 1 = Khronos PBR Neutral
     float whitePoint;
 } pc;
 
@@ -60,126 +60,6 @@ vec3 postTonemapSaturationBoost(vec3 tonemapped, vec3 originalHdr, float boost) 
     return tonemapped;
 }
 
-// Extended Reinhard with proper white point
-// Reinhard et al. 2002, "Photographic Tone Reproduction for Digital Images"
-vec3 reinhardExtended(vec3 hdr, float whitePoint) {
-    float Lold = getLuminance(hdr);
-    float Lwhite2 = whitePoint * whitePoint;
-    float Lnew = (Lold * (1.0 + Lold / Lwhite2)) / (1.0 + Lold);
-    return changeLuminance(hdr, Lnew);
-}
-
-// ACES fitted curve using Narkowicz approximation
-vec3 acesFilmic(vec3 hdr) {
-    // RRT and ODT fit
-    float a = 2.51;
-    float b = 0.03;
-    float c = 2.43;
-    float d = 0.59;
-    float e = 0.14;
-    return clamp((hdr * (a * hdr + b)) / (hdr * (c * hdr + d) + e), 0.0, 1.0);
-}
-
-// Hill ACES
-// https://github.com/TheRealMJP/BakingLab
-vec3 acesHill(vec3 hdr) {
-    // sRGB => XYZ => D65_2_D60 => AP1 => RRT_SAT
-    const mat3 ACESInputMat = mat3(
-        0.59719, 0.07600, 0.02840,
-        0.35458, 0.90834, 0.13383,
-        0.04823, 0.01566, 0.83777
-    );
-
-    // ODT_SAT => XYZ => D60_2_D65 => sRGB
-    const mat3 ACESOutputMat = mat3(
-         1.60475, -0.10208, -0.00327,
-        -0.53108,  1.10813, -0.07276,
-        -0.07367, -0.00605,  1.07602
-    );
-
-    vec3 v = ACESInputMat * hdr;
-
-    // RRT
-    vec3 a = v * (v + 0.0245786) - 0.000090537;
-    vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
-    v = a / b;
-
-    return clamp(ACESOutputMat * v, 0.0, 1.0);
-}
-
-// AgX Base
-// Based on Troy Sobotka's work
-// https://github.com/MissingDeadlines/iolite/discussions/12
-vec3 agxDefaultContrastApprox(vec3 x) {
-    vec3 x2 = x * x;
-    vec3 x4 = x2 * x2;
-
-    return + 15.5     * x4 * x2
-           - 40.14    * x4 * x
-           + 31.96    * x4
-           - 6.868    * x2 * x
-           + 0.4298   * x2
-           + 0.1191   * x
-           - 0.00232;
-}
-
-vec3 agx(vec3 val) {
-    const mat3 agx_mat = mat3(
-        0.842479062253094, 0.0423282422610123, 0.0423756549057051,
-        0.0784335999999992, 0.878468636469772, 0.0784336,
-        0.0792237451477643, 0.0791661274605434, 0.879142973793104
-    );
-
-    const float min_ev = -12.47393;
-    const float max_ev = 4.026069;
-
-    // Input transform (inset)
-    val = agx_mat * val;
-
-    // Log2 space encoding
-    val = clamp(log2(val), min_ev, max_ev);
-    val = (val - min_ev) / (max_ev - min_ev);
-
-    // Apply sigmoid function approximation
-    val = agxDefaultContrastApprox(val);
-
-    return val;
-}
-
-vec3 agxEotf(vec3 val) {
-    const mat3 agx_mat_inv = mat3(
-        1.19687900512017, -0.0528968517574562, -0.0529716355144438,
-        -0.0980208811401368, 1.15190312990417, -0.0980434501171241,
-        -0.0990297440797205, -0.0989611768448433, 1.15107367264116
-    );
-
-    // Inverse input transform (outset)
-    val = agx_mat_inv * val;
-
-    return val;
-}
-
-vec3 agxLook(vec3 val, float saturation, float slope, float power, float offset) {
-    float luma = getLuminance(val);
-
-    // Default punchy look
-    vec3 grey = vec3(luma);
-    val = mix(grey, val, saturation);
-
-    // Contrast
-    val = pow(val * slope, vec3(power)) + offset;
-
-    return val;
-}
-
-vec3 agxTonemap(vec3 hdr) {
-    vec3 val = agx(hdr);
-    // Punchy look (adds saturation back)
-    val = agxLook(val, 1.2, 1.0, 1.35, 0.0);
-    val = agxEotf(val);
-    return clamp(val, 0.0, 1.0);
-}
-
 // Khronos PBR Neutral tonemap
 // https://github.com/KhronosGroup/ToneMapping
 vec3 khronosPbrNeutral(vec3 hdr) {
@@ -201,8 +81,7 @@ vec3 khronosPbrNeutral(vec3 hdr) {
     return mix(hdr, vec3(newPeak), g);
 }
 
-// Neutral/Linear tonemap - just soft clipping
-// Good for scenes that are already well-exposed
+// just soft clipping
 vec3 neutralTonemap(vec3 hdr) {
     // Soft knee compression
     float peak = max(max(hdr.r, hdr.g), hdr.b);
@@ -238,19 +117,10 @@ void main() {
     // apply tonemapping
     vec3 ldr;
     switch (pc.tonemapOperator) {
-        case 0:  // Extended Reinhard
-            ldr = reinhardExtended(hdr, pc.whitePoint);
-            break;
-        case 1:  // ACES (Hill - better colors)
-            ldr = acesHill(hdr);
-            break;
-        case 2:  // AgX
-            ldr = agxTonemap(hdr);
-            break;
-        case 3:  // Neutral (soft clip)
+        case 0:  // Neutral (soft clip)
             ldr = neutralTonemap(hdr);
             break;
-        case 4:  // Khronos PBR Neutral
+        case 1:  // Khronos PBR Neutral
             ldr = khronosPbrNeutral(hdr);
             break;
         default:

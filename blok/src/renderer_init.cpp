@@ -157,9 +157,9 @@ void Renderer::cleanupWorld(WorldSvoGpu& gpuWorld) {
         vmaDestroyBuffer(m_allocator, gpuWorld.svoBuffer.handle, gpuWorld.svoBuffer.alloc);
         gpuWorld.svoBuffer = {};
     }
-    if (gpuWorld.chunkBuffer.handle && gpuWorld.chunkBuffer.alloc) {
-        vmaDestroyBuffer(m_allocator, gpuWorld.chunkBuffer.handle, gpuWorld.chunkBuffer.alloc);
-        gpuWorld.chunkBuffer = {};
+    if (gpuWorld.subChunkBuffer.handle && gpuWorld.subChunkBuffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.subChunkBuffer.handle, gpuWorld.subChunkBuffer.alloc);
+        gpuWorld.subChunkBuffer = {};
     }
 
     if (gpuWorld.materialBuffer.handle && gpuWorld.materialBuffer.alloc) {

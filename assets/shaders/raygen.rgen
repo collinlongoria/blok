@@ -61,7 +61,6 @@ layout(binding = 8, set = 0, rg16f)   uniform image2D outMotionVectors;
 // Ray payload for path tracing
 struct RayPayload {
     vec3 radiance;   // Emission
-    vec3 throughput; // Explicit throughput not strictly needed in payload if handled in rgen, but keeping struct
     vec3 normal;
     vec3 albedo;
     float roughness;
@@ -74,8 +73,6 @@ layout(location = 1) rayPayloadEXT bool isShadowed;
 
 const float PI = 3.14159265359;
 const float INV_PI = 0.31830988618;
-
-// --- RNG Helpers ---
 
 uint pcg(inout uint state) {
     uint oldState = state;
@@ -100,8 +97,6 @@ uint initRNG(uvec2 pixel, uint frameIndex, uint sampleIndex) {
     pcg(seed);
     return seed;
 }
-
-// --- Sampling Helpers ---
 
 vec3 sampleCosineHemisphere(vec2 u, vec3 N) {
     float r = sqrt(u.x);
@@ -159,7 +154,15 @@ vec2 computeMotionVector(vec3 worldPos, vec2 currentUV) {
     return currentUV - prevUV;
 }
 
-// --- Main ---
+// Check if a surface is primarily emissive (emission dominates over albedo)
+bool isEmissive(vec3 emission) {
+    return dot(emission, vec3(1.0)) > 0.01;
+}
+
+// Get luminance of a color
+float luminance(vec3 color) {
+    return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
 
 void main() {
     const uvec2 pixelCoord = gl_LaunchIDEXT.xy;
@@ -170,12 +173,17 @@ void main() {
     vec3 firstHitPos = vec3(0.0);
     vec3 firstHitNormal = vec3(0.0);
     vec3 firstHitAlbedo = vec3(0.0);
+    vec3 firstHitEmission = vec3(0.0);
     float firstHitRoughness = 0.0;
     float firstHitMetallic = 0.0;
     float firstHitDepth = 0.0;
     bool hadFirstHit = false;
+    bool firstHitWasEmissive = false;
 
     vec3 accumulatedColor = vec3(0.0);
+
+    const vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
+    const vec3 sunRadiance = vec3(3.0, 2.9, 2.7);
 
     for (uint sampleIdx = 0u; sampleIdx < frame.sampleCount; sampleIdx++) {
         // Initialize RNG per sample
@@ -183,7 +191,7 @@ void main() {
 
         // Jitter pixel sampling
         vec2 pixelCenter;
-        if(sampleIdx == 0){
+        if(sampleIdx == 0u) {
             pixelCenter = vec2(pixelCoord) + vec2(0.5);
         } else {
             vec2 jitter = randomVec2(rng) - 0.5;
@@ -200,7 +208,8 @@ void main() {
         vec3 radiance = vec3(0.0);
         vec3 throughput = vec3(1.0);
 
-        for (uint bounce = 0u; bounce < 2u; bounce++) {
+        const uint MAX_BOUNCES = 2u;
+        for (uint bounce = 0u; bounce < MAX_BOUNCES; bounce++) {
             // Reset payload before trace
             payload.radiance = vec3(0.0);
             payload.hitT = -1.0;
@@ -216,7 +225,7 @@ void main() {
                 0.001,
                 rayDir,
                 10000.0,
-                0                       // payload location = 0
+                0
             );
 
             // Check for miss
@@ -231,8 +240,14 @@ void main() {
             // Extract surface properties from payload
             vec3 N = payload.normal;
             vec3 albedo = payload.albedo;
+            vec3 emission = payload.radiance;
             float roughness = payload.roughness;
             float metallic = payload.metallic;
+
+            // Ensure normal faces ray
+            if (dot(N, rayDir) > 0.0) {
+                N = -N;
+            }
 
             // Store G-buffer data (first bounce, first sample only)
             if (bounce == 0u && sampleIdx == 0u && !hadFirstHit) {
@@ -240,23 +255,28 @@ void main() {
                 firstHitPos = hitPos;
                 firstHitNormal = N;
                 firstHitAlbedo = albedo;
+                firstHitEmission = emission;
                 firstHitRoughness = roughness;
                 firstHitMetallic = metallic;
                 firstHitDepth = payload.hitT;
+                firstHitWasEmissive = isEmissive(emission);
             }
 
-            // Ensure normal faces ray
-            if (dot(N, rayDir) > 0.0) {
-                N = -N;
-            }
+            if (isEmissive(emission)) {
+                // Add emissive contribution
+                radiance += throughput * emission;
 
-            // Emissive contribution (from payload.radiance)
-            if (length(payload.radiance) > 0.0) {
-                radiance += throughput * payload.radiance;
+                // For strongly emissive surfaces, we can optionally terminate
+                // This prevents noise from bouncing off bright lights
+                float emissionStrength = luminance(emission);
+                if (emissionStrength > 5.0 || bounce > 0u) {
+                    // Terminate path on bright emissives or secondary emissive hits
+                    break;
+                }
+                // For dim emissives on first bounce, continue to also get reflected light
             }
 
             // Direct Lighting / Shadows
-            vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
             float NdotL = max(dot(N, sunDir), 0.0);
 
             if (NdotL > 0.0 && bounce == 0u) {
@@ -278,16 +298,36 @@ void main() {
                 );
 
                 if (!isShadowed) {
-                    vec3 sunRadiance = vec3(3.0, 2.9, 2.7);
+                    // Diffuse contribution from sun
                     vec3 diffuseColor = albedo * (1.0 - metallic);
                     radiance += throughput * diffuseColor * sunRadiance * NdotL * INV_PI;
+
+                    // Specular contribution from sun (for rough surfaces)
+                    if (roughness < 0.9) {
+                        vec3 H = normalize(sunDir - rayDir);
+                        float NdotH = max(dot(N, H), 0.0);
+                        float VdotH = max(dot(-rayDir, H), 0.0);
+
+                        // Simplified GGX specular for direct light
+                        float a = roughness * roughness;
+                        float a2 = a * a;
+                        float denom = NdotH * NdotH * (a2 - 1.0) + 1.0;
+                        float D = a2 / (PI * denom * denom);
+
+                        vec3 F0 = mix(vec3(0.04), albedo, metallic);
+                        vec3 F = fresnelSchlick(VdotH, F0);
+
+                        // Approximate visibility
+                        float Vis = 0.25; // Simplified
+
+                        radiance += throughput * F * D * Vis * sunRadiance * NdotL;
+                    }
                 }
             }
 
             // Russian Roulette
-            if (bounce > 1u) {
-                float p = max(max(throughput.r, throughput.g), throughput.b);
-                p = min(p, 0.95);
+            if (bounce > 0u) {
+                float p = min(max(max(throughput.r, throughput.g), throughput.b), 0.95);
                 if (randomFloat(rng) > p) {
                     break;
                 }
@@ -300,7 +340,7 @@ void main() {
             // Fresnel
             vec3 F0 = mix(vec3(0.04), albedo, metallic);
             vec3 V = -rayDir;
-            float NdotV = max(dot(N, V), 0.0);
+            float NdotV = max(dot(N, V), 0.001);
             vec3 F = fresnelSchlick(NdotV, F0);
 
             float specularWeight = (F.r + F.g + F.b) / 3.0;
@@ -343,7 +383,10 @@ void main() {
     vec3 color = accumulatedColor / float(frame.sampleCount);
 
     // Firefly clamp
-    color = clamp(color, vec3(0.0), vec3(100.0));
+    float maxVal = max(max(color.r, color.g), color.b);
+    if (maxVal > 100.0) {
+        color *= 100.0 / maxVal;
+    }
 
     // Store outputs
     imageStore(outColor, ivec2(pixelCoord), vec4(color, 1.0));
@@ -352,11 +395,16 @@ void main() {
     if (!hadFirstHit) {
         firstHitDepth = 10000.0;
         firstHitPos = frame.camPos + normalize((frame.invView * vec4(0.0, 0.0, -1.0, 0.0)).xyz) * 10000.0;
+        firstHitNormal = vec3(0.0, 1.0, 0.0);
+        firstHitAlbedo = getSkyColor(normalize(firstHitPos - frame.camPos));
     }
+
+    // this helps the denoiser handle emissives
+    vec3 finalAlbedo = firstHitWasEmissive ? firstHitEmission : firstHitAlbedo;
 
     imageStore(outWorldPosition, ivec2(pixelCoord), vec4(firstHitPos, firstHitDepth));
     imageStore(outNormalRoughness, ivec2(pixelCoord), vec4(firstHitNormal, firstHitRoughness));
-    imageStore(outAlbedoMetallic, ivec2(pixelCoord), vec4(firstHitAlbedo, firstHitMetallic));
+    imageStore(outAlbedoMetallic, ivec2(pixelCoord), vec4(finalAlbedo, firstHitMetallic));
 
     vec2 motionVector = vec2(0.0);
     if (hadFirstHit && firstHitDepth < 9999.0) {

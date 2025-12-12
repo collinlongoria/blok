@@ -77,11 +77,8 @@ struct SharpenPushConstants {
 };
 
 enum class TonemapOperator : int {
-    Reinhard = 0,
-    ACESHill = 1,
-    AgX = 2,
-    Neutral = 3,
-    KhronosPBRNeutral = 4,
+    Neutral = 0,
+    KhronosPBRNeutral = 1,
 };
 
 class PostProcess {

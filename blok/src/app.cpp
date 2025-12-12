@@ -103,11 +103,20 @@ void App::init() {
             VoxFile vox;
             std::string err;
             bool success = blok::loadAndImportVox(
-                "assets/models/menger.vox",
+                "assets/models/cars.vox",
                 g_mgr,
                 &matLib,
                 glm::vec3(0, 0, 0),
                 0,
+                &err
+            );
+
+             success = blok::loadAndImportVox(
+                "assets/models/cars.vox",
+                g_mgr,
+                &matLib,
+                glm::vec3(20, 0, 10),
+                1,
                 &err
             );
 
