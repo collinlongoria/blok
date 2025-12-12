@@ -14,7 +14,7 @@ namespace blok {
 // Number of subdivisions per axis
 // MUST be a power of two
 // TODO in a way, this is the beginning outline for LODs, lower numbers would mean coarser traversals
-static constexpr uint32_t SUB_CHUNK_DIVISIONS = 4;
+static constexpr uint32_t SUB_CHUNK_DIVISIONS = 8;
 
 ChunkManager::ChunkManager(uint32_t C_, float voxelSize_)
     : C(C_), voxelSize(voxelSize_) {

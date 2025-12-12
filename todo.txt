@@ -1,12 +1,13 @@
 TODO (Collin)
 
 // NEXT 2 weeks:
-SVO storing material index for PBR + color (systems for blok types)
-glass and refraction
-shadow payload
+Bit-Brick leaves: turning leaf nodes into 4x4x4 blocks to improve performance
+Send initial bounce to a compute shader, only use raytracing pipeline for continuing bounces (huge optimization i think)
+consider implementing upscaling using FSR or DLSS?
 
 // NEXT 2 weeks:
-implement a list of lights, multiple lights
+systems for registering block types
+implement a list of lights, multiple lights and use emissives as emitters
 noise gen for world
 
 // NEXT 2 weeks:
@@ -14,13 +15,16 @@ Refactor SVO rebuild into compute shader?
 obj loader and voxelizer
 
 // LONG term:
-create non-pathtraced pipeline (raytraced, not using acceleration extension)
 bloom?
 motion blur?
+glass and refraction
 
 // THE BIGGEST NEED:
 One BLAS per chunk, multiple TLAS instances, and chunk LOD
 
 // KNOWN ISSUES:
-most of the tonemaps I tried are ugly/useless. may clean it up and remove them
 no way to disable camera movement
+
+// SOME EXPLORATIONS TO CONSIDER:
+mesh shader for SVO traversal -> triangulation -> greedy meshing (on gpu not possible maybe?)
+just forgetting SVO and doing triangles (would work best withraytracing pipeline)

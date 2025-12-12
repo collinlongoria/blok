@@ -16,14 +16,12 @@ struct SvoNode {
 };
 
 struct SubChunkGpu {
-    uint nodeOffset;      // Offset into global node array
-    uint rootNodeIndex;   // Sub-chunk's root node (relative to nodeOffset)
-    uint nodeCount;       // Total nodes in parent chunk
-    uint startDepth;      // Depth at which sub-chunk starts
-
+    uint nodeOffset;     // Offset into global node array
+    uint rootNodeIndex;  // Sub-chunk's root node
+    uint nodeCount;      // Total nodes in parent chunk
+    uint startDepth;     // Depth at which sub-chunk starts
     vec3 worldMin;
     float subChunkSize;
-
     vec3 worldMax;
     float pad0;
 };
@@ -41,170 +39,168 @@ struct HitAttribs {
 };
 hitAttributeEXT HitAttribs hitAttribs;
 
-const uint MAX_STACK = 12u;
-const uint MAX_ITER = 128u;
-const uint MAX_DEPTH = 7u; // Total SVO depth
-const uint SUB_CHUNK_DEPTH = 2u; // log2(SUB_CHUNK_DIVISIONS) - must match CPU!
-const float INV_EPS = 1e-8;
+const uint MAX_STACK = 24u;
+const uint MAX_ITER  = 256u;
+const float EPSILON  = 1e-6;
 
-vec2 intersectAABB(vec3 origin, vec3 invDir, vec3 boxMin, vec3 boxMax) {
+// Returns vec2(tNear, tFar); If tNear > tFar, missed
+vec2 intersectAABB_Root(vec3 origin, vec3 invDir, vec3 boxMin, vec3 boxMax) {
     vec3 t0 = (boxMin - origin) * invDir;
     vec3 t1 = (boxMax - origin) * invDir;
-
     vec3 tmin = min(t0, t1);
     vec3 tmax = max(t0, t1);
-
     float tNear = max(max(tmin.x, tmin.y), tmin.z);
-    float tFar = min(min(tmax.x, tmax.y), tmax.z);
-
+    float tFar  = min(min(tmax.x, tmax.y), tmax.z);
     return vec2(tNear, tFar);
 }
 
-uint getHitFace(vec3 hitPos, vec3 boxMin, vec3 boxMax) {
-    vec3 center = (boxMin + boxMax) * 0.5;
+// Face normal helper for reporting intersection
+uint getHitFace(vec3 hitPos, vec3 center) {
     vec3 diff = hitPos - center;
-    vec3 halfSize = (boxMax - boxMin) * 0.5;
-    vec3 dist = abs(diff) - halfSize;
+    vec3 absDiff = abs(diff);
 
-    if (dist.x > dist.y && dist.x > dist.z) return diff.x > 0 ? 0 : 1;
-    if (dist.y > dist.z) return diff.y > 0 ? 2 : 3;
-    return diff.z > 0 ? 4 : 5;
+    // Find dominant axis
+    if (absDiff.x >= absDiff.y && absDiff.x >= absDiff.z)
+        return diff.x > 0.0 ? 0u : 1u; // +X, -X
+    if (absDiff.y >= absDiff.z)
+        return diff.y > 0.0 ? 2u : 3u; // +Y, -Y
+    return diff.z > 0.0 ? 4u : 5u;     // +Z, -Z
 }
 
 void main() {
-    // Get sub-chunk data
+    // Setup Ray & SubChunk
     SubChunkGpu sub = subChunks[gl_PrimitiveID];
 
     vec3 rayOrg = gl_WorldRayOriginEXT;
     vec3 rayDir = gl_WorldRayDirectionEXT;
 
-    vec3 invDir = vec3(
-        abs(rayDir.x) > INV_EPS ? 1.0 / rayDir.x : sign(rayDir.x) * 1e30,
-        abs(rayDir.y) > INV_EPS ? 1.0 / rayDir.y : sign(rayDir.y) * 1e30,
-        abs(rayDir.z) > INV_EPS ? 1.0 / rayDir.z : sign(rayDir.z) * 1e30
+    // Precompute inverse direction for AABB/Plane tests
+    // Using a safe division to handle axis-aligned rays
+    vec3 invDir = 1.0 / mix(rayDir, vec3(1e-6), lessThan(abs(rayDir), vec3(1e-6)));
+
+    // Intersect SubChunk Root
+    vec2 rootT = intersectAABB_Root(rayOrg, invDir, sub.worldMin, sub.worldMax);
+
+    // Check against current ray T constraints
+    float tMin = max(rootT.x, gl_RayTminEXT);
+    float tMax = min(rootT.y, gl_RayTmaxEXT);
+
+    if (tMin > tMax) return;
+
+    // Prepare Traversal State
+    // "octantMask" XORs the child index to flip the traversal order based on ray direction
+    // If ray.x is positive, visit left children (0) before right (1)
+    // If ray.x is negative, visit right (1) before left (0)
+    uint octantMask = 0u;
+    if (rayDir.x < 0.0) octantMask |= 1u;
+    if (rayDir.y < 0.0) octantMask |= 2u;
+    if (rayDir.z < 0.0) octantMask |= 4u;
+
+    // Stack Data
+    struct StackItem {
+        uint  nodeIndex;
+        vec3  center;
+        float halfSize; // size * 0.5
+        float tEntry;   // t-value where ray enters this node
+        float tExit;    // t-value where ray exits this node
+    };
+
+    StackItem stack[MAX_STACK];
+    uint stackPtr = 0u;
+
+    // Push Root Node
+    vec3 rootSize = sub.worldMax - sub.worldMin;
+    stack[stackPtr++] = StackItem(
+        sub.nodeOffset + sub.rootNodeIndex,
+        sub.worldMin + rootSize * 0.5,
+        rootSize.x * 0.5,
+        tMin,
+        tMax
     );
 
-    // Test against sub-chunk AABB
-    vec2 subT = intersectAABB(rayOrg, invDir, sub.worldMin, sub.worldMax);
-    if (subT.x > subT.y || subT.y < 0.0 || subT.x > gl_RayTmaxEXT) return;
-
-    // Stack for traversal
-    uint sNode[MAX_STACK];
-    vec3 sMin[MAX_STACK];
-    float sSize[MAX_STACK];
-    uint sDepth[MAX_STACK];
-    uint sNextChild[MAX_STACK];
-
-    // Ray direction ordering
-    uint orderMask = 0u;
-    if (rayDir.x < 0.0) orderMask |= 1u;
-    if (rayDir.y < 0.0) orderMask |= 2u;
-    if (rayDir.z < 0.0) orderMask |= 4u;
-
-    // The sub-chunk root is at depth = startDepth in the original SVO
-    uint stackPtr = 1u;
-    sNode[0] = sub.nodeOffset + sub.rootNodeIndex;  // Absolute index into global nodes
-    sMin[0] = sub.worldMin;                          // Sub-chunk bounds
-    sSize[0] = sub.subChunkSize;                     // Sub-chunk size
-    sDepth[0] = sub.startDepth;                      // Start at sub-chunk depth
-    sNextChild[0] = 0u;
-
+    // Parametric Loop
     uint iter = 0u;
     while (stackPtr > 0u && iter++ < MAX_ITER) {
-        uint si = stackPtr - 1u;
+        // Pop
+        StackItem item = stack[--stackPtr];
 
-        // All children processed?
-        if (sNextChild[si] >= 8u) {
-            stackPtr--;
-            continue;
-        }
+        // If the node is now further than a newly found hit, drop it
+        if (item.tEntry >= gl_RayTmaxEXT) continue;
 
-        uint idx = sNode[si];
-        vec3 nodeMin = sMin[si];
-        float size = sSize[si];
-        uint depth = sDepth[si];
+        // Fetch Node Data
+        // Safety check for bounds
+        if (item.nodeIndex >= sub.nodeOffset + sub.nodeCount) continue;
+        SvoNode node = nodes[item.nodeIndex];
 
-        // Bounds check - use sub-chunk's parent chunk node count
-        if (idx >= sub.nodeOffset + sub.nodeCount) {
-            stackPtr--;
-            continue;
-        }
-
-        SvoNode node = nodes[idx];
-
+        // LEAF CHECK
         if (node.childMask == 0u) {
-            stackPtr--;
-            continue;
-        }
+            if (node.occupancy > 0.0) {
+                uint faceID = getHitFace(rayOrg + rayDir * item.tEntry, item.center);
+                hitAttribs.materialId = node.materialId;
 
-        float halfSize = size * 0.5;
-
-        // Find next valid child
-        bool foundChild = false;
-        uint childNodeIndex;
-        vec3 childMin;
-
-        while (sNextChild[si] < 8u) {
-            uint c = sNextChild[si];
-            sNextChild[si] = c + 1u;
-
-            uint octant = c ^ orderMask;
-
-            if ((node.childMask & (1u << octant)) == 0u) continue;
-
-            childMin = nodeMin + vec3(
-                (octant & 1u) != 0u ? halfSize : 0.0,
-                (octant & 2u) != 0u ? halfSize : 0.0,
-                (octant & 4u) != 0u ? halfSize : 0.0
-            );
-            vec3 childMax = childMin + vec3(halfSize);
-
-            vec2 t = intersectAABB(rayOrg, invDir, childMin, childMax);
-            if (t.x > t.y || t.y < 0.0 || t.x > gl_RayTmaxEXT) continue;
-
-            // Child index is relative to firstChild
-            childNodeIndex = sub.nodeOffset + node.firstChild + octant;
-
-            // Bounds check
-            if (childNodeIndex >= sub.nodeOffset + sub.nodeCount) continue;
-
-            foundChild = true;
-            break;
-        }
-
-        if (!foundChild) {
-            stackPtr--;
-            continue;
-        }
-
-        // Check if at leaf depth
-        if (depth + 1u >= MAX_DEPTH) {
-            SvoNode leaf = nodes[childNodeIndex];
-
-            if (leaf.occupancy > 0.0) {
-                vec3 childMax = childMin + vec3(halfSize);
-                vec2 leafT = intersectAABB(rayOrg, invDir, childMin, childMax);
-                float hitT = max(leafT.x, gl_RayTminEXT);
-
-                if (hitT < gl_RayTmaxEXT) {
-                    vec3 hitPos = rayOrg + rayDir * hitT;
-                    uint faceID = getHitFace(hitPos, childMin, childMax);
-
-                    hitAttribs.materialId = leaf.materialId;
-                    reportIntersectionEXT(hitT, faceID);
-                }
+                reportIntersectionEXT(item.tEntry, faceID);
             }
             continue;
         }
 
-        // Push child onto stack
-        if (stackPtr < MAX_STACK) {
-            sNode[stackPtr] = childNodeIndex;
-            sMin[stackPtr] = childMin;
-            sSize[stackPtr] = halfSize;
-            sDepth[stackPtr] = depth + 1u;
-            sNextChild[stackPtr] = 0u;
-            stackPtr++;
+        // define 3 split planes at the node's center.
+        // calculate the t-value where the ray crosses these planes.
+        vec3 tPlane = (item.center - rayOrg) * invDir;
+
+        float t0 = item.tEntry;
+        float t1 = item.tExit;
+
+        // clamp plane intersections to the current node interval
+        bool xIn = (tPlane.x > t0) && (tPlane.x < t1);
+        bool yIn = (tPlane.y > t0) && (tPlane.y < t1);
+        bool zIn = (tPlane.z > t0) && (tPlane.z < t1);
+
+        struct ChildSpan { float tMin; float tMax; uint index; };
+        ChildSpan spans[4]; // Max 4 voxels pierced
+        uint spanCount = 0;
+
+        float nextHalf = item.halfSize * 0.5;
+
+        for(int i = 7; i >= 0; i--) {
+            // Apply ray-sign correction
+            uint childIdx = uint(i) ^ octantMask;
+
+            // Check if this child exists in the tree
+            if ((node.childMask & (1u << childIdx)) == 0u) continue;
+
+            // Calculate child bounds relative to center
+            vec3 childOff;
+            childOff.x = (childIdx & 1u) != 0u ? item.halfSize : -item.halfSize;
+            childOff.y = (childIdx & 2u) != 0u ? item.halfSize : -item.halfSize;
+            childOff.z = (childIdx & 4u) != 0u ? item.halfSize : -item.halfSize;
+
+            vec3 childCenter = item.center + childOff * 0.5;
+
+            vec3 tC0 = (childCenter - vec3(nextHalf) - rayOrg) * invDir;
+            vec3 tC1 = (childCenter + vec3(nextHalf) - rayOrg) * invDir;
+
+            vec3 tMinV = min(tC0, tC1);
+            vec3 tMaxV = max(tC0, tC1);
+
+            float cTmin = max(max(tMinV.x, tMinV.y), tMinV.z);
+            float cTmax = min(min(tMaxV.x, tMaxV.y), tMaxV.z);
+
+            // Clip against parent interval
+            cTmin = max(cTmin, item.tEntry);
+            cTmax = min(cTmax, item.tExit);
+
+            // If valid intersection
+            if (cTmin < cTmax) {
+                 if (stackPtr < MAX_STACK) {
+                    stack[stackPtr++] = StackItem(
+                        sub.nodeOffset + node.firstChild + childIdx,
+                        childCenter,
+                        nextHalf,
+                        cTmin,
+                        cTmax
+                    );
+                }
+            }
         }
     }
 }
