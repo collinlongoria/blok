@@ -42,10 +42,9 @@ Buffer Renderer::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, V
     aci.usage = memUsage;
 
     VmaAllocationInfo ainfo{};
-    if (vmaCreateBuffer(m_allocator, &bci, &aci, reinterpret_cast<VkBuffer*>(&out.handle),
-                        &out.alloc, &ainfo) != VK_SUCCESS) {
+    if (vmaCreateBuffer(m_allocator, &bci, &aci, reinterpret_cast<VkBuffer*>(&out.handle), &out.alloc, &ainfo) != VK_SUCCESS) {
         throw std::runtime_error("Vulkan API: vmaCreateBuffer failed");
-                        }
+    }
     if (mapped) out.mapped = ainfo.pMappedData;
     return out;
 }
@@ -104,10 +103,9 @@ Image Renderer::createImage(uint32_t w, uint32_t h, vk::Format fmt, vk::ImageUsa
     VmaAllocationCreateInfo aci{};
     aci.usage = memUsage;
 
-    if (vmaCreateImage(m_allocator, &ici, &aci,
-                       reinterpret_cast<VkImage*>(&out.handle), &out.alloc, nullptr) != VK_SUCCESS) {
+    if (vmaCreateImage(m_allocator, &ici, &aci, reinterpret_cast<VkImage*>(&out.handle), &out.alloc, nullptr) != VK_SUCCESS) {
         throw std::runtime_error("Vulkan API: vmaCreateImage failed");
-                       }
+    }
 
     vk::ImageViewCreateInfo vci{};
     vci.image = out.handle;
@@ -136,7 +134,7 @@ void Renderer::copyBufferToImage(vk::CommandBuffer cmd, Buffer &staging, Image &
 }
 
 void Renderer::generateMipmaps(vk::CommandBuffer cmd, Image &img) {
-        if (img.mipLevels <= 1) return;
+    if (img.mipLevels <= 1) return;
 
     int32_t mipWidth  = static_cast<int32_t>(img.width);
     int32_t mipHeight = static_cast<int32_t>(img.height);
@@ -242,9 +240,9 @@ void Renderer::uploadSvoBuffers(WorldSvoGpu &gpuWorld) {
         vmaDestroyBuffer(m_allocator, gpuWorld.svoBuffer.handle, gpuWorld.svoBuffer.alloc);
         gpuWorld.svoBuffer = {};
     }
-    if (gpuWorld.chunkBuffer.handle) {
-        vmaDestroyBuffer(m_allocator, gpuWorld.chunkBuffer.handle, gpuWorld.chunkBuffer.alloc);
-        gpuWorld.chunkBuffer = {};
+    if (gpuWorld.subChunkBuffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.subChunkBuffer.handle, gpuWorld.subChunkBuffer.alloc);
+        gpuWorld.subChunkBuffer = {};
     }
 
     // Node buffer
@@ -261,19 +259,19 @@ void Renderer::uploadSvoBuffers(WorldSvoGpu &gpuWorld) {
     uploadToBuffer(gpuWorld.globalNodes.data(), nodeBytes, gpuWorld.svoBuffer);
 
     // Chunk meta buffer
-    const vk::DeviceSize chunkBytes = sizeof(ChunkGpu) * gpuWorld.globalChunks.size();
+    const vk::DeviceSize subChunkBytes = sizeof(SubChunkGpu) * gpuWorld.globalSubChunks.size();
 
-    gpuWorld.chunkBuffer = createBuffer(
-    chunkBytes,
+    gpuWorld.subChunkBuffer = createBuffer(
+    subChunkBytes,
     vk::BufferUsageFlagBits::eStorageBuffer |
     vk::BufferUsageFlagBits::eTransferDst,
     0,
     VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
     );
 
-    uploadToBuffer(gpuWorld.globalChunks.data(), chunkBytes, gpuWorld.chunkBuffer);
+    uploadToBuffer(gpuWorld.globalSubChunks.data(), subChunkBytes, gpuWorld.subChunkBuffer);
 
-    std::cout << "SVO Uploaded: " << gpuWorld.globalNodes.size() << " nodes, " << gpuWorld.globalChunks.size() << " chunks.\n";
+    std::cout << "SVO Uploaded: " << gpuWorld.globalNodes.size() << " nodes, " << gpuWorld.globalSubChunks.size() << " chunks.\n";
 
     uploadMaterialBuffer(gpuWorld);
 }

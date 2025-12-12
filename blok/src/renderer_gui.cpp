@@ -195,9 +195,6 @@ void Renderer::renderOptionsPanel() {
                 ImGui::SliderFloat("White Point", &m_postProcess.settings.whitePoint, 1.0f, 20.0f);
 
                 const char* operators[] = {
-                    "Reinhard Extended",
-                    "ACES (Hill)",
-                    "AgX",
                     "Neutral (Soft Clip)",
                     "Khronos PBR Neutral"
                 };
