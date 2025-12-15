@@ -28,6 +28,8 @@
 #include "scene.hpp"
 #include "vox_loader.hpp"
 
+#include "unit_tests.hpp"
+
 #define VKR reinterpret_cast<VulkanRenderer*>(m_renderer.get())
 
 using namespace blok;
@@ -63,11 +65,14 @@ App::App(GraphicsApi backend)
 App::~App() {}
 
 void App::run() {
+    runAllTests();
+    /*
     init();
 
     update();
 
     shutdown();
+    */
 }
 
 void App::init() {
