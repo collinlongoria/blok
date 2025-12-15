@@ -32,7 +32,7 @@
 
 // Include headers
 #include "morton.hpp"
-#include "contree.hpp"
+#include "sv64.hpp"
 
 // ANSI color codes for pretty output
 namespace color {
@@ -317,7 +317,7 @@ namespace contree_tests {
 using namespace blok;
 
 bool test_construction() {
-    Contree tree(4, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(4, glm::vec3(0.0f), 1.0f);
 
     // Before compaction, tree uses buildNodes internally
     // After compact(), should have root node
@@ -333,36 +333,36 @@ bool test_calculateDepth() {
     // resolution 16 -> 2 levels (4^2 = 16)
     // resolution 64 -> 3 levels (4^3 = 64)
 
-    Contree t1(4, glm::vec3(0), 1.0f);
-    Contree t2(16, glm::vec3(0), 1.0f);
-    Contree t3(64, glm::vec3(0), 1.0f);
+    Sv64 t1(4, glm::vec3(0), 1.0f);
+    Sv64 t2(16, glm::vec3(0), 1.0f);
+    Sv64 t3(64, glm::vec3(0), 1.0f);
 
     return t1.maxDepth == 1 && t2.maxDepth == 2 && t3.maxDepth == 3;
 }
 
 bool test_insertVoxel_single() {
-    Contree tree(4, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(4, glm::vec3(0.0f), 1.0f);
 
     tree.insertVoxel(0, 0, 0, 1, 1.0f);
     tree.compact();
 
-    const ContreeNode* leaf = tree.findLeaf(0, 0, 0);
+    const Sv64Node* leaf = tree.findLeaf(0, 0, 0);
     return leaf != nullptr &&
            leaf->materialId == 1 &&
            leaf->occupancy == 1.0f;
 }
 
 bool test_insertVoxel_multiple() {
-    Contree tree(4, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(4, glm::vec3(0.0f), 1.0f);
 
     tree.insertVoxel(0, 0, 0, 1, 1.0f);
     tree.insertVoxel(1, 1, 1, 2, 0.5f);
     tree.insertVoxel(3, 3, 3, 3, 0.75f);
     tree.compact();
 
-    const ContreeNode* l1 = tree.findLeaf(0, 0, 0);
-    const ContreeNode* l2 = tree.findLeaf(1, 1, 1);
-    const ContreeNode* l3 = tree.findLeaf(3, 3, 3);
+    const Sv64Node* l1 = tree.findLeaf(0, 0, 0);
+    const Sv64Node* l2 = tree.findLeaf(1, 1, 1);
+    const Sv64Node* l3 = tree.findLeaf(3, 3, 3);
 
     return l1 && l1->materialId == 1 &&
            l2 && l2->materialId == 2 &&
@@ -370,42 +370,42 @@ bool test_insertVoxel_multiple() {
 }
 
 bool test_findLeaf_nonexistent() {
-    Contree tree(4, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(4, glm::vec3(0.0f), 1.0f);
 
     tree.insertVoxel(0, 0, 0, 1, 1.0f);
     tree.compact();
 
-    const ContreeNode* leaf = tree.findLeaf(1, 1, 1);
+    const Sv64Node* leaf = tree.findLeaf(1, 1, 1);
     return leaf == nullptr;
 }
 
 bool test_findLeaf_outOfBounds() {
-    Contree tree(4, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(4, glm::vec3(0.0f), 1.0f);
     tree.compact();
 
-    const ContreeNode* l1 = tree.findLeaf(100, 0, 0);
-    const ContreeNode* l2 = tree.findLeaf(0, 100, 0);
-    const ContreeNode* l3 = tree.findLeaf(0, 0, 100);
+    const Sv64Node* l1 = tree.findLeaf(100, 0, 0);
+    const Sv64Node* l2 = tree.findLeaf(0, 100, 0);
+    const Sv64Node* l3 = tree.findLeaf(0, 0, 100);
 
     return l1 == nullptr && l2 == nullptr && l3 == nullptr;
 }
 
 bool test_insertVoxel_zeroDensity() {
-    Contree tree(4, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(4, glm::vec3(0.0f), 1.0f);
 
     tree.insertVoxel(0, 0, 0, 1, 0.0f);  // Zero density
     tree.insertVoxel(1, 1, 1, 1, -0.5f); // Negative density
     tree.compact();
 
     // Neither should be findable (density <= 0 is rejected)
-    const ContreeNode* l1 = tree.findLeaf(0, 0, 0);
-    const ContreeNode* l2 = tree.findLeaf(1, 1, 1);
+    const Sv64Node* l1 = tree.findLeaf(0, 0, 0);
+    const Sv64Node* l2 = tree.findLeaf(1, 1, 1);
 
     return l1 == nullptr && l2 == nullptr;
 }
 
 bool test_insertVoxel_outOfBounds() {
-    Contree tree(4, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(4, glm::vec3(0.0f), 1.0f);
 
     // These should be silently ignored
     tree.insertVoxel(100, 0, 0, 1, 1.0f);
@@ -418,18 +418,18 @@ bool test_insertVoxel_outOfBounds() {
 }
 
 bool test_childMask_propagation() {
-    Contree tree(4, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(4, glm::vec3(0.0f), 1.0f);
 
     tree.insertVoxel(0, 0, 0, 1, 1.0f);
     tree.compact();
 
     // Root should have childMask set for the child containing (0,0,0)
-    const ContreeNode& root = tree.nodes[tree.rootIndex];
+    const Sv64Node& root = tree.nodes[tree.rootIndex];
     return root.childMask != 0;
 }
 
 bool test_clear() {
-    Contree tree(4, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(4, glm::vec3(0.0f), 1.0f);
 
     tree.insertVoxel(0, 0, 0, 1, 1.0f);
     tree.insertVoxel(1, 1, 1, 2, 1.0f);
@@ -446,7 +446,7 @@ bool test_clear() {
 }
 
 bool test_memoryUsage() {
-    Contree tree(4, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(4, glm::vec3(0.0f), 1.0f);
     tree.compact();
 
     size_t usage1 = tree.memoryUsage();
@@ -461,16 +461,16 @@ bool test_memoryUsage() {
 
 bool test_nodeStructSize() {
     // ContreeNode must be exactly 32 bytes (cache line friendly)
-    return sizeof(ContreeNode) == 32;
+    return sizeof(Sv64Node) == 32;
 }
 
 bool test_nodeAlignment() {
     // ContreeNode must be 32-byte aligned
-    return alignof(ContreeNode) == 32;
+    return alignof(Sv64Node) == 32;
 }
 
 bool test_largerResolution() {
-    Contree tree(16, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(16, glm::vec3(0.0f), 1.0f);
 
     // Insert at corners
     tree.insertVoxel(0, 0, 0, 1, 1.0f);
@@ -479,10 +479,10 @@ bool test_largerResolution() {
     tree.insertVoxel(15, 0, 15, 4, 1.0f);
     tree.compact();
 
-    const ContreeNode* l1 = tree.findLeaf(0, 0, 0);
-    const ContreeNode* l2 = tree.findLeaf(15, 15, 15);
-    const ContreeNode* l3 = tree.findLeaf(0, 15, 0);
-    const ContreeNode* l4 = tree.findLeaf(15, 0, 15);
+    const Sv64Node* l1 = tree.findLeaf(0, 0, 0);
+    const Sv64Node* l2 = tree.findLeaf(15, 15, 15);
+    const Sv64Node* l3 = tree.findLeaf(0, 15, 0);
+    const Sv64Node* l4 = tree.findLeaf(15, 0, 15);
 
     return l1 && l1->materialId == 1 &&
            l2 && l2->materialId == 2 &&
@@ -495,8 +495,8 @@ bool test_buildFromDense_empty() {
     std::vector<float> density(res * res * res, 0.0f);
     std::vector<uint32_t> materials(res * res * res, 0);
 
-    Contree tree(1, glm::vec3(0), 1.0f);
-    buildContreeFromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
+    Sv64 tree(1, glm::vec3(0), 1.0f);
+    buildSv64FromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
 
     // Should only have root with no children
     return tree.nodeCount() == 1;
@@ -507,14 +507,14 @@ bool test_buildFromDense_full() {
     std::vector<float> density(res * res * res, 1.0f);
     std::vector<uint32_t> materials(res * res * res, 42);
 
-    Contree tree(1, glm::vec3(0), 1.0f);
-    buildContreeFromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
+    Sv64 tree(1, glm::vec3(0), 1.0f);
+    buildSv64FromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
 
     // All voxels should be findable
     for (uint32_t z = 0; z < res; z++) {
         for (uint32_t y = 0; y < res; y++) {
             for (uint32_t x = 0; x < res; x++) {
-                const ContreeNode* leaf = tree.findLeaf(x, y, z);
+                const Sv64Node* leaf = tree.findLeaf(x, y, z);
                 if (!leaf || leaf->materialId != 42) return false;
             }
         }
@@ -534,33 +534,33 @@ bool test_buildFromDense_sparse() {
         materials[idx] = i + 1;
     }
 
-    Contree tree(1, glm::vec3(0), 1.0f);
-    buildContreeFromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
+    Sv64 tree(1, glm::vec3(0), 1.0f);
+    buildSv64FromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
 
     // Check diagonal exists
     for (uint32_t i = 0; i < res; i++) {
-        const ContreeNode* leaf = tree.findLeaf(i, i, i);
+        const Sv64Node* leaf = tree.findLeaf(i, i, i);
         if (!leaf || leaf->materialId != i + 1) return false;
     }
 
     // Check non-diagonal is empty
-    const ContreeNode* empty = tree.findLeaf(0, 1, 0);
+    const Sv64Node* empty = tree.findLeaf(0, 1, 0);
     return empty == nullptr;
 }
 
 bool test_overwriteVoxel() {
-    Contree tree(4, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(4, glm::vec3(0.0f), 1.0f);
 
     tree.insertVoxel(1, 1, 1, 10, 0.5f);
     tree.insertVoxel(1, 1, 1, 20, 0.9f);
     tree.compact();
 
-    const ContreeNode* leaf = tree.findLeaf(1, 1, 1);
+    const Sv64Node* leaf = tree.findLeaf(1, 1, 1);
     return leaf && leaf->materialId == 20 && std::abs(leaf->occupancy - 0.9f) < 0.001f;
 }
 
 bool test_stressInsert() {
-    Contree tree(64, glm::vec3(0.0f), 1.0f);
+    Sv64 tree(64, glm::vec3(0.0f), 1.0f);
 
     // Insert 1000 random voxels
     std::mt19937 rng(12345);
@@ -583,7 +583,7 @@ bool test_stressInsert() {
     // Verify last 100 insertions are findable
     for (size_t i = inserted.size() - 100; i < inserted.size(); i++) {
         auto [x, y, z, mat] = inserted[i];
-        const ContreeNode* leaf = tree.findLeaf(x, y, z);
+        const Sv64Node* leaf = tree.findLeaf(x, y, z);
         if (!leaf) return false;
     }
 
@@ -652,7 +652,7 @@ void runAllBenchmarks() {
 
     std::cout << "\n" << color::CYAN << "Contree Operations (resolution=64):" << color::RESET << "\n";
 
-    Contree tree64(64, glm::vec3(0), 1.0f);
+    Sv64 tree64(64, glm::vec3(0), 1.0f);
 
     runBenchmark("insertVoxel (empty tree)", 10000, [&tree64]() {
         tree64.clear();
@@ -668,12 +668,12 @@ void runAllBenchmarks() {
     tree64.compact();
 
     runBenchmark("findLeaf (existing)", 1000000, [&tree64]() {
-        volatile const ContreeNode* result = tree64.findLeaf(0, 0, 0);
+        volatile const Sv64Node* result = tree64.findLeaf(0, 0, 0);
         (void)result;
     });
 
     runBenchmark("findLeaf (non-existing)", 1000000, [&tree64]() {
-        volatile const ContreeNode* result = tree64.findLeaf(63, 63, 62);
+        volatile const Sv64Node* result = tree64.findLeaf(63, 63, 62);
         (void)result;
     });
 
@@ -683,16 +683,16 @@ void runAllBenchmarks() {
         const uint32_t res = 16;
         std::vector<float> density(res * res * res, 0.5f);
         std::vector<uint32_t> materials(res * res * res, 1);
-        Contree tree(1, glm::vec3(0), 1.0f);
-        buildContreeFromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
+        Sv64 tree(1, glm::vec3(0), 1.0f);
+        buildSv64FromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
     });
 
     runBenchmark("buildFromDense 32^3", 20, []() {
         const uint32_t res = 32;
         std::vector<float> density(res * res * res, 0.5f);
         std::vector<uint32_t> materials(res * res * res, 1);
-        Contree tree(1, glm::vec3(0), 1.0f);
-        buildContreeFromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
+        Sv64 tree(1, glm::vec3(0), 1.0f);
+        buildSv64FromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
     });
 
     std::cout << "\n";
@@ -704,7 +704,7 @@ void runAllBenchmarks() {
 //                          STATISTICS & INFO
 // ============================================================================
 
-void printTreeStats(const blok::Contree& tree, const std::string& description) {
+void printTreeStats(const blok::Sv64& tree, const std::string& description) {
     std::cout << color::CYAN << "  " << description << ":" << color::RESET << "\n";
     std::cout << "    Resolution:    " << tree.resolution << "^3 voxels\n";
     std::cout << "    Max Depth:     " << tree.maxDepth << " levels\n";
@@ -728,7 +728,7 @@ void printTreeInfo() {
 
     // Empty tree
     {
-        Contree tree(64, glm::vec3(0), 1.0f);
+        Sv64 tree(64, glm::vec3(0), 1.0f);
         tree.compact();
         printTreeStats(tree, "Empty 64^3 tree");
     }
@@ -738,7 +738,7 @@ void printTreeInfo() {
     // Sparse tree (1% fill)
     {
         const uint32_t res = 64;
-        Contree tree(res, glm::vec3(0), 1.0f);
+        Sv64 tree(res, glm::vec3(0), 1.0f);
 
         std::mt19937 rng(42);
         std::uniform_int_distribution<uint32_t> dist(0, res - 1);
@@ -760,8 +760,8 @@ void printTreeInfo() {
         std::vector<float> density(res * res * res, 1.0f);
         std::vector<uint32_t> materials(res * res * res, 1);
 
-        Contree tree(1, glm::vec3(0), 1.0f);
-        buildContreeFromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
+        Sv64 tree(1, glm::vec3(0), 1.0f);
+        buildSv64FromDense(density.data(), materials.data(), res, glm::vec3(0), 1.0f, tree);
 
         printTreeStats(tree, "Dense 16^3 tree (100% fill)");
     }

@@ -1,12 +1,12 @@
 /*
-* File: contree.hpp
+* File: SV64.hpp
 * Project: blok
 * Author: Collin
 * Created on: 12/13/2025
 */
 
-#ifndef CONTREE_HPP
-#define CONTREE_HPP
+#ifndef SV64_HPP
+#define SV64_HPP
 
 #include <cstdint>
 #include <vector>
@@ -15,7 +15,7 @@
 
 namespace blok {
 
-struct alignas(32) ContreeNode {
+struct alignas(32) Sv64Node {
     uint64_t childMask;      // Bitmask of which children exist (0-63)
     uint32_t firstChild;     // Index to first child in compact array
     uint32_t materialId;
@@ -24,11 +24,11 @@ struct alignas(32) ContreeNode {
     uint32_t childCount;     // Number of children (popcount of childMask)
     uint32_t reserved;
 };
-static_assert(sizeof(ContreeNode) == 32, "ContreeNode MUST be 32 bytes");
+static_assert(sizeof(Sv64Node) == 32, "ContreeNode MUST be 32 bytes");
 
-class Contree {
+class Sv64 {
 public:
-    std::vector<ContreeNode> nodes;
+    std::vector<Sv64Node> nodes;
 
     uint32_t  rootIndex;
     uint32_t  maxDepth;    // Number of 64-tree levels
@@ -36,19 +36,19 @@ public:
     float     voxelSize;   // World units per leaf voxel
     uint32_t  resolution;  // Voxels per axis <- this MUST be a power of 4
 
-    Contree(uint32_t resolution, const glm::vec3& origin, float voxelSize);
+    Sv64(uint32_t resolution, const glm::vec3& origin, float voxelSize);
     void clear();
 
     void insertVoxel(uint32_t x, uint32_t y, uint32_t z, uint32_t materialId, float density = 1.0f);
 
     [[nodiscard]]
-    const ContreeNode* findLeaf(uint32_t x, uint32_t y, uint32_t z) const;
+    const Sv64Node* findLeaf(uint32_t x, uint32_t y, uint32_t z) const;
 
     [[nodiscard]]
     size_t nodeCount() const { return nodes.size(); }
 
     [[nodiscard]]
-    size_t memoryUsage() const { return nodes.size() * sizeof(ContreeNode); }
+    size_t memoryUsage() const { return nodes.size() * sizeof(Sv64Node); }
 
     // Compacts the tree after batch insertions for optimal GPU upload
     // Call this after all insertions are complete
@@ -79,20 +79,20 @@ private:
     static uint32_t popcount64(uint64_t x);
 };
 
-void buildContreeFromDense(
+void buildSv64FromDense(
     const float* density,
     const uint32_t* materials,
     uint32_t resolution,
     const glm::vec3& origin,
     float voxelSize,
-    Contree& contree
+    Sv64& sv64
 );
 
-// Utility for GPU-side traversal (same logic as Contree::childOffset)
-inline uint32_t contreeChildOffset(uint64_t childMask, uint32_t childIdx) {
-    return Contree::childOffset(childMask, childIdx);
+// Utility for GPU-side traversal (same logic as childOffset)
+inline uint32_t sv64ChildOffset(uint64_t childMask, uint32_t childIdx) {
+    return Sv64::childOffset(childMask, childIdx);
 }
 
 }
 
-#endif //CONTREE_HPP
+#endif //SV64_HPP
