@@ -72,7 +72,7 @@ void App::run() {
     update();
 
     shutdown();
-    
+
 }
 
 void App::init() {

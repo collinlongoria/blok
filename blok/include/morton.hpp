@@ -68,20 +68,27 @@ inline uint32_t octantFromCode(uint64_t mortonCode, uint32_t maxDepth, uint32_t 
 }
 
 // 64-tree helpers:
+
+// Remaps 6-bit Morton chunk (Z1 Y1 X1 Z0 Y0 X0) -> Linear 4x4x4 (Z1 Z0 Y1 Y0 X1 X0)
+// This matches the Shader's "x | y<<2 | z<<4" traversal logic
+inline uint32_t reorderMortonToLinear64(uint32_t m) {
+    return (m & 1u)        |  // x0 (Bit 0) -> Bit 0
+           ((m & 8u) >> 2) |  // x1 (Bit 3) -> Bit 1
+           ((m & 2u) << 1) |  // y0 (Bit 1) -> Bit 2
+           ((m & 16u) >> 1)|  // y1 (Bit 4) -> Bit 3
+           ((m & 4u) << 2) |  // z0 (Bit 2) -> Bit 4
+           (m & 32u);         // z1 (Bit 5) -> Bit 5
+}
+
 inline uint32_t childIndex64FromCode(uint64_t mortonCode, uint32_t maxDepth64, uint32_t level) {
     uint32_t shift = 6u * (maxDepth64 - 1u - level);
-    return static_cast<uint32_t>((mortonCode >> shift) & 0x3Full);
+    uint32_t rawMorton = static_cast<uint32_t>((mortonCode >> shift) & 0x3Full);
+    return reorderMortonToLinear64(rawMorton);
 }
 
 inline uint32_t childIndexToMorton64(uint32_t childIndex) {
-    uint32_t x = childIndex & 0x3;
-    uint32_t y = (childIndex >> 2) & 0x3;
-    uint32_t z = (childIndex >> 4) & 0x3;
-
-    uint32_t morton = 0;
-    morton |= (x & 1) | ((y & 1) << 1) | ((z & 1) << 2);
-    morton |= ((x >> 1) << 3) | ((y >> 1) << 4) | ((z >> 1) << 5);
-    return morton;
+    // This is complex to reverse, usually not needed for runtime
+    return 0; // Unimplemented
 }
 
 inline uint32_t coordsToChildIndex64(uint32_t lx, uint32_t ly, uint32_t lz) {

@@ -2,35 +2,40 @@
 * File: intersect.rint
 * Project: blok
 * Author: Collin Longoria
-* Created on: 12/1/2025
+* Created on: 12/16/2025
 */
 
 #version 460
 #extension GL_EXT_ray_tracing : require
+#extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
-struct SvoNode {
-    uint childMask;
-    uint firstChild;
-    uint materialId;
-    float occupancy;
+struct Sv64Node {
+    uint64_t childMask;      // 64-bit mask
+    uint     firstChild;     // Index into global array
+    uint     materialId;
+    float    occupancy;
+    uint     mortonPrefix;
+    uint     childCount;
+    uint     reserved;
 };
 
 struct SubChunkGpu {
-    uint nodeOffset;     // Offset into global node array
-    uint rootNodeIndex;  // Sub-chunk's root node
-    uint nodeCount;      // Total nodes in parent chunk
-    uint startDepth;     // Depth at which sub-chunk starts
+    uint nodeOffset;        // Offset into global node array
+    uint rootNodeIndex;     // Sub-chunk's root node
+    uint nodeCount;         // Total nodes in parent chunk
+    uint startDepth;        // Depth at which sub-chunk starts
     vec3 worldMin;
     float subChunkSize;
     vec3 worldMax;
     float pad0;
 };
 
-layout(binding = 1, set = 0) readonly buffer SvoBuffer {
-    SvoNode nodes[];
+layout(binding = 1, set = 0, scalar) readonly buffer Sv64Buffer {
+    Sv64Node nodes[];
 };
 
-layout(binding = 2, set = 0) readonly buffer SubChunkBuffer {
+layout(binding = 2, set = 0, scalar) readonly buffer SubChunkBuffer {
     SubChunkGpu subChunks[];
 };
 
@@ -39,12 +44,20 @@ struct HitAttribs {
 };
 hitAttributeEXT HitAttribs hitAttribs;
 
-const uint MAX_STACK = 24u;
-const uint MAX_ITER  = 256u;
-const float EPSILON  = 1e-6;
+const uint MAX_STACK = 32u;
+const uint MAX_ITER  = 512u;
+const float EPSILON  = 1e-5;
 
-// Returns vec2(tNear, tFar); If tNear > tFar, missed
-vec2 intersectAABB_Root(vec3 origin, vec3 invDir, vec3 boxMin, vec3 boxMax) {
+uint popcount64(uint64_t v) {
+    return bitCount(uint(v)) + bitCount(uint(v >> 32));
+}
+
+uint getChildOffset(uint64_t mask, uint childIdx) {
+    uint64_t lowerMask = mask & ((1ul << childIdx) - 1ul);
+    return popcount64(lowerMask);
+}
+
+vec2 intersectAABB(vec3 origin, vec3 invDir, vec3 boxMin, vec3 boxMax) {
     vec3 t0 = (boxMin - origin) * invDir;
     vec3 t1 = (boxMax - origin) * invDir;
     vec3 tmin = min(t0, t1);
@@ -54,152 +67,131 @@ vec2 intersectAABB_Root(vec3 origin, vec3 invDir, vec3 boxMin, vec3 boxMax) {
     return vec2(tNear, tFar);
 }
 
-// Face normal helper for reporting intersection
 uint getHitFace(vec3 hitPos, vec3 center) {
     vec3 diff = hitPos - center;
     vec3 absDiff = abs(diff);
-
-    // Find dominant axis
     if (absDiff.x >= absDiff.y && absDiff.x >= absDiff.z)
         return diff.x > 0.0 ? 0u : 1u; // +X, -X
     if (absDiff.y >= absDiff.z)
         return diff.y > 0.0 ? 2u : 3u; // +Y, -Y
-    return diff.z > 0.0 ? 4u : 5u;     // +Z, -Z
+    return diff.z > 0.0 ? 4u : 5u; // +Z, -Z
 }
 
+struct StackItem {
+    uint nodeIndex;
+    vec3 minPos;
+    float size; // edge length
+};
+
 void main() {
-    // Setup Ray & SubChunk
     SubChunkGpu sub = subChunks[gl_PrimitiveID];
 
     vec3 rayOrg = gl_WorldRayOriginEXT;
     vec3 rayDir = gl_WorldRayDirectionEXT;
 
-    // Precompute inverse direction for AABB/Plane tests
-    // Using a safe division to handle axis-aligned rays
     vec3 invDir = 1.0 / mix(rayDir, vec3(1e-6), lessThan(abs(rayDir), vec3(1e-6)));
 
-    // Intersect SubChunk Root
-    vec2 rootT = intersectAABB_Root(rayOrg, invDir, sub.worldMin, sub.worldMax);
+    ivec3 stepSign = ivec3(sign(rayDir));
+    vec3  posStep  = vec3(stepSign); // +1.0 or -1.0
 
-    // Check against current ray T constraints
+    vec2 rootT = intersectAABB(rayOrg, invDir, sub.worldMin, sub.worldMax);
+
     float tMin = max(rootT.x, gl_RayTminEXT);
     float tMax = min(rootT.y, gl_RayTmaxEXT);
 
     if (tMin > tMax) return;
 
-    // Prepare Traversal State
-    // "octantMask" XORs the child index to flip the traversal order based on ray direction
-    // If ray.x is positive, visit left children (0) before right (1)
-    // If ray.x is negative, visit right (1) before left (0)
-    uint octantMask = 0u;
-    if (rayDir.x < 0.0) octantMask |= 1u;
-    if (rayDir.y < 0.0) octantMask |= 2u;
-    if (rayDir.z < 0.0) octantMask |= 4u;
-
-    // Stack Data
-    struct StackItem {
-        uint  nodeIndex;
-        vec3  center;
-        float halfSize; // size * 0.5
-        float tEntry;   // t-value where ray enters this node
-        float tExit;    // t-value where ray exits this node
-    };
-
     StackItem stack[MAX_STACK];
     uint stackPtr = 0u;
 
-    // Push Root Node
-    vec3 rootSize = sub.worldMax - sub.worldMin;
     stack[stackPtr++] = StackItem(
         sub.nodeOffset + sub.rootNodeIndex,
-        sub.worldMin + rootSize * 0.5,
-        rootSize.x * 0.5,
-        tMin,
-        tMax
+        sub.worldMin,
+        sub.subChunkSize
     );
 
-    // Parametric Loop
     uint iter = 0u;
+
     while (stackPtr > 0u && iter++ < MAX_ITER) {
-        // Pop
         StackItem item = stack[--stackPtr];
 
-        // If the node is now further than a newly found hit, drop it
-        if (item.tEntry >= gl_RayTmaxEXT) continue;
+        vec3 nodeMax = item.minPos + vec3(item.size);
+        vec2 nodeT = intersectAABB(rayOrg, invDir, item.minPos, nodeMax);
 
-        // Fetch Node Data
-        // Safety check for bounds
-        if (item.nodeIndex >= sub.nodeOffset + sub.nodeCount) continue;
-        SvoNode node = nodes[item.nodeIndex];
+        float tEnter = max(nodeT.x, tMin);
+        float tExit  = min(nodeT.y, tMax);
 
-        // LEAF CHECK
-        if (node.childMask == 0u) {
+        if (tEnter > tExit) continue;
+
+        Sv64Node node = nodes[item.nodeIndex];
+
+        if (node.childMask == 0ul) {
             if (node.occupancy > 0.0) {
-                uint faceID = getHitFace(rayOrg + rayDir * item.tEntry, item.center);
-                hitAttribs.materialId = node.materialId;
+                vec3 center = item.minPos + vec3(item.size * 0.5);
+                uint faceID = getHitFace(rayOrg + rayDir * tEnter, center);
 
-                reportIntersectionEXT(item.tEntry, faceID);
+                hitAttribs.materialId = node.materialId;
+                reportIntersectionEXT(tEnter, faceID);
             }
             continue;
         }
 
-        // define 3 split planes at the node's center.
-        // calculate the t-value where the ray crosses these planes.
-        vec3 tPlane = (item.center - rayOrg) * invDir;
+        float voxelSize = item.size * 0.25; // size / 4
 
-        float t0 = item.tEntry;
-        float t1 = item.tExit;
+        vec3 entryPos = rayOrg + rayDir * (tEnter + EPSILON);
+        vec3 localPos = (entryPos - item.minPos) / voxelSize;
 
-        // clamp plane intersections to the current node interval
-        bool xIn = (tPlane.x > t0) && (tPlane.x < t1);
-        bool yIn = (tPlane.y > t0) && (tPlane.y < t1);
-        bool zIn = (tPlane.z > t0) && (tPlane.z < t1);
+        ivec3 gridPos = clamp(ivec3(floor(localPos)), ivec3(0), ivec3(3));
 
-        struct ChildSpan { float tMin; float tMax; uint index; };
-        ChildSpan spans[4]; // Max 4 voxels pierced
-        uint spanCount = 0;
+        vec3 tDelta = (vec3(voxelSize) * posStep) * invDir; // abs() logic simplified
 
-        float nextHalf = item.halfSize * 0.5;
+        vec3 nextBoundary = (vec3(gridPos) + max(vec3(0), posStep)) * voxelSize + item.minPos;
+        vec3 tNext = (nextBoundary - rayOrg) * invDir;
 
-        for(int i = 7; i >= 0; i--) {
-            // Apply ray-sign correction
-            uint childIdx = uint(i) ^ octantMask;
+        struct ChildHit { uint index; vec3 pos; };
+        ChildHit childHits[12]; // Max path length in 4x4x4 is 4+4+4=12
+        uint hitCount = 0u;
 
-            // Check if this child exists in the tree
-            if ((node.childMask & (1u << childIdx)) == 0u) continue;
+        for (int step = 0; step < 16; ++step) {
+            uint childIdx = uint(gridPos.x) | (uint(gridPos.y) << 2) | (uint(gridPos.z) << 4);
 
-            // Calculate child bounds relative to center
-            vec3 childOff;
-            childOff.x = (childIdx & 1u) != 0u ? item.halfSize : -item.halfSize;
-            childOff.y = (childIdx & 2u) != 0u ? item.halfSize : -item.halfSize;
-            childOff.z = (childIdx & 4u) != 0u ? item.halfSize : -item.halfSize;
+            if ((node.childMask & (1ul << childIdx)) != 0ul) {
+                uint offset = getChildOffset(node.childMask, childIdx);
+                uint childNodeIndex = node.firstChild + offset;
 
-            vec3 childCenter = item.center + childOff * 0.5;
+                vec3 childPos = item.minPos + vec3(gridPos) * voxelSize;
 
-            vec3 tC0 = (childCenter - vec3(nextHalf) - rayOrg) * invDir;
-            vec3 tC1 = (childCenter + vec3(nextHalf) - rayOrg) * invDir;
-
-            vec3 tMinV = min(tC0, tC1);
-            vec3 tMaxV = max(tC0, tC1);
-
-            float cTmin = max(max(tMinV.x, tMinV.y), tMinV.z);
-            float cTmax = min(min(tMaxV.x, tMaxV.y), tMaxV.z);
-
-            // Clip against parent interval
-            cTmin = max(cTmin, item.tEntry);
-            cTmax = min(cTmax, item.tExit);
-
-            // If valid intersection
-            if (cTmin < cTmax) {
-                 if (stackPtr < MAX_STACK) {
-                    stack[stackPtr++] = StackItem(
-                        sub.nodeOffset + node.firstChild + childIdx,
-                        childCenter,
-                        nextHalf,
-                        cTmin,
-                        cTmax
-                    );
+                if (hitCount < 12) {
+                    childHits[hitCount++] = ChildHit(childNodeIndex, childPos);
                 }
+            }
+
+            float tNextMin = min(min(tNext.x, tNext.y), tNext.z);
+
+            if (tNextMin > tExit) break;
+
+            if (tNext.x <= tNext.y && tNext.x <= tNext.z) {
+                tNext.x += tDelta.x;
+                gridPos.x += stepSign.x;
+                if (gridPos.x < 0 || gridPos.x > 3) break;
+            } else if (tNext.y <= tNext.z) {
+                tNext.y += tDelta.y;
+                gridPos.y += stepSign.y;
+                if (gridPos.y < 0 || gridPos.y > 3) break;
+            } else {
+                tNext.z += tDelta.z;
+                gridPos.z += stepSign.z;
+                if (gridPos.z < 0 || gridPos.z > 3) break;
+            }
+        }
+
+        for (int i = int(hitCount) - 1; i >= 0; --i) {
+            if (stackPtr < MAX_STACK) {
+                stack[stackPtr++] = StackItem(
+                    childHits[i].index,
+                    childHits[i].pos,
+                    voxelSize
+                );
             }
         }
     }
