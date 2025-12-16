@@ -12,7 +12,7 @@
 
 namespace blok {
 
-vk::AccelerationStructureKHR Renderer::buildChunkBlas(WorldSvoGpu &gpuWorld) {
+vk::AccelerationStructureKHR Renderer::buildChunkBlas(WorldSv64Gpu &gpuWorld) {
     // count primitives
     uint32_t count = gpuWorld.globalSubChunks.size();
     if (count == 0) return {};
@@ -134,7 +134,7 @@ vk::AccelerationStructureKHR Renderer::buildChunkBlas(WorldSvoGpu &gpuWorld) {
     return gpuWorld.blas.handle;
 }
 
-vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
+vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSv64Gpu &gpuWorld) {
     uint32_t subChunkCount = gpuWorld.globalSubChunks.size();
     if (subChunkCount == 0)
         return {};
@@ -250,6 +250,8 @@ vk::AccelerationStructureKHR Renderer::buildChunkTlas(WorldSvoGpu &gpuWorld) {
 
     vmaDestroyBuffer(m_allocator, scratch.handle, scratch.alloc);
 
+    std::cout << "TLAS built with 1 instance containing " << subChunkCount << " sub-chunks\n";
+
     return gpuWorld.tlas.handle;
 }
 
@@ -257,87 +259,31 @@ RayTracing::RayTracing(Renderer* r_)
     :r(r_) {}
 
 void RayTracing::createDescriptorSetLayout() {
-    // 0 = TLAS
-    vk::DescriptorSetLayoutBinding tlas{};
-    tlas.binding = 0;
-    tlas.descriptorCount = 1;
-    tlas.descriptorType = vk::DescriptorType::eAccelerationStructureKHR;
-    tlas.stageFlags =
-        vk::ShaderStageFlagBits::eRaygenKHR |
-        vk::ShaderStageFlagBits::eClosestHitKHR |
-        vk::ShaderStageFlagBits::eIntersectionKHR;
-
-    // 1 = SVO
-    vk::DescriptorSetLayoutBinding svoBuf{};
-    svoBuf.binding = 1;
-    svoBuf.descriptorCount = 1;
-    svoBuf.descriptorType = vk::DescriptorType::eStorageBuffer;
-    svoBuf.stageFlags =
-        vk::ShaderStageFlagBits::eRaygenKHR |
-        vk::ShaderStageFlagBits::eClosestHitKHR |
-        vk::ShaderStageFlagBits::eIntersectionKHR;
-
-    // 2 = Chunk metadata
-    vk::DescriptorSetLayoutBinding chunkBuf{};
-    chunkBuf.binding = 2;
-    chunkBuf.descriptorCount = 1;
-    chunkBuf.descriptorType = vk::DescriptorType::eStorageBuffer;
-    chunkBuf.stageFlags = svoBuf.stageFlags;
-
-    // 3 = Frame UBO
-    vk::DescriptorSetLayoutBinding frameUBO{};
-    frameUBO.binding = 3;
-    frameUBO.descriptorCount = 1;
-    frameUBO.descriptorType = vk::DescriptorType::eUniformBuffer;
-    frameUBO.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
-
-    // 4 = Output Image
-    vk::DescriptorSetLayoutBinding outImg{};
-    outImg.binding = 4;
-    outImg.descriptorCount = 1;
-    outImg.descriptorType = vk::DescriptorType::eStorageImage;
-    outImg.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
-
-    // 5 = World Position Output
-    vk::DescriptorSetLayoutBinding wp{};
-    wp.binding = 5;
-    wp.descriptorCount = 1;
-    wp.descriptorType = vk::DescriptorType::eStorageImage;
-    wp.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
-
-    // 6 = Normal + Roughness Output
-    vk::DescriptorSetLayoutBinding nr{};
-    nr.binding = 6;
-    nr.descriptorCount = 1;
-    nr.descriptorType = vk::DescriptorType::eStorageImage;
-    nr.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
-
-    // 7 = Albedo + Metallic Output
-    vk::DescriptorSetLayoutBinding am{};
-    am.binding = 7;
-    am.descriptorCount = 1;
-    am.descriptorType = vk::DescriptorType::eStorageImage;
-    am.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
-
-    // 8 = Motion Vectors
-    vk::DescriptorSetLayoutBinding mv{};
-    mv.binding = 8;
-    mv.descriptorCount = 1;
-    mv.descriptorType = vk::DescriptorType::eStorageImage;
-    mv.stageFlags = vk::ShaderStageFlagBits::eRaygenKHR;
-
-    // 9 = Material Buffer
-    vk::DescriptorSetLayoutBinding mb{};
-    mb.binding = 9;
-    mb.descriptorCount = 1;
-    mb.descriptorType = vk::DescriptorType::eStorageBuffer;
-    mb.stageFlags = vk::ShaderStageFlagBits::eClosestHitKHR;
-
-    std::array<vk::DescriptorSetLayoutBinding, 10> bindings =
-    { tlas, svoBuf, chunkBuf, frameUBO, outImg, wp, nr, am, mv, mb };
+    std::vector<vk::DescriptorSetLayoutBinding> bindings = {
+        // binding 0: TLAS
+        {0, vk::DescriptorType::eAccelerationStructureKHR, 1, vk::ShaderStageFlagBits::eRaygenKHR | vk::ShaderStageFlagBits::eClosestHitKHR | vk::ShaderStageFlagBits::eIntersectionKHR},
+        // binding 1: SV64 nodes
+        {1, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eIntersectionKHR | vk::ShaderStageFlagBits::eClosestHitKHR},
+        // binding 2: sub-chunks
+        {2, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eIntersectionKHR | vk::ShaderStageFlagBits::eClosestHitKHR},
+        // binding 3: frame UBO
+        {3, vk::DescriptorType::eUniformBuffer, 1, vk::ShaderStageFlagBits::eRaygenKHR | vk::ShaderStageFlagBits::eClosestHitKHR | vk::ShaderStageFlagBits::eMissKHR},
+        // binding 4: output image
+        {4, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eRaygenKHR},
+        // binding 5: world position
+        {5, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eRaygenKHR},
+        // binding 6: normal/roughness
+        {6, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eRaygenKHR},
+        // binding 7: albedo/metallic
+        {7, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eRaygenKHR},
+        // binding 8: motion vectors
+        {8, vk::DescriptorType::eStorageImage, 1, vk::ShaderStageFlagBits::eRaygenKHR},
+        // binding 9: materials
+        {9, vk::DescriptorType::eStorageBuffer, 1, vk::ShaderStageFlagBits::eClosestHitKHR},
+    };
 
     vk::DescriptorSetLayoutCreateInfo ci{};
-    ci.bindingCount = static_cast<uint32_t>(bindings.size());
+    ci.bindingCount = bindings.size();
     ci.pBindings = bindings.data();
 
     rtSetLayout = r->m_device.createDescriptorSetLayout(ci);
@@ -349,15 +295,13 @@ void RayTracing::allocateDescriptorSet() {
     }
 }
 
-void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu, uint32_t frameIndex)
-{
-    auto& gbuffer = r->m_denoiser.gbuffer;
+void RayTracing::updateDescriptorSet(const WorldSv64Gpu& world, uint32_t frameIndex) {
     vk::DescriptorSet currentSet = rtSets[frameIndex];
 
-    // Acceleration structure
+    // TLAS
     vk::WriteDescriptorSetAccelerationStructureKHR asInfo{};
     asInfo.accelerationStructureCount = 1;
-    asInfo.pAccelerationStructures = &gpu.tlas.handle;
+    asInfo.pAccelerationStructures = &world.tlas.handle;
 
     vk::WriteDescriptorSet asWrite{};
     asWrite.dstSet = currentSet;
@@ -366,104 +310,106 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu, uint32_t frameIndex
     asWrite.descriptorCount = 1;
     asWrite.pNext = &asInfo;
 
-    // SVO SSBO
-    vk::DescriptorBufferInfo svoInfo{
-        gpu.svoBuffer.handle,
-        0,
-        VK_WHOLE_SIZE
-    };
+    // SV64 buffer
+    vk::DescriptorBufferInfo sv64Info{};
+    sv64Info.buffer = world.sv64Buffer.handle;
+    sv64Info.offset = 0;
+    sv64Info.range = VK_WHOLE_SIZE;
 
-    vk::WriteDescriptorSet svoWrite{};
-    svoWrite.dstSet = currentSet;
-    svoWrite.dstBinding = 1;
-    svoWrite.descriptorType = vk::DescriptorType::eStorageBuffer;
-    svoWrite.setBufferInfo(svoInfo);
+    vk::WriteDescriptorSet sv64Write{};
+    sv64Write.dstSet = currentSet;
+    sv64Write.dstBinding = 1;
+    sv64Write.descriptorType = vk::DescriptorType::eStorageBuffer;
+    sv64Write.descriptorCount = 1;
+    sv64Write.pBufferInfo = &sv64Info;
 
-    // Chunk SSBO
-    vk::DescriptorBufferInfo chunkInfo{
-        gpu.subChunkBuffer.handle,
-        0, VK_WHOLE_SIZE
-    };
+    // Chunk buffer
+    vk::DescriptorBufferInfo chunkInfo{};
+    chunkInfo.buffer = world.subChunkBuffer.handle;
+    chunkInfo.offset = 0;
+    chunkInfo.range = VK_WHOLE_SIZE;
 
     vk::WriteDescriptorSet chunkWrite{};
     chunkWrite.dstSet = currentSet;
     chunkWrite.dstBinding = 2;
     chunkWrite.descriptorType = vk::DescriptorType::eStorageBuffer;
-    chunkWrite.setBufferInfo(chunkInfo);
+    chunkWrite.descriptorCount = 1;
+    chunkWrite.pBufferInfo = &chunkInfo;
 
     // Frame UBO
-    auto& fr = r->m_frames[r->m_frameIndex];
-    vk::DescriptorBufferInfo frameInfo{
-        fr.frameUBO.handle,
-        0,
-        VK_WHOLE_SIZE
-    };
+    vk::DescriptorBufferInfo frameInfo{};
+    frameInfo.buffer = r->m_frames[frameIndex].frameUBO.handle;
+    frameInfo.offset = 0;
+    frameInfo.range = sizeof(FrameUBO);
 
     vk::WriteDescriptorSet frameWrite{};
     frameWrite.dstSet = currentSet;
     frameWrite.dstBinding = 3;
     frameWrite.descriptorType = vk::DescriptorType::eUniformBuffer;
-    frameWrite.setBufferInfo(frameInfo);
+    frameWrite.descriptorCount = 1;
+    frameWrite.pBufferInfo = &frameInfo;
 
-    // Output Image
-    vk::DescriptorImageInfo imgInfo{
-        nullptr,
-        gbuffer.color.view,
-        vk::ImageLayout::eGeneral
-    };
+    // Output image
+    vk::DescriptorImageInfo imgInfo{};
+    imgInfo.imageView = r->m_denoiser.gbuffer.color.view;
+    imgInfo.imageLayout = vk::ImageLayout::eGeneral;
 
     vk::WriteDescriptorSet imgWrite{};
     imgWrite.dstSet = currentSet;
     imgWrite.dstBinding = 4;
     imgWrite.descriptorType = vk::DescriptorType::eStorageImage;
-    imgWrite.setImageInfo(imgInfo);
+    imgWrite.descriptorCount = 1;
+    imgWrite.pImageInfo = &imgInfo;
 
-    // Temporal Reprojection
-    vk::DescriptorImageInfo wpInfo{
-        nullptr,
-        gbuffer.worldPosition.view,
-        vk::ImageLayout::eGeneral
-    };
+    // World position
+    vk::DescriptorImageInfo wpInfo{};
+    wpInfo.imageView = r->m_denoiser.gbuffer.currentWorldPosition().view;
+    wpInfo.imageLayout = vk::ImageLayout::eGeneral;
+
     vk::WriteDescriptorSet wpWrite{};
     wpWrite.dstSet = currentSet;
     wpWrite.dstBinding = 5;
     wpWrite.descriptorType = vk::DescriptorType::eStorageImage;
-    wpWrite.setImageInfo(wpInfo);
+    wpWrite.descriptorCount = 1;
+    wpWrite.pImageInfo = &wpInfo;
 
-    vk::DescriptorImageInfo nrInfo{
-        nullptr,
-        gbuffer.normalRoughness.view,
-        vk::ImageLayout::eGeneral
-    };
+    // Normal/roughness
+    vk::DescriptorImageInfo nrInfo{};
+    nrInfo.imageView = r->m_denoiser.gbuffer.currentNormalRoughness().view;
+    nrInfo.imageLayout = vk::ImageLayout::eGeneral;
+
     vk::WriteDescriptorSet nrWrite{};
     nrWrite.dstSet = currentSet;
     nrWrite.dstBinding = 6;
     nrWrite.descriptorType = vk::DescriptorType::eStorageImage;
-    nrWrite.setImageInfo(nrInfo);
+    nrWrite.descriptorCount = 1;
+    nrWrite.pImageInfo = &nrInfo;
 
-    vk::DescriptorImageInfo amInfo{
-        nullptr,
-        gbuffer.albedoMetallic.view,
-        vk::ImageLayout::eGeneral
-    };
+    // Albedo/metallic
+    vk::DescriptorImageInfo amInfo{};
+    amInfo.imageView = r->m_denoiser.gbuffer.albedoMetallic.view;
+    amInfo.imageLayout = vk::ImageLayout::eGeneral;
+
     vk::WriteDescriptorSet amWrite{};
     amWrite.dstSet = currentSet;
     amWrite.dstBinding = 7;
     amWrite.descriptorType = vk::DescriptorType::eStorageImage;
-    amWrite.setImageInfo(amInfo);
+    amWrite.descriptorCount = 1;
+    amWrite.pImageInfo = &amInfo;
 
-    vk::DescriptorImageInfo motionInfo{
-        nullptr,
-        r->m_denoiser.gbuffer.motionVectors.view,
-        vk::ImageLayout::eGeneral
-    };
+    // Motion vectors
+    vk::DescriptorImageInfo motionInfo{};
+    motionInfo.imageView = r->m_denoiser.gbuffer.motionVectors.view;
+    motionInfo.imageLayout = vk::ImageLayout::eGeneral;
+
     vk::WriteDescriptorSet motionWrite{};
     motionWrite.dstSet = currentSet;
     motionWrite.dstBinding = 8;
     motionWrite.descriptorType = vk::DescriptorType::eStorageImage;
-    motionWrite.setImageInfo(motionInfo);
+    motionWrite.descriptorCount = 1;
+    motionWrite.pImageInfo = &motionInfo;
 
-    // Material buffer
+    // Materials
     vk::DescriptorBufferInfo materialInfo{};
     materialInfo.buffer = r->m_world->materialBuffer.handle;
     materialInfo.offset = 0;
@@ -477,7 +423,7 @@ void RayTracing::updateDescriptorSet(const WorldSvoGpu& gpu, uint32_t frameIndex
     materialWrite.pBufferInfo = &materialInfo;
 
     std::array<vk::WriteDescriptorSet,10> writes =
-    { asWrite, svoWrite, chunkWrite, frameWrite, imgWrite, wpWrite, nrWrite, amWrite, motionWrite, materialWrite };
+    { asWrite, sv64Write, chunkWrite, frameWrite, imgWrite, wpWrite, nrWrite, amWrite, motionWrite, materialWrite };
 
     r->m_device.updateDescriptorSets(writes, {});
 }
@@ -647,7 +593,7 @@ void RayTracing::createSBT() {
         region = vk::StridedDeviceAddressRegionKHR{
             addr,
             handleSizeAligned,  // Stride (distance between records)
-            sbtSize             // Size (total size of the region) <--- FIXED
+            sbtSize             // Size (total size of the region)
         };
     };
 

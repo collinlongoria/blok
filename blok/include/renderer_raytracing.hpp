@@ -43,7 +43,7 @@ public:
 
     void createDescriptorSetLayout();
     void allocateDescriptorSet();
-    void updateDescriptorSet(const WorldSvoGpu&, uint32_t frameIndex);
+    void updateDescriptorSet(const WorldSv64Gpu&, uint32_t frameIndex);
 
     void createPipeline();
     void createSBT();

@@ -66,13 +66,13 @@ App::~App() {}
 
 void App::run() {
     runAllTests();
-    /*
+
     init();
 
     update();
 
     shutdown();
-    */
+    
 }
 
 void App::init() {
@@ -121,9 +121,9 @@ void App::init() {
             }
 
             // Prepare GPU world SVO
-            m_gpuWorld = std::make_unique<WorldSvoGpu>();
+            m_gpuWorld = std::make_unique<WorldSv64Gpu>();
             rebuildDirtyChunks(g_mgr, 16);
-            packChunksToGpuSvo(g_mgr, *m_gpuWorld);
+            packChunksToGpuSv64(g_mgr, *m_gpuWorld);
 
             // Upload world to Renderer
             m_renderer->addWorld(*m_gpuWorld);

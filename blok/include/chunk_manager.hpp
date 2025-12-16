@@ -17,7 +17,6 @@ class ChunkManager {
 public:
     uint32_t C; // voxels per chunk edge
     float voxelSize; // world units per voxel
-    uint32_t maxDepth;
 
     std::unordered_map<ChunkCoord, Chunk*, ChunkCoordHash> chunks;
 
@@ -49,7 +48,7 @@ public:
 };
 
 void rebuildDirtyChunks(ChunkManager& mgr, int maxPerFrame);
-void packChunksToGpuSvo(const ChunkManager& mgr, WorldSvoGpu& gpuWorld);
+void packChunksToGpuSv64(const ChunkManager& mgr, WorldSv64Gpu& gpuWorld);
 
 }
 

@@ -17,12 +17,7 @@ namespace blok {
 static constexpr uint32_t SUB_CHUNK_DIVISIONS = 8;
 
 ChunkManager::ChunkManager(uint32_t C_, float voxelSize_)
-    : C(C_), voxelSize(voxelSize_) {
-    maxDepth = 0;
-    // require C = 2^maxDepth
-    while ((1u << maxDepth) < C)
-        maxDepth++;
-}
+    : C(C_), voxelSize(voxelSize_) {}
 
 ChunkManager::~ChunkManager() {
     for (auto& kv : chunks) delete kv.second;
@@ -68,7 +63,7 @@ Chunk *ChunkManager::getOrCreateChunk(const ChunkCoord &cc) {
         static_cast<float>(cc.y * static_cast<int32_t>(C)) * voxelSize,
         static_cast<float>(cc.z * static_cast<int32_t>(C)) * voxelSize
     );
-    auto* ch = new Chunk(cc.x, cc.y, cc.z, C, maxDepth, origin, voxelSize);
+    auto* ch = new Chunk(cc.x, cc.y, cc.z, C, C, origin, voxelSize);
 
     chunks[cc] = ch;
     return ch;
@@ -103,8 +98,8 @@ void ChunkManager::setVoxel(const glm::vec3& worldPos, uint8_t r, uint8_t g, uin
 
 // helper to rebuild svo
 // TODO: this is a testing version. update to make less naive.
-void buildSvoFromDensity(Chunk* ch, uint32_t C) {
-    ch->svo.clear();
+void buildSv64FromDensity(Chunk* ch, uint32_t C) {
+    ch->sv64.clear();
 
     for (uint32_t z = 0; z < C; ++z)
         for (uint32_t y = 0; y < C; ++y)
@@ -113,9 +108,10 @@ void buildSvoFromDensity(Chunk* ch, uint32_t C) {
                 float d = ch->density[idx];
                 if (d > 0.0f) {
                     uint32_t materialId = ch->materialIds[idx];
-                    ch->svo.insertVoxel(x, y, z, materialId, d);
+                    ch->sv64.insertVoxel(x, y, z, materialId, d);
                 }
             }
+    ch->sv64.compact();
 }
 
 void rebuildDirtyChunks(ChunkManager& mgr, int maxPerFrame) {
@@ -125,54 +121,52 @@ void rebuildDirtyChunks(ChunkManager& mgr, int maxPerFrame) {
         if (!ch->dirty) continue;
         if (count >= maxPerFrame) break;
 
-        ch->svo.clear();
-
         // rebuild
-        buildSvoFromDensity(ch, mgr.C);
+        buildSv64FromDensity(ch, mgr.C);
 
         ch->dirty = false;
         count++;
 
-        // TODO: debug print. establish macro or delete
+        // TODO: could benefit from better logging system
         std::cout << "Chunk (" << ch->cx << "," << ch->cy << "," << ch->cz
-          << ") - SVO node count: " << ch->svo.nodes.size() << "\n";
+          << ") - SV64 node count: " << ch->sv64.nodes.size() << "\n";
     }
 }
 
-// Check if a sub-region of the SVO contains any geometry
+
+// Check if a sub-region of the SV64 contains any geometry
 // by checking the childMask bits along the path to that sub-region
 static bool subChunkHasGeometry(
-    const std::vector<SvoNode>& nodes,
+    const std::vector<Sv64Node>& nodes,
     uint32_t subX, uint32_t subY, uint32_t subZ,
     uint32_t subDivisions,
     uint32_t maxDepth
 ) {
     if (nodes.empty()) return false;
 
-    // Calculate how many levels of the SVO we need to descend to reach sub-chunk level
-    // If chunk is 128³ (maxDepth=7) and subDivisions=4:
-    //   subChunkSize = 128/4 = 32 voxels = 2^5, so we descend 2 levels (7-5=2)
-    uint32_t subChunkVoxels = (1u << maxDepth) / subDivisions;
+    // Calculate how many levels of the SV64 we need to descend to reach sub-chunk level
     uint32_t subChunkDepth = 0;
-    while ((1u << subChunkDepth) < subDivisions) subChunkDepth++;
+    while ((1u << (subChunkDepth * 2)) < subDivisions) subChunkDepth++;
 
     // Traverse down to sub-chunk root
     uint32_t nodeIndex = 0;  // Start at root
 
-    for (uint32_t level = 0; level < subChunkDepth; level++) {
-        const SvoNode& node = nodes[nodeIndex];
+    for (uint32_t level = 0; level < subChunkDepth && level < maxDepth; level++) {
+        const Sv64Node& node = nodes[nodeIndex];
 
-        // Calculate which octant this sub-chunk falls into at this level
-        uint32_t levelDivisions = 1u << (level + 1);
+        // Calculate which child (0-63) this sub-chunk falls into at this level
+        // SV64 uses 4x4x4 children per level
+        uint32_t levelDivisions = 1u << ((level + 1) * 2);  // 4, 16, 64, ...
         uint32_t cellSize = subDivisions / levelDivisions;
+        if (cellSize == 0) cellSize = 1;
 
-        uint32_t octX = (subX / cellSize) & 1;
-        uint32_t octY = (subY / cellSize) & 1;
-        uint32_t octZ = (subZ / cellSize) & 1;
-        uint32_t octant = octX | (octY << 1) | (octZ << 2);
+        uint32_t childX = (subX / cellSize) & 0x3;
+        uint32_t childY = (subY / cellSize) & 0x3;
+        uint32_t childZ = (subZ / cellSize) & 0x3;
+        uint32_t childIdx = childX | (childY << 2) | (childZ << 4);
 
-        // Check if this octant has children
-        if ((node.childMask & (1u << octant)) == 0) {
+        // Check if this child has children
+        if ((node.childMask & (1ull << childIdx)) == 0) {
             return false;  // No geometry in this sub-chunk
         }
 
@@ -180,7 +174,9 @@ static bool subChunkHasGeometry(
             return false;  // Invalid child pointer
         }
 
-        nodeIndex = node.firstChild + octant;
+        // Use popcount to find the actual child index in the compact array
+        uint32_t offset = Sv64::childOffset(node.childMask, childIdx);
+        nodeIndex = node.firstChild + offset;
 
         if (nodeIndex >= nodes.size()) {
             return false;  // Out of bounds
@@ -188,13 +184,13 @@ static bool subChunkHasGeometry(
     }
 
     // At sub-chunk root - check if it has any children (geometry)
-    const SvoNode& subRoot = nodes[nodeIndex];
+    const Sv64Node& subRoot = nodes[nodeIndex];
     return subRoot.childMask != 0 || subRoot.occupancy > 0.0f;
 }
 
 // Find the node index for a sub-chunk's root
 static uint32_t findSubChunkRootNode(
-    const std::vector<SvoNode>& nodes,
+    const std::vector<Sv64Node>& nodes,
     uint32_t subX, uint32_t subY, uint32_t subZ,
     uint32_t subDivisions,
     uint32_t maxDepth
@@ -202,26 +198,32 @@ static uint32_t findSubChunkRootNode(
     if (nodes.empty()) return 0;
 
     uint32_t subChunkDepth = 0;
-    while ((1u << subChunkDepth) < subDivisions) subChunkDepth++;
+    while ((1u << (subChunkDepth * 2)) < subDivisions) subChunkDepth++;
 
     uint32_t nodeIndex = 0;
 
-    for (uint32_t level = 0; level < subChunkDepth; level++) {
-        const SvoNode& node = nodes[nodeIndex];
+    for (uint32_t level = 0; level < subChunkDepth && level < maxDepth; level++) {
+        const Sv64Node& node = nodes[nodeIndex];
 
-        uint32_t levelDivisions = 1u << (level + 1);
+        uint32_t levelDivisions = 1u << ((level + 1) * 2);
         uint32_t cellSize = subDivisions / levelDivisions;
+        if (cellSize == 0) cellSize = 1;
 
-        uint32_t octX = (subX / cellSize) & 1;
-        uint32_t octY = (subY / cellSize) & 1;
-        uint32_t octZ = (subZ / cellSize) & 1;
-        uint32_t octant = octX | (octY << 1) | (octZ << 2);
+        uint32_t childX = (subX / cellSize) & 0x3;
+        uint32_t childY = (subY / cellSize) & 0x3;
+        uint32_t childZ = (subZ / cellSize) & 0x3;
+        uint32_t childIdx = childX | (childY << 2) | (childZ << 4);
+
+        if ((node.childMask & (1ull << childIdx)) == 0) {
+            return nodeIndex;  // Can't go deeper, return current
+        }
 
         if (node.firstChild == 0xFFFFFFFFu) {
             return nodeIndex;  // Can't go deeper, return current
         }
 
-        nodeIndex = node.firstChild + octant;
+        uint32_t offset = Sv64::childOffset(node.childMask, childIdx);
+        nodeIndex = node.firstChild + offset;
 
         if (nodeIndex >= nodes.size()) {
             return 0;
@@ -231,7 +233,7 @@ static uint32_t findSubChunkRootNode(
     return nodeIndex;
 }
 
-void packChunksToGpuSvo(const ChunkManager& mgr, WorldSvoGpu& gpuWorld) {
+void packChunksToGpuSv64(const ChunkManager& mgr, WorldSv64Gpu& gpuWorld) {
     gpuWorld.globalNodes.clear();
     gpuWorld.globalSubChunks.clear();
 
@@ -242,13 +244,13 @@ void packChunksToGpuSvo(const ChunkManager& mgr, WorldSvoGpu& gpuWorld) {
     uint32_t totalSubChunks = 0;
     uint32_t emptySubChunks = 0;
 
-    // Calculate sub-chunk depth (how many SVO levels to skip)
+    // Calculate sub-chunk depth (how many SV64 levels to skip)
     uint32_t subChunkDepth = 0;
-    while ((1u << subChunkDepth) < SUB_CHUNK_DIVISIONS) subChunkDepth++;
+    while ((1u << (subChunkDepth * 2)) < SUB_CHUNK_DIVISIONS) subChunkDepth++;
 
     for (auto& kv : mgr.chunks) {
         const Chunk* ch = kv.second;
-        const auto& nodes = ch->svo.nodes;
+        const auto& nodes = ch->sv64.nodes;
         if (nodes.empty()) continue;
 
         // Chunk's world-space origin
@@ -262,6 +264,8 @@ void packChunksToGpuSvo(const ChunkManager& mgr, WorldSvoGpu& gpuWorld) {
         float chunkWorldSize = static_cast<float>(mgr.C) * mgr.voxelSize;
         float subChunkWorldSize = chunkWorldSize / static_cast<float>(SUB_CHUNK_DIVISIONS);
 
+        uint32_t maxDepth = ch->sv64.maxDepth;
+
         // Iterate over all sub-chunk positions
         for (uint32_t sz = 0; sz < SUB_CHUNK_DIVISIONS; sz++) {
             for (uint32_t sy = 0; sy < SUB_CHUNK_DIVISIONS; sy++) {
@@ -269,14 +273,14 @@ void packChunksToGpuSvo(const ChunkManager& mgr, WorldSvoGpu& gpuWorld) {
                     totalSubChunks++;
 
                     // Check if this sub-chunk has any geometry
-                    if (!subChunkHasGeometry(nodes, sx, sy, sz, SUB_CHUNK_DIVISIONS, mgr.maxDepth)) {
+                    if (!subChunkHasGeometry(nodes, sx, sy, sz, SUB_CHUNK_DIVISIONS, maxDepth)) {
                         emptySubChunks++;
                         continue;  // Skip empty sub-chunks
                     }
 
                     // Find the root node for this sub-chunk
                     uint32_t subRootNode = findSubChunkRootNode(
-                        nodes, sx, sy, sz, SUB_CHUNK_DIVISIONS, mgr.maxDepth
+                        nodes, sx, sy, sz, SUB_CHUNK_DIVISIONS, maxDepth
                     );
 
                     // Calculate world-space bounds
@@ -310,7 +314,7 @@ void packChunksToGpuSvo(const ChunkManager& mgr, WorldSvoGpu& gpuWorld) {
     std::cout << "Sub-chunk packing: " << gpuWorld.globalSubChunks.size()
               << " active sub-chunks out of " << totalSubChunks
               << " total (" << emptySubChunks << " culled)\n";
-    std::cout << "Total SVO nodes: " << gpuWorld.globalNodes.size() << "\n";
+    std::cout << "Total SV64 nodes: " << gpuWorld.globalNodes.size() << "\n";
 }
 
 void ChunkManager::setVoxelMaterial(const glm::vec3& worldPos, uint32_t materialId, float density) {

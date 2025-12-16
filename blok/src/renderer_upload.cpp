@@ -234,11 +234,11 @@ vk::Buffer Renderer::uploadIndexBuffer(const uint32_t *data, uint32_t indexCount
     return dst.handle;
 }
 
-void Renderer::uploadSvoBuffers(WorldSvoGpu &gpuWorld) {
+void Renderer::uploadSv64Buffers(WorldSv64Gpu &gpuWorld) {
     // destroy previous buffer if needed
-    if (gpuWorld.svoBuffer.handle) {
-        vmaDestroyBuffer(m_allocator, gpuWorld.svoBuffer.handle, gpuWorld.svoBuffer.alloc);
-        gpuWorld.svoBuffer = {};
+    if (gpuWorld.sv64Buffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.sv64Buffer.handle, gpuWorld.sv64Buffer.alloc);
+        gpuWorld.sv64Buffer = {};
     }
     if (gpuWorld.subChunkBuffer.handle) {
         vmaDestroyBuffer(m_allocator, gpuWorld.subChunkBuffer.handle, gpuWorld.subChunkBuffer.alloc);
@@ -247,16 +247,16 @@ void Renderer::uploadSvoBuffers(WorldSvoGpu &gpuWorld) {
 
     // Node buffer
     const vk::DeviceSize nodeBytes =
-        sizeof(SvoNode) * gpuWorld.globalNodes.size();
+        sizeof(Sv64Node) * gpuWorld.globalNodes.size();
 
-    gpuWorld.svoBuffer = createBuffer(
+    gpuWorld.sv64Buffer = createBuffer(
         nodeBytes,
         vk::BufferUsageFlagBits::eStorageBuffer |
         vk::BufferUsageFlagBits::eTransferDst,
         0,
         VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
     );
-    uploadToBuffer(gpuWorld.globalNodes.data(), nodeBytes, gpuWorld.svoBuffer);
+    uploadToBuffer(gpuWorld.globalNodes.data(), nodeBytes, gpuWorld.sv64Buffer);
 
     // Chunk meta buffer
     const vk::DeviceSize subChunkBytes = sizeof(SubChunkGpu) * gpuWorld.globalSubChunks.size();
@@ -271,12 +271,12 @@ void Renderer::uploadSvoBuffers(WorldSvoGpu &gpuWorld) {
 
     uploadToBuffer(gpuWorld.globalSubChunks.data(), subChunkBytes, gpuWorld.subChunkBuffer);
 
-    std::cout << "SVO Uploaded: " << gpuWorld.globalNodes.size() << " nodes, " << gpuWorld.globalSubChunks.size() << " chunks.\n";
+    std::cout << "SV64 Uploaded: " << gpuWorld.globalNodes.size() << " nodes, " << gpuWorld.globalSubChunks.size() << " chunks.\n";
 
     uploadMaterialBuffer(gpuWorld);
 }
 
-void Renderer::uploadMaterialBuffer(WorldSvoGpu& gpuWorld) {
+void Renderer::uploadMaterialBuffer(WorldSv64Gpu& gpuWorld) {
     // Pack materials from the library
     gpuWorld.materials = m_materialLib.packForGpu();
 

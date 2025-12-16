@@ -37,11 +37,11 @@ public:
     GLFWwindow* getWindow() const { return m_window; }
 
     // TODO will probably remove this function and refactor this later
-    void addWorld(WorldSvoGpu& gpuWorld) {
+    void addWorld(WorldSv64Gpu& gpuWorld) {
         m_world = &gpuWorld;
 
-        // Upload all SVO buffers
-        uploadSvoBuffers(*m_world);
+        // Upload all SV64 buffers
+        uploadSv64Buffers(*m_world);
 
         // Build BLAS/TLAS
         buildChunkBlas(*m_world);
@@ -57,8 +57,8 @@ public:
 
         m_device.waitIdle();
 
-        // Reupload SVO buffers
-        uploadSvoBuffers(*m_world);
+        // Reupload SV64 buffers
+        uploadSv64Buffers(*m_world);
 
         // Rebuild BLAS/TLAS
         buildChunkBlas(*m_world);
@@ -69,7 +69,7 @@ public:
             m_raytracer.updateDescriptorSet(*m_world, i);
         }
     }
-    void cleanupWorld(WorldSvoGpu& gpuWorld);
+    void cleanupWorld(WorldSv64Gpu& gpuWorld);
 
     MaterialLibrary& getMaterialLibrary() { return m_materialLib; }
 
@@ -114,8 +114,8 @@ private:
     vk::Buffer uploadVertexBuffer(const void* data, vk::DeviceSize sizeBytes, uint32_t vertexCount);
     vk::Buffer uploadIndexBuffer(const uint32_t* data, uint32_t indexCount);
 
-    void uploadSvoBuffers(WorldSvoGpu& gpuWorld);
-    void uploadMaterialBuffer(WorldSvoGpu& gpuWorld);
+    void uploadSv64Buffers(WorldSv64Gpu& gpuWorld);
+    void uploadMaterialBuffer(WorldSv64Gpu& gpuWorld);
 
     // Rendering
     void beginFrame();
@@ -125,8 +125,8 @@ private:
     void endFrame();
 
     // Raytracing
-    vk::AccelerationStructureKHR buildChunkBlas(WorldSvoGpu& gpuWorld);
-    vk::AccelerationStructureKHR buildChunkTlas(WorldSvoGpu& gpuWorld);
+    vk::AccelerationStructureKHR buildChunkBlas(WorldSv64Gpu& gpuWorld);
+    vk::AccelerationStructureKHR buildChunkTlas(WorldSv64Gpu& gpuWorld);
 
     // Cleanup and Recreation
     void cleanupSwapChain();
@@ -192,7 +192,7 @@ private:
 
     ShaderManager m_shaderManager;
 
-    WorldSvoGpu* m_world = nullptr;
+    WorldSv64Gpu* m_world = nullptr;
     MaterialLibrary m_materialLib{};
 
     vk::PhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProps{};

@@ -9,7 +9,7 @@
 #include <vector>
 #include <vec3.hpp>
 
-#include "svo.hpp"
+#include "sv64.hpp"
 
 namespace blok {
 struct ChunkCoord {
@@ -35,10 +35,10 @@ struct Chunk {
     std::vector<float> density; // size C*C*C
     std::vector<uint32_t> materialIds;
     bool dirty;
-    SvoTree svo;
+    Sv64 sv64;
 
     Chunk(int32_t cx_, int32_t cy_, int32_t cz_, uint32_t C, uint32_t maxDepth, const glm::vec3& origin, float voxelSize)
-        : cx(cx_), cy(cy_), cz(cz_), density(C*C*C, 0.0f), materialIds(C*C*C, 0u), dirty(true), svo(maxDepth, origin, voxelSize) {}
+        : cx(cx_), cy(cy_), cz(cz_), density(C*C*C, 0.0f), materialIds(C*C*C, 0u), dirty(true), sv64(C, origin, voxelSize) {}
 };
 
 }

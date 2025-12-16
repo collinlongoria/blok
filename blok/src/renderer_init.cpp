@@ -120,7 +120,7 @@ Renderer::~Renderer() {
     if (m_instance) m_instance.destroy();
 }
 
-void Renderer::cleanupWorld(WorldSvoGpu& gpuWorld) {
+void Renderer::cleanupWorld(WorldSv64Gpu& gpuWorld) {
     // Wait for GPU to finish any pending work
     m_device.waitIdle();
 
@@ -153,9 +153,9 @@ void Renderer::cleanupWorld(WorldSvoGpu& gpuWorld) {
     }
 
     // Destroy SVO and chunk buffers
-    if (gpuWorld.svoBuffer.handle && gpuWorld.svoBuffer.alloc) {
-        vmaDestroyBuffer(m_allocator, gpuWorld.svoBuffer.handle, gpuWorld.svoBuffer.alloc);
-        gpuWorld.svoBuffer = {};
+    if (gpuWorld.sv64Buffer.handle && gpuWorld.sv64Buffer.alloc) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.sv64Buffer.handle, gpuWorld.sv64Buffer.alloc);
+        gpuWorld.sv64Buffer = {};
     }
     if (gpuWorld.subChunkBuffer.handle && gpuWorld.subChunkBuffer.alloc) {
         vmaDestroyBuffer(m_allocator, gpuWorld.subChunkBuffer.handle, gpuWorld.subChunkBuffer.alloc);

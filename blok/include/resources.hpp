@@ -10,7 +10,8 @@
 #include <vk_mem_alloc.h>
 
 #include "material.hpp"
-#include "svo.hpp"
+#include "sv64.hpp"
+#include "glm.hpp"
 
 namespace blok {
 
@@ -166,9 +167,9 @@ struct alignas(16) ChunkGpu {
 };
 static_assert(sizeof(ChunkGpu) == 48, "expected 48 bytes");
 
-// Each sub-chunk represents a portion of a chunk's SVO
+// Each sub-chunk represents a portion of a chunk's SV64
 struct alignas(16) SubChunkGpu {
-    // SVO navigation
+    // SV64 navigation
     uint32_t nodeOffset; // Offset into global node array (start of parent chunk's nodes)
     uint32_t rootNodeIndex; // Index of sub-chunk's root node RELATIVE to nodeOffset
     uint32_t nodeCount; // Total nodes in parent chunk (for bounds checking)
@@ -192,11 +193,11 @@ struct AccelerationStructure {
     Buffer buffer{};
 };
 
-struct WorldSvoGpu {
-    std::vector<SvoNode> globalNodes;
+struct WorldSv64Gpu {
+    std::vector<Sv64Node> globalNodes;
     std::vector<SubChunkGpu> globalSubChunks;
 
-    Buffer svoBuffer{};
+    Buffer sv64Buffer{};
     Buffer subChunkBuffer{};
 
     std::vector<MaterialGpu> materials;

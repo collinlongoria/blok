@@ -38,13 +38,13 @@ void applyBrush(ChunkManager& mgr, const Brush& brush) {
             lv.z < 0 || lv.z >= static_cast<int>(mgr.C)) continue;
 
         // get voxel world pos
-        glm::vec3 voxelWS = ch->svo.origin + glm::vec3(static_cast<float>(lv.x) + 0.5f * mgr.voxelSize,
-                                                       static_cast<float>(lv.y) + 0.5f * mgr.voxelSize,
-                                                       static_cast<float>(lv.z) + 0.5f * mgr.voxelSize);
+        //glm::vec3 voxelWS = ch->svo.origin + glm::vec3(static_cast<float>(lv.x) + 0.5f * mgr.voxelSize,
+         //                                              static_cast<float>(lv.y) + 0.5f * mgr.voxelSize,
+         //                                              static_cast<float>(lv.z) + 0.5f * mgr.voxelSize);
 
         // check if inside brush
-        float dist = glm::distance(voxelWS, brush.centerWS);
-        if (dist > brush.radiusWS) continue;
+       // float dist = glm::distance(voxelWS, brush.centerWS);
+        //if (dist > brush.radiusWS) continue;
 
         // apply value
         float& d = ch->density[mgr.localIndex(lv.x, lv.y, lv.z)];
