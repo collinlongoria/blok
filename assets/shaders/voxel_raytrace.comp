@@ -3,7 +3,6 @@
 * Project: blok
 * Author: Collin Longoria
 * Created on: 12/17/2025
-* Description: Compute shader for voxel ray tracing using double DDA traversal
 */
 
 #version 460
@@ -11,10 +10,6 @@
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
-
-// ============================================================================
-// Uniforms and Buffers
-// ============================================================================
 
 layout(binding = 0, set = 0) uniform FrameUBO {
     mat4 view;
@@ -99,10 +94,6 @@ layout(binding = 8, set = 0, rgba16f) uniform image2D outNormalRoughness;
 layout(binding = 9, set = 0, rgba8) uniform image2D outAlbedoMetallic;
 layout(binding = 10, set = 0, rg16f) uniform image2D outMotionVectors;
 
-// ============================================================================
-// Constants
-// ============================================================================
-
 const float PI = 3.14159265359;
 const float INV_PI = 0.31830988618;
 const float EPSILON = 1e-5;
@@ -119,10 +110,6 @@ const vec3 FACE_NORMALS[6] = vec3[](
     vec3(0, 1, 0), vec3(0, -1, 0),
     vec3(0, 0, 1), vec3(0, 0, -1)
 );
-
-// ============================================================================
-// RNG
-// ============================================================================
 
 uint pcg(inout uint state) {
     uint oldState = state;
@@ -141,10 +128,6 @@ uint initRNG(uvec2 pixel, uint frameIndex, uint sampleIndex) {
     pcg(seed); pcg(seed);
     return seed;
 }
-
-// ============================================================================
-// Utilities
-// ============================================================================
 
 uint popcount64(uint64_t v) { return bitCount(uint(v)) + bitCount(uint(v >> 32)); }
 uint getChildOffset(uint64_t mask, uint childIdx) { return popcount64(mask & ((1ul << childIdx) - 1ul)); }
@@ -167,16 +150,8 @@ uint getHitFace(vec3 hitPos, vec3 center) {
 
 vec3 safeInvDir(vec3 dir) { return 1.0 / mix(dir, vec3(sign(dir) * 1e-6), lessThan(abs(dir), vec3(1e-6))); }
 
-// ============================================================================
-// Hit Result
-// ============================================================================
-
 struct HitResult { bool hit; float t; vec3 normal; vec3 albedo; vec3 emission; float roughness; float metallic; };
 HitResult noHit() { HitResult r; r.hit = false; r.t = T_MAX; return r; }
-
-// ============================================================================
-// Octree Traversal
-// ============================================================================
 
 struct OctreeStackItem { uint nodeIndex; vec3 minPos; float size; };
 
@@ -209,6 +184,10 @@ HitResult traverseChunkOctree(uint chunkIndex, vec3 rayOrigin, vec3 rayDir, vec3
     ivec3 stepSign = ivec3(sign(rayDir));
     vec3 posStep = vec3(stepSign);
 
+        // Calculate cone spread factor for LOD
+        // tan(FOV/2) approx 1.0 / proj[1][1]
+        float coneSpread = (2.0 / frame.proj[1][1]) / float(frame.screenHeight);
+
     OctreeStackItem stack[MAX_OCTREE_STACK];
     uint stackPtr = 0u;
     uint rootGlobalIndex = chunk.nodeOffset + chunk.rootNodeIndex;
@@ -225,7 +204,10 @@ HitResult traverseChunkOctree(uint chunkIndex, vec3 rayOrigin, vec3 rayDir, vec3
 
         Sv64Node node = nodes[item.nodeIndex];
 
-        if (node.childMask == 0ul) {
+
+        bool useLOD = (item.size < (tEnter * coneSpread * 80));
+        bool isLeaf = (node.childMask == 0ul);
+        if (isLeaf || (useLOD && node.occupancy > 0.0)) {
             if (node.occupancy > 0.0) {
                 MaterialGpu mat = materials[min(node.materialId, 65535u)];
                 result.hit = true;
@@ -268,10 +250,6 @@ HitResult traverseChunkOctree(uint chunkIndex, vec3 rayOrigin, vec3 rayDir, vec3
     }
     return result;
 }
-
-// ============================================================================
-// Ray Tracing
-// ============================================================================
 
 HitResult traceRay(vec3 rayOrigin, vec3 rayDir, float tMin, float tMax) {
     HitResult result = noHit();
@@ -334,10 +312,6 @@ bool traceShadowRay(vec3 rayOrigin, vec3 rayDir, float tMax) {
     return false;
 }
 
-// ============================================================================
-// Shading
-// ============================================================================
-
 vec3 sampleCosineHemisphere(vec2 u, vec3 N) {
     float r = sqrt(u.x); float phi = 2.0 * PI * u.y;
     vec3 up = abs(N.z) < 0.999 ? vec3(0, 0, 1) : vec3(1, 0, 0);
@@ -372,10 +346,6 @@ vec2 computeMotionVector(vec3 worldPos, vec2 currentUV) {
     return currentUV - (prevClip.xy / prevClip.w * 0.5 + 0.5);
 }
 
-// ============================================================================
-// Main
-// ============================================================================
-
 void main() {
     uvec2 pixelCoord = gl_GlobalInvocationID.xy;
     if (pixelCoord.x >= frame.screenWidth || pixelCoord.y >= frame.screenHeight) return;
@@ -393,7 +363,7 @@ void main() {
 
     for (uint sampleIdx = 0u; sampleIdx < frame.sampleCount; sampleIdx++) {
         uint rng = initRNG(pixelCoord, frame.frameCount, sampleIdx);
-        vec2 pixelCenter = vec2(pixelCoord) + (sampleIdx == 0u ? vec2(0.5) : vec2(0.5) + (randomVec2(rng) - 0.5) * 0.5);
+        vec2 pixelCenter = vec2(pixelCoord) + vec2(0.5) + frame.jitterOffset;
         vec2 d = pixelCenter / pixelSize * 2.0 - 1.0;
         vec4 target = frame.invProj * vec4(d, 1.0, 1.0);
         vec3 rayDir = normalize((frame.invView * vec4(normalize(target.xyz), 0.0)).xyz);
@@ -468,11 +438,52 @@ void main() {
         accumulatedColor += radiance;
     }
 
-    vec3 color = accumulatedColor / float(frame.sampleCount);
-    float maxVal = max(max(color.r, color.g), color.b);
-    if (maxVal > 100.0) color *= 100.0 / maxVal;
+// 1. Calculate the raw noisy color for this specific frame
+    vec3 newColor = accumulatedColor / float(frame.sampleCount);
+    float maxVal = max(max(newColor.r, newColor.g), newColor.b);
+    if (maxVal > 100.0) newColor *= 100.0 / maxVal;
 
-    imageStore(outColor, ivec2(pixelCoord), vec4(color, 1.0));
+    // --- STATIC CONVERGENCE LOGIC ---
+
+    // Check if the camera is effectively motionless
+    // We check position and the view vectors to detect rotation
+    bool cameraMoved = distance(frame.camPos, frame.prevCamPos) > 0.001 ||
+                       distance(frame.view[0], frame.prevView[0]) > 0.001 ||
+                       distance(frame.view[1], frame.prevView[1]) > 0.001;
+
+    // Load the data from the previous frame (stored in the output image itself)
+    vec4 prevData = imageLoad(outColor, ivec2(pixelCoord));
+    vec3 prevColor = prevData.rgb;
+    float currentSampleCount = prevData.a; // We use Alpha to store how many frames we've blended
+
+    vec3 finalColor;
+    float nextSampleCount;
+
+    if (cameraMoved) {
+        // CASE A: Moving.
+        // Reset accumulation. Output raw noise so SVGF can handle the motion/ghosting.
+        finalColor = newColor;
+        nextSampleCount = 1.0;
+    } else {
+        // CASE B: Static.
+        // Manually accumulate samples to create a perfect, shimmer-free image.
+        // This fixes the "shimmer" by averaging out the variance before the denoiser sees it.
+
+        // Cap at 1024 frames to prevent floating point precision issues
+        if (currentSampleCount < 1024.0) {
+            nextSampleCount = currentSampleCount + 1.0;
+            // Progressive Average Formula: avg = mix(oldAvg, newSample, 1/N)
+            finalColor = mix(prevColor, newColor, 1.0 / nextSampleCount);
+        } else {
+            finalColor = prevColor;
+            nextSampleCount = currentSampleCount;
+        }
+    }
+
+    // Write the result. The Denoiser will read this "finalColor".
+    // If we are static, the Denoiser reads a clean image and has nothing to do (Success).
+    // If we are moving, the Denoiser reads a noisy image and does its job (Success).
+    imageStore(outColor, ivec2(pixelCoord), vec4(finalColor, nextSampleCount));
 
     if (!hadFirstHit) {
         firstHitDepth = T_MAX;

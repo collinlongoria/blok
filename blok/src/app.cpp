@@ -29,6 +29,7 @@
 #include "vox_loader.hpp"
 
 #include "unit_tests.hpp"
+#include "noise.hpp"
 
 #define VKR reinterpret_cast<VulkanRenderer*>(m_renderer.get())
 
@@ -36,7 +37,7 @@ using namespace blok;
 static Camera g_camera;
 static Scene  g_scene;
 static UI* g_ui;
-static ChunkManager g_mgr(16, 1.0f);
+static ChunkManager g_mgr(64, 1.0f);
 static float lastX = 400.0f;
 static float lastY = 300.0f;
 static bool firstMouse = true;
@@ -57,91 +58,9 @@ void mouse_callback(GLFWwindow* window, double xpos, double ypos) {
     g_camera.processMouse(dx, dy);
 }
 
-// =============================================================================
-// Simple Noise Functions (no external dependencies)
-// =============================================================================
-
-// Simple hash function for noise
-inline float hash(int x, int y, uint32_t seed) {
-    int n = x + y * 57 + seed * 131;
-    n = (n << 13) ^ n;
-    return (1.0f - ((n * (n * n * 15731 + 789221) + 1376312589) & 0x7fffffff) / 1073741824.0f);
-}
-
-// Smooth interpolation (smoothstep)
-inline float smoothstep(float t) {
-    return t * t * (3.0f - 2.0f * t);
-}
-
-// 2D Value Noise
-float valueNoise2D(float x, float y, uint32_t seed) {
-    int xi = static_cast<int>(std::floor(x));
-    int yi = static_cast<int>(std::floor(y));
-
-    float xf = x - xi;
-    float yf = y - yi;
-
-    // Get values at corners
-    float v00 = hash(xi, yi, seed);
-    float v10 = hash(xi + 1, yi, seed);
-    float v01 = hash(xi, yi + 1, seed);
-    float v11 = hash(xi + 1, yi + 1, seed);
-
-    // Smooth interpolation
-    float sx = smoothstep(xf);
-    float sy = smoothstep(yf);
-
-    // Bilinear interpolation
-    float v0 = v00 + sx * (v10 - v00);
-    float v1 = v01 + sx * (v11 - v01);
-
-    return v0 + sy * (v1 - v0);
-}
-
-// Fractal Brownian Motion (layered noise for natural-looking terrain)
-float fbm2D(float x, float y, uint32_t seed, int octaves = 4, float lacunarity = 2.0f, float persistence = 0.5f) {
-    float value = 0.0f;
-    float amplitude = 1.0f;
-    float frequency = 1.0f;
-    float maxValue = 0.0f;
-
-    for (int i = 0; i < octaves; ++i) {
-        value += amplitude * valueNoise2D(x * frequency, y * frequency, seed + i * 1000);
-        maxValue += amplitude;
-        amplitude *= persistence;
-        frequency *= lacunarity;
-    }
-
-    return value / maxValue; // Normalize to [-1, 1]
-}
-
-// Ridged noise for mountain ridges
-float ridgedNoise2D(float x, float y, uint32_t seed, int octaves = 4) {
-    float value = 0.0f;
-    float amplitude = 1.0f;
-    float frequency = 1.0f;
-    float maxValue = 0.0f;
-
-    for (int i = 0; i < octaves; ++i) {
-        float n = valueNoise2D(x * frequency, y * frequency, seed + i * 1000);
-        n = 1.0f - std::abs(n); // Create ridges
-        n = n * n; // Sharpen ridges
-        value += amplitude * n;
-        maxValue += amplitude;
-        amplitude *= 0.5f;
-        frequency *= 2.0f;
-    }
-
-    return value / maxValue;
-}
-
-// =============================================================================
-// Terrain Generation
-// =============================================================================
-
 struct TerrainSettings {
     // Size
-    int halfSize = 500;           // Half-extent of terrain
+    int halfSize = 10000;           // Half-extent of terrain
 
     // Height settings
     float baseHeight = 0.0f;      // Base ground level
@@ -155,7 +74,7 @@ struct TerrainSettings {
     float detailScale = 0.05f;    // Scale for small details
 
     // Feature blend
-    float mountaininess = 0.3f;   // 0-1, how mountainous the terrain is
+    float mountaininess = 1.0f;   // 0-1, how mountainous the terrain is
 
     // Structures
     int structureCount = 100;
@@ -391,16 +310,6 @@ void generateTerrain(
 // =============================================================================
 // Random Test Scene Generator
 // =============================================================================
-
-/**
- * Generates a random test scene with voxels scattered in a cubic volume.
- *
- * @param mgr           The chunk manager to populate
- * @param matLib        Material library for creating colored materials
- * @param halfExtent    Half the size of the cube (e.g., 2000 means -2000 to +2000)
- * @param voxelCount    Number of voxels to place
- * @param seed          Random seed for reproducibility (0 = random seed)
- */
 void generateRandomTestScene(
     ChunkManager& mgr,
     MaterialLibrary* matLib,
@@ -456,18 +365,6 @@ void generateRandomTestScene(
     std::cout << "  Total chunks created: " << mgr.chunks.size() << std::endl;
 }
 
-/**
- * Generates a more structured test scene with clusters of voxels.
- * Creates spherical clusters at random positions for a more interesting visual.
- *
- * @param mgr           The chunk manager to populate
- * @param matLib        Material library for creating colored materials
- * @param halfExtent    Half the size of the cube
- * @param clusterCount  Number of clusters to create
- * @param clusterRadius Average radius of each cluster
- * @param voxelsPerCluster Average voxels per cluster
- * @param seed          Random seed
- */
 void generateClusteredTestScene(
     ChunkManager& mgr,
     MaterialLibrary* matLib,
@@ -543,10 +440,6 @@ void generateClusteredTestScene(
     std::cout << "  Total chunks: " << mgr.chunks.size() << std::endl;
 }
 
-/**
- * Generates a ground plane with some random structures on top.
- * Good for testing shadows and lighting.
- */
 void generateGroundWithStructures(
     ChunkManager& mgr,
     MaterialLibrary* matLib,
@@ -616,11 +509,6 @@ void App::init() {
             blok::MaterialLibrary& matLib = m_renderer->getMaterialLibrary();
             g_mgr.setMaterialLibrary(&matLib);
 
-            // =========================================================
-            // TEST SCENE SELECTION
-            // Comment/uncomment the scene you want to test
-            // =========================================================
-
             // Option 1: Load VOX file (original behavior)
 /*
             VoxFile vox;
@@ -637,7 +525,6 @@ void App::init() {
                 std::cerr << "Failed to load VOX: " << err << "\n";
             }
 */
-
             // Option 2: Random scattered voxels (sparse, tests large world)
             // Parameters: halfExtent=2000, voxelCount=100000, seed=0 (random)
             //generateRandomTestScene(g_mgr, &matLib, 2000, 5000000, 12345);
@@ -648,9 +535,7 @@ void App::init() {
 
             // Option 4: Ground plane with structures (good for shadow testing)
             // Parameters: groundHalfSize, structureCount, seed
-             generateGroundWithStructures(g_mgr, &matLib, 500, 100, 12345);
-
-            // =========================================================
+             generateGroundWithStructures(g_mgr, &matLib, 1000, 100, 12345);
 
             // Prepare GPU world SVO
             m_gpuWorld = std::make_unique<WorldSv64Gpu>();

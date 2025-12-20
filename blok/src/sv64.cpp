@@ -152,12 +152,52 @@ void Sv64::insertVoxel(uint32_t x, uint32_t y, uint32_t z, uint32_t materialId, 
     lastMortonCode = mortonCode;
 }
 
+void Sv64::removeVoxel(uint32_t x, uint32_t y, uint32_t z) {
+    if (compacted) return;
+    if (x >= resolution || y >= resolution || z >= resolution) return;
+
+    uint64_t mortonCode = morton3d::encodeUnsigned(x, y, z);
+
+    lastMortonCode = 0xFFFFFFFFFFFFFFFF;
+
+    removeRecursive(rootIndex, mortonCode, 0);
+}
+
+bool Sv64::removeRecursive(uint32_t nodeIndex, uint64_t mortonCode, uint32_t currentDepth) {
+    BuildNode& node = buildNodes[nodeIndex];
+
+    // Leaf case
+    if (currentDepth == maxDepth) {
+        node.occupancy = 0.0f;
+        node.materialId = 0;
+        return true;
+    }
+
+    uint32_t childIdx = morton3d::childIndex64FromCode(mortonCode, maxDepth, currentDepth);
+    uint32_t childNodeIndex = node.children[childIdx];
+
+    if (childNodeIndex == INVALID_NODE_INDEX) return false;
+
+    // Recurse
+    bool childIsNowEmpty = removeRecursive(childNodeIndex, mortonCode, currentDepth + 1);
+
+    if (childIsNowEmpty) {
+        // Disconnect child
+        node.children[childIdx] = INVALID_NODE_INDEX;
+        node.childMask &= ~(1ull << childIdx);
+    }
+
+    return (node.childMask == 0ull && node.occupancy <= 0.0f);
+}
+
 void Sv64::compact() {
     if (compacted) return;
     if (buildNodes.empty()) return;
 
-    // Build a mapping from old indices to new indices using BFS
-    // This ensures parents come before children and siblings are contiguous
+    propagateAttributes(rootIndex);
+
+    // mapping from old indices to new indices using BFS
+    // this ensures parents come before children and siblings are contiguous
     std::vector<uint32_t> newIndices(buildNodes.size(), INVALID_NODE_INDEX);
     std::vector<uint32_t> bfsOrder;
     bfsOrder.reserve(buildNodes.size());
@@ -170,7 +210,7 @@ void Sv64::compact() {
         uint32_t oldIdx = bfsOrder[queuePos++];
         const BuildNode& bn = buildNodes[oldIdx];
 
-        // Add children in order (this keeps siblings contiguous)
+        // add children in order (this keeps siblings contiguous)
         for (uint32_t i = 0; i < 64; ++i) {
             if (bn.children[i] != INVALID_NODE_INDEX) {
                 bfsOrder.push_back(bn.children[i]);
@@ -178,12 +218,12 @@ void Sv64::compact() {
         }
     }
 
-    // Assign new indices based on BFS order
+    // assign new indices based on BFS order
     for (uint32_t newIdx = 0; newIdx < bfsOrder.size(); ++newIdx) {
         newIndices[bfsOrder[newIdx]] = newIdx;
     }
 
-    // Build the compacted nodes array
+    // compacted nodes array
     nodes.clear();
     nodes.resize(bfsOrder.size());
 
@@ -200,8 +240,6 @@ void Sv64::compact() {
         cn.reserved = 0;
 
         if (cn.childCount > 0) {
-            // Find the first child's new index
-            // Because of BFS order, children are contiguous
             for (uint32_t i = 0; i < 64; ++i) {
                 if (bn.children[i] != INVALID_NODE_INDEX) {
                     cn.firstChild = newIndices[bn.children[i]];
@@ -213,10 +251,10 @@ void Sv64::compact() {
         }
     }
 
-    // Update root index
+    // update root index
     rootIndex = newIndices[rootIndex];
 
-    // Clear build data
+    // clear build data
     buildNodes.clear();
     buildNodes.shrink_to_fit();
 
@@ -231,7 +269,6 @@ const Sv64Node* Sv64::findLeaf(uint32_t x, uint32_t y, uint32_t z) const {
     uint64_t mortonCode = morton3d::encodeUnsigned(x, y, z);
 
     if (compacted) {
-        // Use compact traversal with popcount-based indexing
         uint32_t nodeIndex = rootIndex;
 
         for (uint32_t level = 0; level < maxDepth; ++level) {
@@ -239,11 +276,9 @@ const Sv64Node* Sv64::findLeaf(uint32_t x, uint32_t y, uint32_t z) const {
 
             const Sv64Node& node = nodes[nodeIndex];
 
-            // Check if this child exists
             if ((node.childMask & (1ull << childIdx)) == 0ull) return nullptr;
             if (node.firstChild == INVALID_NODE_INDEX) return nullptr;
 
-            // Use popcount to find offset into compact child array
             uint32_t offset = childOffset(node.childMask, childIdx);
             nodeIndex = node.firstChild + offset;
         }
@@ -271,6 +306,40 @@ void buildSv64FromDense(const float* density, const uint32_t* materials, uint32_
         }
     }
     sv64.compact();
+}
+
+void Sv64::propagateAttributes(uint32_t nodeIndex) {
+    BuildNode& node = buildNodes[nodeIndex];
+
+    // Leaf nodes are already populated by insertVoxel
+    if (node.childMask == 0) return;
+
+    float maxOccupancy = 0.0f;
+    uint32_t dominantMaterial = 0;
+
+    // Process children
+    for (int i = 0; i < 64; ++i) {
+        if (node.children[i] != INVALID_NODE_INDEX) {
+            // Recurse first
+            propagateAttributes(node.children[i]);
+
+            const BuildNode& child = buildNodes[node.children[i]];
+
+            // Propagate max occupancy (keeps distant objects solid)
+            if (child.occupancy > maxOccupancy) {
+                maxOccupancy = child.occupancy;
+            }
+
+            // Simple heuristic: inherit material from first valid child
+            // (A more complex version would histogram children to find the mode)
+            if (dominantMaterial == 0 && child.materialId != 0) {
+                dominantMaterial = child.materialId;
+            }
+        }
+    }
+
+    node.occupancy = maxOccupancy;
+    node.materialId = dominantMaterial;
 }
 
 }

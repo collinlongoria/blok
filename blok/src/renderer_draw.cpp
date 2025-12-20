@@ -62,13 +62,13 @@ void Renderer::drawFrame(const Camera& c, float dt) {
     glm::mat4 baseProj = c.projection(aspect, nearPlane, farPlane);
 
     // Apply TAA jitter to projection
-    glm::mat4 jitteredProj = m_postProcess.getJitteredProjection(baseProj, m_swapExtent.width, m_swapExtent.height);
+   // glm::mat4 jitteredProj = m_postProcess.getJitteredProjection(baseProj, m_swapExtent.width, m_swapExtent.height);
 
     FrameUBO fubo{};
     m_denoiser.fillFrameUBO(
         fubo,
         c.view(),
-        jitteredProj,
+        baseProj,
         c.position,
         dt,
         depth,

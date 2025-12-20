@@ -3,8 +3,8 @@
 * Project: blok
 * Author: Collin Longoria
 * Created on: 12/17/2025
-* Description: Compute shader-based voxel ray tracing implementation
 */
+
 #include "renderer_compute_rt.hpp"
 
 #include <iostream>
@@ -14,10 +14,6 @@
 #include "chunk_manager.hpp"
 
 namespace blok {
-
-// ============================================================================
-// ComputeRT Implementation
-// ============================================================================
 
 ComputeRT::ComputeRT(Renderer* r_)
     : r(r_) {}
@@ -211,7 +207,7 @@ void ComputeRT::updateDescriptorSet(const WorldComputeGpu& world, uint32_t frame
 }
 
 void ComputeRT::createPipeline() {
-    // Load compute shader
+    // compute shader
     auto shaderModule = r->m_shaderManager.loadModule(
         "assets/shaders/voxel_raytrace.comp",
         vk::ShaderStageFlagBits::eCompute
@@ -229,7 +225,7 @@ void ComputeRT::createPipeline() {
 
     rtPipeline.layout = r->m_device.createPipelineLayout(layoutInfo);
 
-    // Create compute pipeline
+    // compute pipeline
     vk::ComputePipelineCreateInfo pipelineInfo{};
     pipelineInfo.stage = stageInfo;
     pipelineInfo.layout = rtPipeline.layout;
@@ -251,7 +247,7 @@ void ComputeRT::dispatchRayTracing(vk::CommandBuffer cmd, uint32_t w, uint32_t h
         0, rtSets[frameIndex], {}
     );
 
-    // Dispatch one thread per pixel, workgroup size is 8x8
+    // one thread per pixel, workgroup size is 8x8
     uint32_t groupsX = (w + 7) / 8;
     uint32_t groupsY = (h + 7) / 8;
     cmd.dispatch(groupsX, groupsY, 1);
@@ -274,10 +270,6 @@ void ComputeRT::cleanup() {
     }
 }
 
-// ============================================================================
-// World Data Packing for Compute
-// ============================================================================
-
 void packChunksForCompute(const ChunkManager& mgr, WorldComputeGpu& gpuWorld) {
     gpuWorld.globalNodes.clear();
     gpuWorld.chunks.clear();
@@ -287,7 +279,7 @@ void packChunksForCompute(const ChunkManager& mgr, WorldComputeGpu& gpuWorld) {
         return;
     }
 
-    // Calculate grid bounds
+    // calculate grid bounds
     int32_t minCx = INT32_MAX, minCy = INT32_MAX, minCz = INT32_MAX;
     int32_t maxCx = INT32_MIN, maxCy = INT32_MIN, maxCz = INT32_MIN;
 
@@ -301,17 +293,18 @@ void packChunksForCompute(const ChunkManager& mgr, WorldComputeGpu& gpuWorld) {
         maxCz = std::max(maxCz, ch->cz);
     }
 
-    // Grid dimensions (add 1 because max is inclusive)
+    // grid dimensions
+    // add 1 because max is inclusive
     glm::ivec3 gridDims = glm::ivec3(
         maxCx - minCx + 1,
         maxCy - minCy + 1,
         maxCz - minCz + 1
     );
 
-    // Store grid offset for coordinate translation
+    // grid offset for coordinate translation
     gpuWorld.gridOffset = glm::ivec3(minCx, minCy, minCz);
 
-    // Calculate world-space bounds
+    // world-space bounds
     float chunkWorldSize = static_cast<float>(mgr.C) * mgr.voxelSize;
     glm::vec3 gridWorldMin = glm::vec3(
         static_cast<float>(minCx * static_cast<int32_t>(mgr.C)) * mgr.voxelSize,
@@ -320,18 +313,17 @@ void packChunksForCompute(const ChunkManager& mgr, WorldComputeGpu& gpuWorld) {
     );
     glm::vec3 gridWorldMax = gridWorldMin + glm::vec3(gridDims) * chunkWorldSize;
 
-    // Fill in grid info
+    // grid info
     gpuWorld.gridInfo.gridWorldMin = gridWorldMin;
     gpuWorld.gridInfo.chunkSize = chunkWorldSize;
     gpuWorld.gridInfo.gridDimensions = gridDims;
     gpuWorld.gridInfo.invChunkSize = 1.0f / chunkWorldSize;
     gpuWorld.gridInfo.gridWorldMax = gridWorldMax;
 
-    // Initialize chunk index map with INVALID_CHUNK
+    // chunk index map init
     size_t mapSize = static_cast<size_t>(gridDims.x) * gridDims.y * gridDims.z;
     gpuWorld.chunkIndexData.resize(mapSize, ChunkIndexMap::INVALID_CHUNK);
 
-    // Reserve space
     gpuWorld.globalNodes.reserve(1024);
     gpuWorld.chunks.reserve(mgr.chunks.size());
 
@@ -342,25 +334,19 @@ void packChunksForCompute(const ChunkManager& mgr, WorldComputeGpu& gpuWorld) {
         const Chunk* ch = kv.second;
         const auto& nodes = ch->sv64.nodes;
 
-        // Skip empty chunks (no nodes)
         if (nodes.empty()) {
             continue;
         }
 
-        // Calculate grid position (relative to grid origin)
         int32_t gx = ch->cx - minCx;
         int32_t gy = ch->cy - minCy;
         int32_t gz = ch->cz - minCz;
 
-        // Linear index in 3D array: x + y * dimX + z * dimX * dimY
-        size_t linearIdx = static_cast<size_t>(gx) +
-                          static_cast<size_t>(gy) * gridDims.x +
-                          static_cast<size_t>(gz) * gridDims.x * gridDims.y;
+        size_t linearIdx = static_cast<size_t>(gx) + static_cast<size_t>(gy) * gridDims.x + static_cast<size_t>(gz) * gridDims.x * gridDims.y;
 
-        // Store chunk index in the map
         gpuWorld.chunkIndexData[linearIdx] = chunkIndex;
 
-        // Calculate world-space bounds for this chunk
+        // world-space bounds for this chunk
         glm::vec3 chunkWorldMin = glm::vec3(
             static_cast<float>(ch->cx * static_cast<int32_t>(mgr.C)) * mgr.voxelSize,
             static_cast<float>(ch->cy * static_cast<int32_t>(mgr.C)) * mgr.voxelSize,
@@ -368,17 +354,15 @@ void packChunksForCompute(const ChunkManager& mgr, WorldComputeGpu& gpuWorld) {
         );
         glm::vec3 chunkWorldMax = chunkWorldMin + glm::vec3(chunkWorldSize);
 
-        // Determine chunk flags
         uint32_t flags = 0;
-        // Check if chunk is a single solid voxel covering the entire space
         if (nodes.size() == 1 && nodes[0].childMask == 0 && nodes[0].occupancy > 0.0f) {
             flags |= CHUNK_FLAG_SOLID;
         }
 
-        // Create chunk metadata
+        // chunk metadata
         ChunkGpuCompute chunkGpu{};
         chunkGpu.nodeOffset = nodeOffset;
-        chunkGpu.rootNodeIndex = 0;  // Root is always at index 0 within chunk's nodes
+        chunkGpu.rootNodeIndex = 0;
         chunkGpu.nodeCount = static_cast<uint32_t>(nodes.size());
         chunkGpu.flags = flags;
         chunkGpu.worldMin = chunkWorldMin;
@@ -387,11 +371,9 @@ void packChunksForCompute(const ChunkManager& mgr, WorldComputeGpu& gpuWorld) {
 
         gpuWorld.chunks.push_back(chunkGpu);
 
-        // Append nodes to global array
         for (const auto& node : nodes) {
             Sv64Node adjustedNode = node;
 
-            // Only adjust if this node has children (firstChild is valid)
             if (node.childMask != 0 && node.firstChild != 0xFFFFFFFFu) {
                 adjustedNode.firstChild = node.firstChild + nodeOffset;
             }
