@@ -177,8 +177,9 @@ void computeNeighborhoodStatistics(ivec2 coord, vec3 centerNormal, float centerD
     maxC = mean + gamma * stdDev;
 
     // Also clamp to actual min/max found (prevents over-expansion)
-    minC = max(minC, minVal - vec3(0.05));
-    maxC = min(maxC, maxVal + vec3(0.05));
+    vec3 minThreshold = vec3(0.02);
+    minC = min(minC, mean - minThreshold);
+    maxC = max(maxC, mean + minThreshold);
 }
 
 void main() {
@@ -289,7 +290,7 @@ void main() {
             vec2 prevMomentsData = imageLoad(prevMoments, prevCoord).rg;
             float prevHistLen = imageLoad(prevHistoryLength, prevCoord).r;
 
-            // ============ Variance Clipping ============
+            // Variance Clipping
             vec3 mean, stdDev, minC, maxC;
             computeNeighborhoodStatistics(coord, normal, depth, mean, stdDev, minC, maxC);
 
@@ -330,7 +331,16 @@ void main() {
 
             outputHistoryLength = min(historyLen, 64.0);
         }
-        // else: keep initialized values (reset history)
+        else {
+            // disocclusion blur
+            outputColor = mean;
+            outputHistoryLength = 0.0;
+        }
+    }
+    else {
+        // off screen or invalid motion
+        outputColor = mean;
+        outputHistoryLength = 0.0;
     }
 
     // Clamp outputs

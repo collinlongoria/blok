@@ -83,10 +83,9 @@ float computeKernelWeight(ivec2 offset) {
 float computeColorWeight(vec3 centerColor, vec3 sampleColor, float variance) {
     // Calculate luminance
     float lCenter = luminance(centerColor);
-    float lSample = luminance(sampleColor);
 
     // Scale the color difference by the inverse of luminance.
-    float lumWeight = 1.0 / (max(lCenter, 0.001) + 0.1); // +0.1 prevents explosion
+    float lumWeight = 1.0 / (lCenter + 1.0);
 
     vec3 diff = (centerColor - sampleColor) * lumWeight;
     float colorDistSq = dot(diff, diff);

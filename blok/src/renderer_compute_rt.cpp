@@ -388,7 +388,17 @@ void packChunksForCompute(const ChunkManager& mgr, WorldComputeGpu& gpuWorld) {
         gpuWorld.chunks.push_back(chunkGpu);
 
         // Append nodes to global array
-        gpuWorld.globalNodes.insert(gpuWorld.globalNodes.end(), nodes.begin(), nodes.end());
+        for (const auto& node : nodes) {
+            Sv64Node adjustedNode = node;
+
+            // Only adjust if this node has children (firstChild is valid)
+            if (node.childMask != 0 && node.firstChild != 0xFFFFFFFFu) {
+                adjustedNode.firstChild = node.firstChild + nodeOffset;
+            }
+
+            gpuWorld.globalNodes.push_back(adjustedNode);
+        }
+
         nodeOffset += static_cast<uint32_t>(nodes.size());
 
         chunkIndex++;

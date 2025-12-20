@@ -56,23 +56,23 @@ public:
     // TODO imgui panel to edit these
     struct Settings {
         // Temporal accumulation
-        float temporalAlpha = 0.05f;
+        float temporalAlpha = 0.1f;
         float momentAlpha = 0.2f;
-        float varianceClipGamma = 1.5f;
+        float varianceClipGamma = 2.0f;
 
         // Geometry rejection thresholds
-        float depthThreshold = 0.1f;
-        float normalThreshold = 0.95f;
+        float depthThreshold = 0.05f;
+        float normalThreshold = 0.9f;
 
         // Atrous filter parameters
-        float phiColor = 0.5f;
-        float phiNormal = 128.0f;
-        float phiDepth = 0.1f;
-        int atrousIterations = 4;
+        float phiColor = 0.3f;
+        float phiNormal = 64.0f;
+        float phiDepth = 0.05f;
+        int atrousIterations = 5;
 
         // Variance estimation
-        float varianceBoost = 1.5f;
-        int minHistoryLength = 4;
+        float varianceBoost = 2.0f;
+        int minHistoryLength = 8;
     } settings;
 
 public:

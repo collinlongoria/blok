@@ -110,6 +110,7 @@ const float T_MAX = 10000.0;
 const uint MAX_OCTREE_STACK = 24;
 const uint MAX_OCTREE_ITER = 256;
 const uint INVALID_CHUNK = 0xFFFFFFFFu;
+const uint INVALID_NODE = 0xFFFFFFFFu;
 const uint CHUNK_FLAG_EMPTY = 0x1u;
 const uint CHUNK_FLAG_SOLID = 0x2u;
 
@@ -182,14 +183,14 @@ struct OctreeStackItem { uint nodeIndex; vec3 minPos; float size; };
 HitResult traverseChunkOctree(uint chunkIndex, vec3 rayOrigin, vec3 rayDir, vec3 invDir, float tMin, float tMax) {
     HitResult result = noHit();
     ChunkGpu chunk = chunks[chunkIndex];
-    
+
     if ((chunk.flags & CHUNK_FLAG_EMPTY) != 0u) return result;
-    
+
     if ((chunk.flags & CHUNK_FLAG_SOLID) != 0u) {
         vec2 chunkT = intersectAABB(rayOrigin, invDir, chunk.worldMin, chunk.worldMax);
         float tEnter = max(chunkT.x, tMin);
         if (tEnter < min(chunkT.y, tMax)) {
-            Sv64Node rootNode = nodes[chunk.nodeOffset + chunk.rootNodeIndex];
+            Sv64Node rootNode = nodes[chunk.nodeOffset];
             MaterialGpu mat = materials[min(rootNode.materialId, 65535u)];
             result.hit = true;
             result.t = tEnter;
@@ -201,17 +202,18 @@ HitResult traverseChunkOctree(uint chunkIndex, vec3 rayOrigin, vec3 rayDir, vec3
         }
         return result;
     }
-    
+
     vec2 chunkT = intersectAABB(rayOrigin, invDir, chunk.worldMin, chunk.worldMax);
     if (max(chunkT.x, tMin) > min(chunkT.y, tMax)) return result;
-    
+
     ivec3 stepSign = ivec3(sign(rayDir));
     vec3 posStep = vec3(stepSign);
-    
+
     OctreeStackItem stack[MAX_OCTREE_STACK];
     uint stackPtr = 0u;
-    stack[stackPtr++] = OctreeStackItem(chunk.nodeOffset + chunk.rootNodeIndex, chunk.worldMin, chunk.size);
-    
+    uint rootGlobalIndex = chunk.nodeOffset + chunk.rootNodeIndex;
+    stack[stackPtr++] = OctreeStackItem(rootGlobalIndex, chunk.worldMin, chunk.size);
+
     uint iter = 0u;
     while (stackPtr > 0u && iter++ < MAX_OCTREE_ITER) {
         OctreeStackItem item = stack[--stackPtr];
@@ -220,9 +222,9 @@ HitResult traverseChunkOctree(uint chunkIndex, vec3 rayOrigin, vec3 rayDir, vec3
         float tEnter = max(nodeT.x, tMin);
         float tExit = min(nodeT.y, min(tMax, result.t - EPSILON));
         if (tEnter > tExit) continue;
-        
+
         Sv64Node node = nodes[item.nodeIndex];
-        
+
         if (node.childMask == 0ul) {
             if (node.occupancy > 0.0) {
                 MaterialGpu mat = materials[min(node.materialId, 65535u)];
@@ -237,21 +239,22 @@ HitResult traverseChunkOctree(uint chunkIndex, vec3 rayOrigin, vec3 rayDir, vec3
             }
             continue;
         }
-        
+
         float voxelSize = item.size * 0.25;
         vec3 entryPos = rayOrigin + rayDir * (tEnter + EPSILON);
         ivec3 gridPos = clamp(ivec3(floor((entryPos - item.minPos) / voxelSize)), ivec3(0), ivec3(3));
         vec3 tDelta = abs(vec3(voxelSize) * invDir);
         vec3 tNext = ((vec3(gridPos) + max(vec3(0), posStep)) * voxelSize + item.minPos - rayOrigin) * invDir;
-        
+
         struct ChildHit { uint index; vec3 pos; };
         ChildHit childHits[12];
         uint hitCount = 0u;
-        
+
         for (int step = 0; step < 16; ++step) {
             uint childIdx = uint(gridPos.x) | (uint(gridPos.y) << 2) | (uint(gridPos.z) << 4);
             if ((node.childMask & (1ul << childIdx)) != 0ul && hitCount < 12u) {
-                childHits[hitCount++] = ChildHit(node.firstChild + getChildOffset(node.childMask, childIdx), item.minPos + vec3(gridPos) * voxelSize);
+                uint childGlobalIndex = node.firstChild + getChildOffset(node.childMask, childIdx);
+                childHits[hitCount++] = ChildHit(childGlobalIndex, item.minPos + vec3(gridPos) * voxelSize);
             }
             float tNextMin = min(min(tNext.x, tNext.y), tNext.z);
             if (tNextMin > tExit) break;
@@ -259,7 +262,7 @@ HitResult traverseChunkOctree(uint chunkIndex, vec3 rayOrigin, vec3 rayDir, vec3
             else if (tNext.y <= tNext.z) { tNext.y += tDelta.y; gridPos.y += stepSign.y; if (gridPos.y < 0 || gridPos.y > 3) break; }
             else { tNext.z += tDelta.z; gridPos.z += stepSign.z; if (gridPos.z < 0 || gridPos.z > 3) break; }
         }
-        
+
         for (int i = int(hitCount) - 1; i >= 0 && stackPtr < MAX_OCTREE_STACK; --i)
             stack[stackPtr++] = OctreeStackItem(childHits[i].index, childHits[i].pos, voxelSize);
     }
@@ -273,32 +276,32 @@ HitResult traverseChunkOctree(uint chunkIndex, vec3 rayOrigin, vec3 rayDir, vec3
 HitResult traceRay(vec3 rayOrigin, vec3 rayDir, float tMin, float tMax) {
     HitResult result = noHit();
     vec3 invDir = safeInvDir(rayDir);
-    
+
     vec2 gridT = intersectAABB(rayOrigin, invDir, chunkGrid.gridWorldMin, chunkGrid.gridWorldMax);
     float tEnterGrid = max(gridT.x, tMin);
     float tExitGrid = min(gridT.y, tMax);
     if (tEnterGrid > tExitGrid) return result;
-    
+
     ivec3 stepSign = ivec3(sign(rayDir));
     vec3 entryPos = rayOrigin + rayDir * max(tEnterGrid + EPSILON, 0.0);
     ivec3 gridPos = clamp(ivec3(floor((entryPos - chunkGrid.gridWorldMin) * chunkGrid.invChunkSize)), ivec3(0), chunkGrid.gridDimensions - 1);
     vec3 tDelta = abs(vec3(chunkGrid.chunkSize) * invDir);
     vec3 tNext = (chunkGrid.gridWorldMin + (vec3(gridPos) + max(vec3(0), vec3(stepSign))) * chunkGrid.chunkSize - rayOrigin) * invDir;
-    
+
     int maxIter = chunkGrid.gridDimensions.x + chunkGrid.gridDimensions.y + chunkGrid.gridDimensions.z;
     for (int iter = 0; iter < maxIter; ++iter) {
         if (any(lessThan(gridPos, ivec3(0))) || any(greaterThanEqual(gridPos, chunkGrid.gridDimensions))) break;
-        
+
         uint chunkIndex = texelFetch(chunkIndexMap, gridPos, 0).r;
         if (chunkIndex != INVALID_CHUNK) {
             HitResult chunkHit = traverseChunkOctree(chunkIndex, rayOrigin, rayDir, invDir, tMin, min(tMax, result.t));
             if (chunkHit.hit && chunkHit.t < result.t) result = chunkHit;
         }
-        
+
         float tNextMin = min(min(tNext.x, tNext.y), tNext.z);
         if (result.hit && tNextMin > result.t) break;
         if (tNextMin > tExitGrid) break;
-        
+
         if (tNext.x <= tNext.y && tNext.x <= tNext.z) { tNext.x += tDelta.x; gridPos.x += stepSign.x; }
         else if (tNext.y <= tNext.z) { tNext.y += tDelta.y; gridPos.y += stepSign.y; }
         else { tNext.z += tDelta.z; gridPos.z += stepSign.z; }
@@ -310,13 +313,13 @@ bool traceShadowRay(vec3 rayOrigin, vec3 rayDir, float tMax) {
     vec3 invDir = safeInvDir(rayDir);
     vec2 gridT = intersectAABB(rayOrigin, invDir, chunkGrid.gridWorldMin, chunkGrid.gridWorldMax);
     if (max(gridT.x, EPSILON) > min(gridT.y, tMax)) return false;
-    
+
     ivec3 stepSign = ivec3(sign(rayDir));
     vec3 entryPos = rayOrigin + rayDir * max(gridT.x + EPSILON, 0.0);
     ivec3 gridPos = clamp(ivec3(floor((entryPos - chunkGrid.gridWorldMin) * chunkGrid.invChunkSize)), ivec3(0), chunkGrid.gridDimensions - 1);
     vec3 tDelta = abs(vec3(chunkGrid.chunkSize) * invDir);
     vec3 tNext = (chunkGrid.gridWorldMin + (vec3(gridPos) + max(vec3(0), vec3(stepSign))) * chunkGrid.chunkSize - rayOrigin) * invDir;
-    
+
     int maxIter = chunkGrid.gridDimensions.x + chunkGrid.gridDimensions.y + chunkGrid.gridDimensions.z;
     for (int iter = 0; iter < maxIter; ++iter) {
         if (any(lessThan(gridPos, ivec3(0))) || any(greaterThanEqual(gridPos, chunkGrid.gridDimensions))) break;
@@ -376,18 +379,18 @@ vec2 computeMotionVector(vec3 worldPos, vec2 currentUV) {
 void main() {
     uvec2 pixelCoord = gl_GlobalInvocationID.xy;
     if (pixelCoord.x >= frame.screenWidth || pixelCoord.y >= frame.screenHeight) return;
-    
+
     vec2 pixelSize = vec2(frame.screenWidth, frame.screenHeight);
     vec2 currentUV = (vec2(pixelCoord) + 0.5) / pixelSize;
-    
+
     vec3 firstHitPos, firstHitNormal, firstHitAlbedo, firstHitEmission;
     float firstHitRoughness = 0.0, firstHitMetallic = 0.0, firstHitDepth = 0.0;
     bool hadFirstHit = false, firstHitWasEmissive = false;
     vec3 accumulatedColor = vec3(0.0);
-    
+
     const vec3 sunDir = normalize(vec3(0.5, 0.8, 0.3));
     const vec3 sunRadiance = vec3(3.0, 2.9, 2.7);
-    
+
     for (uint sampleIdx = 0u; sampleIdx < frame.sampleCount; sampleIdx++) {
         uint rng = initRNG(pixelCoord, frame.frameCount, sampleIdx);
         vec2 pixelCenter = vec2(pixelCoord) + (sampleIdx == 0u ? vec2(0.5) : vec2(0.5) + (randomVec2(rng) - 0.5) * 0.5);
@@ -396,14 +399,14 @@ void main() {
         vec3 rayDir = normalize((frame.invView * vec4(normalize(target.xyz), 0.0)).xyz);
         vec3 rayOrigin = frame.camPos;
         vec3 radiance = vec3(0.0), throughput = vec3(1.0);
-        
+
         for (uint bounce = 0u; bounce < 4u; bounce++) {
             HitResult hit = traceRay(rayOrigin, rayDir, 0.001, T_MAX);
             if (!hit.hit) { radiance += throughput * getSkyColor(rayDir); break; }
-            
+
             vec3 hitPos = rayOrigin + rayDir * hit.t;
             vec3 N = hit.normal; if (dot(N, rayDir) > 0.0) N = -N;
-            
+
             if (bounce == 0u && sampleIdx == 0u && !hadFirstHit) {
                 hadFirstHit = true;
                 firstHitPos = hitPos; firstHitNormal = N; firstHitAlbedo = hit.albedo;
@@ -411,7 +414,7 @@ void main() {
                 firstHitMetallic = hit.metallic; firstHitDepth = hit.t;
                 firstHitWasEmissive = isEmissive(hit.emission);
             }
-            
+
             if (isEmissive(hit.emission)) {
                 vec3 emission = hit.emission;
                 // Clamp indirect light intensity to kill fireflies at the source
@@ -423,7 +426,7 @@ void main() {
 
                 if (luminance(hit.emission) > 5.0 || bounce > 0u) break;
             }
-            
+
             float NdotL = max(dot(N, sunDir), 0.0);
             if (NdotL > 0.0 && bounce == 0u && !traceShadowRay(hitPos + N * 0.001, sunDir, 1000.0)) {
                 vec3 diffuseColor = hit.albedo * (1.0 - hit.metallic);
@@ -435,18 +438,18 @@ void main() {
                     radiance += throughput * fresnelSchlick(max(dot(-rayDir, H), 0.0), mix(vec3(0.04), hit.albedo, hit.metallic)) * (a2 / (PI * denom * denom)) * 0.25 * sunRadiance * NdotL;
                 }
             }
-            
+
             if (bounce > 0u) {
                 float p = min(max(max(throughput.r, throughput.g), throughput.b), 0.95);
                 if (randomFloat(rng) > p) break;
                 throughput /= p;
             }
-            
+
             vec2 u = randomVec2(rng);
             vec3 F0 = mix(vec3(0.04), hit.albedo, hit.metallic);
             vec3 F = fresnelSchlick(max(dot(N, -rayDir), 0.001), F0);
             float specularWeight = mix((F.r + F.g + F.b) / 3.0, 1.0, hit.metallic);
-            
+
             if (randomFloat(rng) < specularWeight) {
                 vec3 H = sampleGGX(u, N, max(hit.roughness, 0.04));
                 vec3 newDir = reflect(rayDir, H);
@@ -457,27 +460,27 @@ void main() {
                 throughput *= hit.albedo * (1.0 - hit.metallic) / max(1.0 - specularWeight, 0.001);
                 rayDir = sampleCosineHemisphere(u, N);
             }
-            
+
             float maxT = max(max(throughput.r, throughput.g), throughput.b);
             if (maxT > 10.0) throughput *= 10.0 / maxT;
             rayOrigin = hitPos + N * 0.002;
         }
         accumulatedColor += radiance;
     }
-    
+
     vec3 color = accumulatedColor / float(frame.sampleCount);
     float maxVal = max(max(color.r, color.g), color.b);
     if (maxVal > 100.0) color *= 100.0 / maxVal;
-    
+
     imageStore(outColor, ivec2(pixelCoord), vec4(color, 1.0));
-    
+
     if (!hadFirstHit) {
         firstHitDepth = T_MAX;
         firstHitPos = frame.camPos + normalize((frame.invView * vec4(0, 0, -1, 0)).xyz) * T_MAX;
         firstHitNormal = vec3(0, 1, 0);
         firstHitAlbedo = getSkyColor(normalize(firstHitPos - frame.camPos));
     }
-    
+
     imageStore(outWorldPosition, ivec2(pixelCoord), vec4(firstHitPos, firstHitDepth));
     imageStore(outNormalRoughness, ivec2(pixelCoord), vec4(firstHitNormal, firstHitRoughness));
     imageStore(outAlbedoMetallic, ivec2(pixelCoord), vec4(firstHitWasEmissive ? firstHitEmission : firstHitAlbedo, firstHitMetallic));

@@ -1,11 +1,6 @@
 TODO (Collin)
 
 // NEXT 2 weeks:
-Bit-Brick leaves: turning leaf nodes into 4x4x4 blocks to improve performance
-Send initial bounce to a compute shader, only use raytracing pipeline for continuing bounces (huge optimization i think)
-consider implementing upscaling using FSR or DLSS?
-
-// NEXT 2 weeks:
 systems for registering block types
 implement a list of lights, multiple lights and use emissives as emitters
 noise gen for world
@@ -18,13 +13,10 @@ obj loader and voxelizer
 bloom?
 motion blur?
 glass and refraction
-
-// THE BIGGEST NEED:
-One BLAS per chunk, multiple TLAS instances, and chunk LOD
+consider implementing upscaling using FSR or DLSS?
+non-pathtraced graphics pipeline (for fun, and for testing voxels)
 
 // KNOWN ISSUES:
 no way to disable camera movement
-
-// SOME EXPLORATIONS TO CONSIDER:
-mesh shader for SVO traversal -> triangulation -> greedy meshing (on gpu not possible maybe?)
-just forgetting SVO and doing triangles (would work best withraytracing pipeline)
+noise in heavily shadowed areas
+insert voxel is naive

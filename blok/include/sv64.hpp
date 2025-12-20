@@ -41,6 +41,8 @@ public:
 
     void insertVoxel(uint32_t x, uint32_t y, uint32_t z, uint32_t materialId, float density = 1.0f);
 
+    void removeVoxel(uint32_t x, uint32_t y, uint32_t z);
+
     [[nodiscard]]
     const Sv64Node* findLeaf(uint32_t x, uint32_t y, uint32_t z) const;
 
@@ -73,7 +75,13 @@ private:
     };
     std::vector<BuildNode> buildNodes;
 
+    // Cache of the last access path to speed up sequential inserts
+    uint64_t lastMortonCode = 0xFFFFFFFFFFFFFFFF;
+    std::vector<uint32_t> lastPathIndices;
+
     uint32_t ensureChild(uint32_t nodeIndex, uint32_t childIdx);
+
+    bool removeRecursive(uint32_t nodeIndex, uint64_t mortonCode, uint32_t currentDepth);
 
     static uint32_t calculateDepth(uint32_t resolution);
     static uint32_t popcount64(uint64_t x);
