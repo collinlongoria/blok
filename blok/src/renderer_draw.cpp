@@ -138,11 +138,15 @@ void Renderer::drawFrame(const Camera& c, float dt) {
         m_raytracer.updateDescriptorSet(*m_world, m_frameIndex);
     }
 
-    m_raytracer.dispatchRayTracing(fr.cmd, m_swapExtent.width, m_swapExtent.height, m_frameIndex);
+    //m_raytracer.dispatchRayTracing(fr.cmd, m_swapExtent.width, m_swapExtent.height, m_frameIndex);
+    m_computeRT.updateDescriptorSet(*m_computeWorld, m_frameIndex);
+    m_computeRT.dispatchRayTracing(fr.cmd, m_swapExtent.width, m_swapExtent.height, m_frameIndex);
 
     // Memory barrier: ray tracing writes -> compute shader reads
     vk::MemoryBarrier2 rtToComputeBarrier{};
-    rtToComputeBarrier.srcStageMask = vk::PipelineStageFlagBits2::eRayTracingShaderKHR;
+    //rtToComputeBarrier.srcStageMask = vk::PipelineStageFlagBits2::eRayTracingShaderKHR;
+    rtToComputeBarrier.srcStageMask = vk::PipelineStageFlagBits2::eComputeShader;
+
     rtToComputeBarrier.srcAccessMask = vk::AccessFlagBits2::eShaderWrite;
     rtToComputeBarrier.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader;
     rtToComputeBarrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead | vk::AccessFlagBits2::eShaderWrite;

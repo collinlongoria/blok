@@ -22,7 +22,7 @@ static VKAPI_ATTR VkBool32 VKAPI_CALL debugCallback(VkDebugUtilsMessageSeverityF
 }
 
 Renderer::Renderer(int width, int height)
-    : m_width(width), m_height(height), m_shaderManager(m_device), m_raytracer(this), m_denoiser(this), m_postProcess(this) {
+    : m_width(width), m_height(height), m_shaderManager(m_device), m_raytracer(this), m_denoiser(this), m_postProcess(this), m_computeRT(this) {
     VULKAN_HPP_DEFAULT_DISPATCHER.init();
 
     createWindow();
@@ -63,6 +63,10 @@ Renderer::Renderer(int width, int height)
     m_raytracer.createPipeline();
     m_raytracer.createSBT();
 
+    m_computeRT.createDescriptorSetLayout();
+    m_computeRT.allocateDescriptorSet();
+    m_computeRT.createPipeline();
+
     m_denoiser.init(m_swapExtent.width, m_swapExtent.height);
 
     m_postProcess.init(m_swapExtent.width, m_swapExtent.height);
@@ -96,6 +100,13 @@ Renderer::~Renderer() {
     if (m_uploadFence) { m_device.destroyFence(m_uploadFence); }
     if (m_uploadCmd) { m_device.freeCommandBuffers(m_uploadPool, 1, &m_uploadCmd); }
     if (m_uploadPool) { m_device.destroyCommandPool(m_uploadPool); }
+
+    m_computeRT.cleanup();
+
+    if (m_computeWorld) {
+        cleanupWorldCompute(*m_computeWorld);
+        m_computeWorld = nullptr;
+    }
 
     if (m_raytracer.rtSetLayout) { m_device.destroyDescriptorSetLayout(m_raytracer.rtSetLayout); }
     if (m_raytracer.rtPipeline.layout) { m_device.destroyPipelineLayout(m_raytracer.rtPipeline.layout); }
@@ -598,6 +609,76 @@ std::vector<const char *> Renderer::getRequiredDeviceExtensions() {
         VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME /* Raytracing Pipeline */
     };
     return out;
+}
+
+void Renderer::addWorldCompute(WorldComputeGpu& gpuWorld) {
+    m_computeWorld = &gpuWorld;
+
+    // Upload all buffers
+    uploadComputeWorldBuffers(gpuWorld);
+
+    // Create chunk index map from the packed data
+    createChunkIndexMap(gpuWorld, gpuWorld.chunkIndexData);
+
+    // Update descriptor sets
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        m_computeRT.updateDescriptorSet(gpuWorld, i);
+    }
+}
+
+void Renderer::updateWorldCompute() {
+    if (!m_computeWorld) return;
+
+    m_device.waitIdle();
+
+    // Reupload all buffers
+    uploadComputeWorldBuffers(*m_computeWorld);
+
+    // Recreate chunk index map
+    createChunkIndexMap(*m_computeWorld, m_computeWorld->chunkIndexData);
+
+    // Update descriptor sets
+    for (uint32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; ++i) {
+        m_computeRT.updateDescriptorSet(*m_computeWorld, i);
+    }
+}
+
+void Renderer::cleanupWorldCompute(WorldComputeGpu& gpuWorld) {
+    m_device.waitIdle();
+
+    // Cleanup chunk index map
+    auto& map = gpuWorld.chunkIndexMap;
+    if (map.sampler) { m_device.destroySampler(map.sampler); map.sampler = nullptr; }
+    if (map.view) { m_device.destroyImageView(map.view); map.view = nullptr; }
+    if (map.handle) { vmaDestroyImage(m_allocator, map.handle, map.alloc); map.handle = nullptr; map.alloc = nullptr; }
+
+    // Cleanup buffers
+    if (gpuWorld.sv64Buffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.sv64Buffer.handle, gpuWorld.sv64Buffer.alloc);
+        gpuWorld.sv64Buffer = {};
+    }
+    if (gpuWorld.chunkBuffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.chunkBuffer.handle, gpuWorld.chunkBuffer.alloc);
+        gpuWorld.chunkBuffer = {};
+    }
+    if (gpuWorld.gridInfoBuffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.gridInfoBuffer.handle, gpuWorld.gridInfoBuffer.alloc);
+        gpuWorld.gridInfoBuffer = {};
+    }
+    if (gpuWorld.materialBuffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.materialBuffer.handle, gpuWorld.materialBuffer.alloc);
+        gpuWorld.materialBuffer = {};
+    }
+
+    // Clear CPU-side data
+    gpuWorld.globalNodes.clear();
+    gpuWorld.chunks.clear();
+    gpuWorld.materials.clear();
+    gpuWorld.chunkIndexData.clear();
+
+    if (m_computeWorld == &gpuWorld) {
+        m_computeWorld = nullptr;
+    }
 }
 
 }

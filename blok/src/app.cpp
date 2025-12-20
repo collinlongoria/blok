@@ -108,7 +108,7 @@ void App::init() {
             VoxFile vox;
             std::string err;
             bool success = blok::loadAndImportVox(
-                "assets/models/chr_knight.vox",
+                "assets/models/menger.vox",
                 g_mgr,
                 &matLib,
                 glm::vec3(0, 0, 0),
@@ -122,11 +122,14 @@ void App::init() {
 
             // Prepare GPU world SVO
             m_gpuWorld = std::make_unique<WorldSv64Gpu>();
+            computeWorld = std::make_unique<WorldComputeGpu>();
             rebuildDirtyChunks(g_mgr, 16);
-            packChunksToGpuSv64(g_mgr, *m_gpuWorld);
+
+
+            packChunksForCompute(g_mgr, *computeWorld);
 
             // Upload world to Renderer
-            m_renderer->addWorld(*m_gpuWorld);
+            m_renderer->addWorldCompute(*computeWorld);
         }
             break;
     }

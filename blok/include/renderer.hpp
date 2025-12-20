@@ -18,6 +18,7 @@
 #include "renderer_raytracing.hpp"
 #include "renderer_denoising.hpp"
 #include "renderer_postprocess.hpp"
+#include "renderer_compute_rt.hpp"
 #include "resources.hpp"
 #include "shader_manager.hpp"
 
@@ -76,6 +77,11 @@ public:
     // gui
     void updatePerformanceData(float fps, float ms);
 
+    // compute rt
+    void addWorldCompute(WorldComputeGpu& gpuWorld);
+    void updateWorldCompute();
+    void cleanupWorldCompute(WorldComputeGpu& gpuWorld);
+
 private:
     // Device creation
     void createWindow();
@@ -116,6 +122,9 @@ private:
 
     void uploadSv64Buffers(WorldSv64Gpu& gpuWorld);
     void uploadMaterialBuffer(WorldSv64Gpu& gpuWorld);
+
+    void createChunkIndexMap(WorldComputeGpu& gpuWorld, const std::vector<uint32_t>& indexData);
+    void uploadComputeWorldBuffers(WorldComputeGpu& gpuWorld);
 
     // Rendering
     void beginFrame();
@@ -193,14 +202,17 @@ private:
     ShaderManager m_shaderManager;
 
     WorldSv64Gpu* m_world = nullptr;
+    WorldComputeGpu* m_computeWorld = nullptr;
     MaterialLibrary m_materialLib{};
 
     vk::PhysicalDeviceRayTracingPipelinePropertiesKHR m_rtProps{};
     RayTracing m_raytracer;
+    ComputeRT m_computeRT;
     uint32_t m_frameCount = 0;
     Denoiser m_denoiser;
     PostProcess m_postProcess;
     friend class RayTracing;
+    friend class ComputeRT;
     friend class Denoiser;
     friend class PostProcess;
 };

@@ -11,6 +11,7 @@
 #include "backend.hpp"
 
 namespace blok {
+struct WorldComputeGpu;
 struct WorldSv64Gpu;
 
 class Window;
@@ -38,6 +39,7 @@ private:
     std::unique_ptr<CudaTracer> m_cudaTracer;
 
     std::unique_ptr<WorldSv64Gpu> m_gpuWorld;
+    std::unique_ptr<WorldComputeGpu> computeWorld;
 };
 
 } // namespace blok

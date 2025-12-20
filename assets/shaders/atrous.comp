@@ -9,7 +9,6 @@
 
 layout(local_size_x = 8, local_size_y = 8, local_size_z = 1) in;
 
-// CHANGED: Use image instead of sampler to avoid bilinear blur across voxel edges
 layout(binding = 0) uniform sampler2D inColor;
 
 layout(binding = 1, r32f)    uniform readonly image2D inVariance;
@@ -55,7 +54,6 @@ layout(push_constant) uniform PushConstants {
     float phiDepth;
 } pc;
 
-// 5x5 à-trous kernel weights
 const float kernel[3] = float[3](1.0, 2.0/3.0, 1.0/6.0);
 
 const ivec2 offsets[25] = ivec2[25](
@@ -82,13 +80,18 @@ float computeKernelWeight(ivec2 offset) {
     return kernel[kx] * kernel[ky];
 }
 
-// variance-guided color weight
 float computeColorWeight(vec3 centerColor, vec3 sampleColor, float variance) {
-    vec3 diff = centerColor - sampleColor;
+    // Calculate luminance
+    float lCenter = luminance(centerColor);
+    float lSample = luminance(sampleColor);
+
+    // Scale the color difference by the inverse of luminance.
+    float lumWeight = 1.0 / (max(lCenter, 0.001) + 0.1); // +0.1 prevents explosion
+
+    vec3 diff = (centerColor - sampleColor) * lumWeight;
     float colorDistSq = dot(diff, diff);
 
-    // Variance-guided sigma
-    // Add base sigma to prevent over-filtering when variance is very low
+    // Variance guidance
     float baseSigma = 0.01;
     float varianceSigma = pc.phiColor * sqrt(max(variance, 0.0));
     float sigma = baseSigma + varianceSigma;
@@ -96,45 +99,28 @@ float computeColorWeight(vec3 centerColor, vec3 sampleColor, float variance) {
     return fastExp(colorDistSq / (2.0 * sigma * sigma + 1e-6));
 }
 
-// Sharper normal falloff for voxels
 float computeNormalWeight(vec3 centerNormal, vec3 sampleNormal) {
     float dotProduct = max(dot(centerNormal, sampleNormal), 0.0);
 
-    // For voxels with axis-aligned normals:
-    // - Same face: dot = 1.0 -> weight = 1.0
-    // - Adjacent face (90°): dot = 0.0 -> weight = 0.0
-    // - Opposite face: dot = -1.0 -> weight = 0.0
-
-    // Use a threshold instead of power for hard edges
-    // Normals within ~25° get full weight, then sharp falloff
     float threshold = 0.9; // cos(25°) ≈ 0.906
     if (dotProduct < threshold) {
         return 0.0;
     }
 
-    // Smooth falloff above threshold
     float t = (dotProduct - threshold) / (1.0 - threshold);
-    return t * t; // Quadratic falloff in the valid range
+    return t * t;
 }
 
-// IMPROVED: Plane-aware depth weight for voxels
 float computeDepthWeight(vec3 centerWorldPos, vec3 sampleWorldPos, vec3 centerNormal, float centerDepth, float sampleDepth) {
-    // For voxels, we care about whether we're on the same surface
-
-    // Method 1: Simple depth difference (good for axis-aligned views)
     float depthDiff = abs(centerDepth - sampleDepth);
 
-    // Method 2: Plane distance (better for angled views)
     vec3 posDiff = sampleWorldPos - centerWorldPos;
     float planeDistance = abs(dot(posDiff, centerNormal));
 
-    // Combine both - use whichever is more restrictive
     float effectiveDistance = max(depthDiff * 0.1, planeDistance);
 
-    // Threshold based on step size (larger steps = more tolerance)
     float sigma = pc.phiDepth * float(pc.stepSize) + 0.1;
 
-    // Hard cutoff for voxel edges
     if (effectiveDistance > sigma * 2.0) {
         return 0.0;
     }
@@ -149,7 +135,6 @@ void main() {
         return;
     }
 
-    // Load center pixel data - USE POINT SAMPLING for voxels
     vec2 centerUV = (vec2(coord) + 0.5) / vec2(frame.screenWidth, frame.screenHeight);
     vec3 centerColor = texture(inColor, centerUV).rgb;
 
@@ -161,13 +146,11 @@ void main() {
     float centerDepth = centerWorldPosData.w;
     vec3 centerNormal = normalize(centerNormalData.xyz);
 
-    // Sky check
     if (centerDepth > 9000.0) {
         imageStore(outColor, coord, vec4(centerColor, 1.0));
         return;
     }
 
-    // Accumulate filtered color
     vec3 sumColor = vec3(0.0);
     float sumWeight = 0.0;
 
@@ -176,7 +159,6 @@ void main() {
         ivec2 sampleCoord = coord + offset;
         sampleCoord = clamp(sampleCoord, ivec2(0), ivec2(frame.screenWidth - 1, frame.screenHeight - 1));
 
-        // POINT SAMPLE - no bilinear interpolation across voxel edges
         vec2 sampleUV = (vec2(sampleCoord) + 0.5) / vec2(frame.screenWidth, frame.screenHeight);
         vec3 sampleColor = texture(inColor, sampleUV).rgb;
 
@@ -187,12 +169,10 @@ void main() {
         float sampleDepth = sampleWorldPosData.w;
         vec3 sampleNormal = normalize(sampleNormalData.xyz);
 
-        // Skip sky
         if (sampleDepth > 9000.0) {
             continue;
         }
 
-        // Compute weights
         float kernelWeight = computeKernelWeight(offsets[i]);
         float colorWeight = computeColorWeight(centerColor, sampleColor, centerVariance);
         float normalWeight = computeNormalWeight(centerNormal, sampleNormal);
@@ -200,7 +180,6 @@ void main() {
 
         float weight = kernelWeight * colorWeight * normalWeight * depthWeight;
 
-        // Minimum weight threshold to avoid near-zero contributions
         if (weight < 0.001) {
             continue;
         }

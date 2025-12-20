@@ -97,7 +97,6 @@ vec3 clipToAABB(vec3 historyColor, vec3 currentMin, vec3 currentMax) {
     vec3 unitOffset = offset / max(extents, vec3(0.0001));
 
     float maxComponent = max(max(abs(unitOffset.x), abs(unitOffset.y)), abs(unitOffset.z));
-
     if (maxComponent > 1.0) {
         return center + offset / maxComponent;
     }
@@ -190,8 +189,34 @@ void main() {
         return;
     }
 
-    // Load current frame data
+    // Load current frame data (This is the noisy input)
     vec3 currentColor = imageLoad(inColor, coord).rgb;
+
+    vec3 m1 = vec3(0.0);
+    vec3 m2 = vec3(0.0);
+    float w = 0.0;
+
+    // Simple 3x3 box filter (no edge detection needed for firefly killing)
+    for(int y = -1; y <= 1; ++y) {
+        for(int x = -1; x <= 1; ++x) {
+            ivec2 sCoord = clamp(coord + ivec2(x, y), ivec2(0), ivec2(frame.screenWidth - 1, frame.screenHeight - 1));
+            vec3 sColor = imageLoad(inColor, sCoord).rgb;
+            m1 += sColor;
+            m2 += sColor * sColor;
+            w += 1.0;
+        }
+    }
+
+    vec3 mean = m1 / w;
+    vec3 stdDev = sqrt(max(m2 / w - mean * mean, vec3(0.0)));
+
+    // Clamp to Mean +/- 3 StdDev
+    // This crushes single bright pixels (fireflies) down to the neighborhood average
+    vec3 minValid = mean - 3.0 * stdDev;
+    vec3 maxValid = mean + 3.0 * stdDev;
+
+    currentColor = clamp(currentColor, minValid, maxValid);
+
     vec4 worldPosData = imageLoad(inWorldPosition, coord);
     vec4 normalRoughnessData = imageLoad(inNormalRoughness, coord);
 
@@ -254,7 +279,8 @@ void main() {
         // World position consistency (helps with disocclusion)
         vec3 prevWorldPos = prevWorldPosData.xyz;
         float worldPosDiff = length(worldPos - prevWorldPos);
-        bool worldPosValid = worldPosDiff < 2.0; // 2 voxel units tolerance
+        bool worldPosValid = worldPosDiff < 2.0;
+        // 2 voxel units tolerance
 
         // Combined validity
         bool geometryValid = depthValid && normalValid && worldPosValid;

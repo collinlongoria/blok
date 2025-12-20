@@ -311,4 +311,195 @@ void Renderer::uploadMaterialBuffer(WorldSv64Gpu& gpuWorld) {
               << " materials (" << materialSize << " bytes)\n";
 }
 
+void Renderer::createChunkIndexMap(WorldComputeGpu& gpuWorld, const std::vector<uint32_t>& indexData) {
+    auto& map = gpuWorld.chunkIndexMap;
+    glm::ivec3 dims = gpuWorld.gridInfo.gridDimensions;
+
+    // Cleanup old resources
+    if (map.sampler) { m_device.destroySampler(map.sampler); map.sampler = nullptr; }
+    if (map.view) { m_device.destroyImageView(map.view); map.view = nullptr; }
+    if (map.handle) { vmaDestroyImage(m_allocator, map.handle, map.alloc); map.handle = nullptr; map.alloc = nullptr; }
+
+    map.dimensions = dims;
+
+    // Create 3D image
+    VkImageCreateInfo ici{};
+    ici.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    ici.imageType = VK_IMAGE_TYPE_3D;
+    ici.format = VK_FORMAT_R32_UINT;
+    ici.extent = { static_cast<uint32_t>(dims.x), static_cast<uint32_t>(dims.y), static_cast<uint32_t>(dims.z) };
+    ici.mipLevels = 1;
+    ici.arrayLayers = 1;
+    ici.samples = VK_SAMPLE_COUNT_1_BIT;
+    ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    ici.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ici.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VmaAllocationCreateInfo aci{};
+    aci.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+
+    if (vmaCreateImage(m_allocator, &ici, &aci, reinterpret_cast<VkImage*>(&map.handle), &map.alloc, nullptr) != VK_SUCCESS) {
+        throw std::runtime_error("Failed to create chunk index map");
+    }
+
+    // Create view
+    vk::ImageViewCreateInfo vci{};
+    vci.image = map.handle;
+    vci.viewType = vk::ImageViewType::e3D;
+    vci.format = vk::Format::eR32Uint;
+    vci.subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 };
+    map.view = m_device.createImageView(vci);
+
+    // Create sampler (nearest filtering for integer lookups)
+    vk::SamplerCreateInfo sci{};
+    sci.magFilter = vk::Filter::eNearest;
+    sci.minFilter = vk::Filter::eNearest;
+    sci.mipmapMode = vk::SamplerMipmapMode::eNearest;
+    sci.addressModeU = vk::SamplerAddressMode::eClampToEdge;
+    sci.addressModeV = vk::SamplerAddressMode::eClampToEdge;
+    sci.addressModeW = vk::SamplerAddressMode::eClampToEdge;
+    sci.unnormalizedCoordinates = VK_FALSE;
+    map.sampler = m_device.createSampler(sci);
+
+    // Create staging buffer and upload
+    size_t dataSize = indexData.size() * sizeof(uint32_t);
+
+    Buffer staging = createBuffer(
+        dataSize,
+        vk::BufferUsageFlagBits::eTransferSrc,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        VMA_MEMORY_USAGE_AUTO_PREFER_HOST, true
+    );
+    std::memcpy(staging.mapped, indexData.data(), dataSize);
+
+    // Upload via command buffer
+    auto result = m_device.resetFences(1, &m_uploadFence);
+    m_uploadCmd.reset({});
+    m_uploadCmd.begin({ vk::CommandBufferUsageFlagBits::eOneTimeSubmit });
+
+    // Transition to transfer dst
+    vk::ImageMemoryBarrier2 barrier{};
+    barrier.srcStageMask = vk::PipelineStageFlagBits2::eTopOfPipe;
+    barrier.srcAccessMask = vk::AccessFlagBits2::eNone;
+    barrier.dstStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    barrier.dstAccessMask = vk::AccessFlagBits2::eTransferWrite;
+    barrier.oldLayout = vk::ImageLayout::eUndefined;
+    barrier.newLayout = vk::ImageLayout::eTransferDstOptimal;
+    barrier.image = map.handle;
+    barrier.subresourceRange = { vk::ImageAspectFlagBits::eColor, 0, 1, 0, 1 };
+
+    vk::DependencyInfo dep{};
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers = &barrier;
+    m_uploadCmd.pipelineBarrier2(dep);
+
+    // Copy buffer to image
+    vk::BufferImageCopy region{};
+    region.bufferOffset = 0;
+    region.bufferRowLength = 0;
+    region.bufferImageHeight = 0;
+    region.imageSubresource = { vk::ImageAspectFlagBits::eColor, 0, 0, 1 };
+    region.imageOffset = vk::Offset3D{ 0, 0, 0 };
+    region.imageExtent = vk::Extent3D{ static_cast<uint32_t>(dims.x), static_cast<uint32_t>(dims.y), static_cast<uint32_t>(dims.z) };
+    m_uploadCmd.copyBufferToImage(staging.handle, map.handle, vk::ImageLayout::eTransferDstOptimal, 1, &region);
+
+    // Transition to shader read
+    barrier.srcStageMask = vk::PipelineStageFlagBits2::eTransfer;
+    barrier.srcAccessMask = vk::AccessFlagBits2::eTransferWrite;
+    barrier.dstStageMask = vk::PipelineStageFlagBits2::eComputeShader;
+    barrier.dstAccessMask = vk::AccessFlagBits2::eShaderRead;
+    barrier.oldLayout = vk::ImageLayout::eTransferDstOptimal;
+    barrier.newLayout = vk::ImageLayout::eShaderReadOnlyOptimal;
+    m_uploadCmd.pipelineBarrier2(dep);
+
+    m_uploadCmd.end();
+
+    vk::SubmitInfo si{};
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &m_uploadCmd;
+    result = m_graphicsQueue.submit(1, &si, m_uploadFence);
+    result = m_device.waitForFences(1, &m_uploadFence, VK_TRUE, UINT64_MAX);
+
+    vmaDestroyBuffer(m_allocator, staging.handle, staging.alloc);
+
+    std::cout << "Created chunk index map: " << dims.x << "x" << dims.y << "x" << dims.z << "\n";
+}
+
+// ============================================================================
+// Buffer Upload
+// ============================================================================
+
+void Renderer::uploadComputeWorldBuffers(WorldComputeGpu& gpuWorld) {
+    // Destroy previous buffers
+    if (gpuWorld.sv64Buffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.sv64Buffer.handle, gpuWorld.sv64Buffer.alloc);
+        gpuWorld.sv64Buffer = {};
+    }
+    if (gpuWorld.chunkBuffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.chunkBuffer.handle, gpuWorld.chunkBuffer.alloc);
+        gpuWorld.chunkBuffer = {};
+    }
+    if (gpuWorld.gridInfoBuffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.gridInfoBuffer.handle, gpuWorld.gridInfoBuffer.alloc);
+        gpuWorld.gridInfoBuffer = {};
+    }
+    if (gpuWorld.materialBuffer.handle) {
+        vmaDestroyBuffer(m_allocator, gpuWorld.materialBuffer.handle, gpuWorld.materialBuffer.alloc);
+        gpuWorld.materialBuffer = {};
+    }
+
+    // Node buffer
+    if (!gpuWorld.globalNodes.empty()) {
+        vk::DeviceSize nodeBytes = sizeof(Sv64Node) * gpuWorld.globalNodes.size();
+        gpuWorld.sv64Buffer = createBuffer(
+            nodeBytes,
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            0, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
+        );
+        uploadToBuffer(gpuWorld.globalNodes.data(), nodeBytes, gpuWorld.sv64Buffer);
+    }
+
+    // Chunk metadata buffer
+    if (!gpuWorld.chunks.empty()) {
+        vk::DeviceSize chunkBytes = sizeof(ChunkGpuCompute) * gpuWorld.chunks.size();
+        gpuWorld.chunkBuffer = createBuffer(
+            chunkBytes,
+            vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+            0, VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE
+        );
+        uploadToBuffer(gpuWorld.chunks.data(), chunkBytes, gpuWorld.chunkBuffer);
+    }
+
+    // Grid info UBO
+    gpuWorld.gridInfoBuffer = createBuffer(
+        sizeof(ChunkGridUBO),
+        vk::BufferUsageFlagBits::eUniformBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT,
+        VMA_MEMORY_USAGE_AUTO_PREFER_HOST, true
+    );
+    uploadToBuffer(&gpuWorld.gridInfo, sizeof(ChunkGridUBO), gpuWorld.gridInfoBuffer);
+
+    // Material buffer
+    gpuWorld.materials = m_materialLib.packForGpu();
+    if (gpuWorld.materials.empty()) {
+        Material defaultMat;
+        defaultMat.albedo = glm::vec3(0.8f);
+        defaultMat.roughness = 0.5f;
+        gpuWorld.materials.push_back(MaterialGpu::pack(defaultMat));
+    }
+
+    vk::DeviceSize materialSize = gpuWorld.materials.size() * sizeof(MaterialGpu);
+    gpuWorld.materialBuffer = createBuffer(
+        materialSize,
+        vk::BufferUsageFlagBits::eStorageBuffer | vk::BufferUsageFlagBits::eTransferDst,
+        0, VMA_MEMORY_USAGE_AUTO
+    );
+    uploadToBuffer(gpuWorld.materials.data(), materialSize, gpuWorld.materialBuffer);
+
+    std::cout << "Compute RT: Uploaded " << gpuWorld.globalNodes.size() << " nodes, "
+              << gpuWorld.chunks.size() << " chunks, "
+              << gpuWorld.materials.size() << " materials\n";
+}
+
 }

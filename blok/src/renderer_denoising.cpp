@@ -680,7 +680,7 @@ void Denoiser::fillFrameUBO(
     ubo.depth = depth;
 
     ubo.frame_count = frameCount;
-    ubo.sample_count = 8;
+    ubo.sample_count = 1;
     ubo.screen_width = screenWidth;
     ubo.screen_height = screenHeight;
 
