@@ -70,16 +70,30 @@ void addWindow()
 	ImGui::End();
 }
 
-UI::UI(const std::shared_ptr<Window>& window) :
+UI::UI(Window* window) :
 	m_window(window),
 	m_camera(nullptr),
-	m_mouseSetting(DEFAULT)
+	m_mouseSetting(DEFAULT),
+	frameCount(0),
+	averageFps(0.0),
+	nextWindowPos(0),
+	dt(0)
 {
+	//ImGuiIO& io = ImGui::GetIO();
+	//io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+	//io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+
 	glfwSetWindowUserPointer(window->getGLFWwindow(), this);
 }
 
 blok::UI::~UI()
 {
+}
+
+void blok::UI::update(float deltatime)
+{
+	/*framerate stuff*/
+	dt = deltatime;
 }
 
 void UI::mouseCameraCallback(GLFWwindow* window, double xpos, double ypos) {
@@ -100,7 +114,7 @@ void UI::mouseCameraCallback(GLFWwindow* window, double xpos, double ypos) {
 
 		if (handler->m_camera != nullptr)
 		{
-			handler->m_camera->processMouse(dx * 2, dy * 2);
+			handler->m_camera->processMouse(dx * 5, dy * 5);
 		}
 	}
 }
@@ -130,7 +144,7 @@ void UI::handleCameraControls(Camera* cam)
 {
 	m_camera = cam;
 
-	if (ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem | ImGuiHoveredFlags_RootAndChildWindows))
+	if (ImGui::IsItemHovered(ImGuiHoveredFlags_RectOnly) && ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem | ImGuiHoveredFlags_RootAndChildWindows))
 	{
 		GLFWcursor* handCursor = glfwCreateStandardCursor(GLFW_CROSSHAIR_CURSOR);
 		glfwSetCursor(m_window->getGLFWwindow(), handCursor);
@@ -151,6 +165,10 @@ void UI::handleCameraControls(Camera* cam)
 			}
 
 			m_mouseData.firstMouse = true;
+
+			ImGui::BeginTooltip();
+			ImGui::Text("Hold Right Click for Camera Controls");
+			ImGui::EndTooltip();
 		}
 	}
 	else
@@ -176,28 +194,62 @@ void UI::handleCameraControls(Camera* cam)
 
 void blok::UI::renderToWindow(unsigned int texture)
 {
-	ImGui::Image((ImTextureID)(intptr_t)texture, ImVec2((float)m_window->getWidth(), (float)m_window->getHeight()));
+	ImGui::Image((ImTextureID)(intptr_t)texture, ImVec2((float)m_window->getWidth() - 220.f, (float)m_window->getHeight() - 60.f));
 }
 
-void blok::UI::displayData(float dt)
+void blok::UI::displayData()
 {
-	ImGui::ShowDemoWindow();
+	if (dt == 0 || dt < 0.00001f) return;
 
-	ImGui::Begin("Delete after testing"); //del after
 
-	ImGui::BeginChild("Data Display");
-	ImGui::Text("%f", 1/dt);
+	ImGui::BeginChild("Data Display", ImVec2(200.0f, 100.0f));
+	ImGui::SeparatorText("Data Display");
+	ImGui::Text("FPS: %f", 1/dt);
+	averageFps += 1 / dt;
+	ImGui::Text("Average FPS: %f", averageFps/++frameCount);
+
+
+	ImGui::Separator();
+
 	ImGui::EndChild();
+}
 
-	ImGui::End(); //del after
+void blok::UI::beginWindow(Vector2 position, std::string windowName)
+{
+	ImGui::SetNextWindowPos(ImVec2(position.x, position.y));
+	ImGui::SetNextWindowSize(ImVec2(0, 0));
+	nextWindowPos = Vector2(0, 0);
+
+	ImGui::Begin(windowName.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize);
 }
 
 void blok::UI::beginWindow(std::string windowName)
 {
-	ImGui::Begin(windowName.c_str());
+	ImGui::SetNextWindowPos(ImVec2(nextWindowPos.x, nextWindowPos.y));
+	ImGui::SetNextWindowSize(ImVec2(0, 0));
+	ImGui::Begin(windowName.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize);
 }
 
 void blok::UI::endWindow()
 {
+	nextWindowPos += Vector2(ImGui::GetWindowSize().x,0.0f);
+
+	// 216, 135
+
 	ImGui::End();
+}
+
+void blok::UI::createButton(std::string windowName, void func())
+{
+	if (func == nullptr)
+	{
+		ImGui::Button(windowName.c_str());
+	}
+	else
+	{
+		if (ImGui::Button(windowName.c_str()))
+		{
+			func();
+		}
+	}
 }

@@ -12,7 +12,7 @@
 
 int main() {
     try {
-        blok::GraphicsApi backend = blok::GraphicsApi::Vulkan;
+        blok::GraphicsApi backend = blok::GraphicsApi::OpenGL;
 
         blok::App app(backend);
         app.run();

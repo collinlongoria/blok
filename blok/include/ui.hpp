@@ -10,6 +10,7 @@
 #include "window.hpp"
 #include <memory> 
 #include <string>
+#include "math.hpp"
 
 void addWindow();
 
@@ -28,9 +29,11 @@ namespace blok {
             CAMERA_CONTROL
         };
 
-        UI(const std::shared_ptr<Window>& window);
+        UI(Window* window);
 
         ~UI();
+
+        void update(float dt);
 
         /*Handles Camera movement through mouse controls*/
         void handleCameraControls(Camera* camera);
@@ -38,13 +41,16 @@ namespace blok {
         //void renderToNewWindow(unsigned int texture, std::string windowName = "");
         void renderToWindow(unsigned int texture);
 
-        /*Displays App Information as a Child Window (Not Done Yet)*/
-        void displayData(float dt);
+        /*Displays App Information as a Child Window (WIP)*/
+        void displayData();
 
         
-        void beginWindow(std::string windowName = "");
+        void beginWindow(Vector2 position, std::string windowName = "New Window");
+        void beginWindow(std::string windowName = "New Window");
         /*Must be called after beginWindow*/
         void endWindow();
+
+        void createButton(std::string windowName = "New Button", void func() = nullptr);
         
     private:
 
@@ -55,11 +61,18 @@ namespace blok {
             bool firstMouse = true;
         } m_mouseData;
         
+         /*Controls*/
          MouseBehaviour m_mouseSetting;
-         const std::shared_ptr<Window>& m_window;
+         Window* m_window;
          Camera* m_camera;
 
-         
+         /*Data*/
+         double averageFps;
+         unsigned frameCount;
+         float dt;
+
+         /*Arrangement*/
+         Vector2 nextWindowPos;
 
          static void mouseCameraCallback(GLFWwindow* window, double xpos, double ypos);
          void swapMouseBehaviour(MouseBehaviour behaviour);
